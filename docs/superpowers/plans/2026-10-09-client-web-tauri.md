@@ -173,6 +173,20 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 12: SSE parser — handle chat/completions + responses envelopes
+
+**Files:**
+- Modify: `web/src/lib/providers/send.ts`
+
+**Interfaces:**
+- Produces: `sendStream` unchanged; `parseLine` (internal) now reads more envelopes.
+
+- [ ] **Step 1:** Widen `parseLine` — for a `data:` line, extract text from, in order: a top-level `delta` (string, Responses events); `choices[0].delta.content` (string) and `choices[0].text` (chat/completions); a top-level `output_text`/`text` (string); else `null`. Still skip `[DONE]`, blanks, and non-`data:` lines. Keep it total (never throws) and pure.
+- [ ] **Step 2:** Verify — tsc/biome/LS + a browser smoke against a **local mock SSE** emitting `data: {"choices":[{"delta":{"content":"Hi"}}]}` (spin a throwaway `bun` server; do not commit it).
+- [ ] **Step 3:** Commit — `fix(providers): parse chat/completions + responses SSE envelopes`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
