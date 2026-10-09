@@ -8,7 +8,13 @@ export const chatcompletions = {
 	endpoint: "/v1/chat/completions",
 	template: { model: "" },
 	parse: parseChatCompletionsSend,
-	buildRequest: (send: ChatCompletionsSend, _ctx: SendCtx) => send,
+	buildRequest: (send: ChatCompletionsSend, ctx: SendCtx) => {
+		const prior = (send as { messages?: unknown[] }).messages ?? [];
+		return {
+			...send,
+			messages: [...prior, { role: "user", content: ctx.msg }],
+		};
+	},
 	send: (_ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk>, string> =>
 		Effect.succeed(Stream.empty),
 } satisfies Provider<ChatCompletionsSend>;
