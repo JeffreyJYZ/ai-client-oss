@@ -24,6 +24,7 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 	);
 	return {
 		...send,
+		model: ctx.model,
 		input: [
 			...prior,
 			{

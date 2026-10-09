@@ -29,6 +29,7 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 				];
 	return {
 		...send,
+		model: ctx.model,
 		messages: [...prior, { role: "user", content }],
 		...(ctx.tools ? { tools: ctx.tools } : {}),
 	};

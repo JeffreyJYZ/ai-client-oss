@@ -21,6 +21,7 @@ export interface SendCtx {
 	readonly prev: unknown;
 	readonly apiUrl: string;
 	readonly apiKey?: string;
+	readonly model: string;
 	readonly parts?: readonly AttachmentPart[];
 	readonly tools?: readonly ToolSpec[];
 }
