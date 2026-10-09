@@ -289,6 +289,27 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 18: Tauri storage adapter (Rust)
+
+**Files:**
+- Modify: `web/src-tauri/src/lib.rs` (Tauri commands + `invoke_handler`)
+- Modify: `web/src-tauri/Cargo.toml` (only if `serde_json`/Tauri features are missing)
+- Modify: `web/src/lib/db/tauri.ts` (wire the stub to `invoke`)
+- Possibly: `web/src-tauri/capabilities/default.json` (only if custom commands need an entry)
+
+**Interfaces:**
+- The tauri adapter implements the SAME `Db` via `@tauri-apps/api/core` `invoke`, storing raw JSON under `app_data_dir`:
+  - `db_get_settings() -> string | null`, `db_set_settings(json: string)`
+  - `db_list_conversations() -> string[]`, `db_get_conversation(id: string) -> string | null`, `db_upsert_conversation(id: string, json: string)`, `db_delete_conversation(id: string)`
+- Rust takes/returns opaque JSON **strings** (no Rust structs) so the JS owns the shapes — no Rust/TS drift.
+
+- [ ] **Step 1:** `src-tauri/src/lib.rs` — add the six `#[tauri::command]`s writing under `tauri::Manager::path().app_data_dir()` (`settings.json`, `conversations/<id>.json`); register them in `invoke_handler`. Return `Result<_, String>`.
+- [ ] **Step 2:** `lib/db/tauri.ts` — replace the stub: wrap each `invoke(...)` in `Effect.tryPromise` (`catch: String`), JSON.parse/stringify, and `safeParse`-with-defaults on read (mirror the web adapter's behavior).
+- [ ] **Step 3:** Verify — `cd web/src-tauri && cargo build` (compiles) + `bunx tsc -b --force` / `biome check .` / effect-LS; then `cd web && bunx tauri dev`, add a provider, close, relaunch, and confirm it persisted.
+- [ ] **Step 4:** Commit — `feat(tauri): persist conversations + settings via Rust`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
