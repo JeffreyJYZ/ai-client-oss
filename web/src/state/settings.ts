@@ -1,30 +1,6 @@
-import { type ProtocolName, protocolNames } from "@lib/providers";
+import { SETTINGS_KEY, Settings, settingsDefaults } from "@lib/db";
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
-import { z } from "zod";
-
-const STORAGE_KEY = "ai-client.settings";
-
-const defaultProvider: ProtocolName = "responses";
-
-export const Settings = z.object({
-	provider: z.enum(protocolNames).default(defaultProvider),
-	baseUrl: z.string().default(""),
-	apiKey: z.string().default(""),
-	model: z.string().default(""),
-	tools: z
-		.array(
-			z.object({
-				type: z.string(),
-				max_num_results: z.number(),
-			}),
-		)
-		.default([]),
-});
-
-export type Settings = z.infer<typeof Settings>;
-
-const defaults = (): Settings => Settings.parse({});
 
 const parseJson = (raw: string): unknown =>
 	Effect.runSync(
@@ -35,10 +11,10 @@ const parseJson = (raw: string): unknown =>
 	);
 
 const load = (): Settings => {
-	const raw = localStorage.getItem(STORAGE_KEY);
-	if (raw === null) return defaults();
+	const raw = localStorage.getItem(SETTINGS_KEY);
+	if (raw === null) return settingsDefaults();
 	const parsed = Settings.safeParse(parseJson(raw));
-	return parsed.success ? parsed.data : defaults();
+	return parsed.success ? parsed.data : settingsDefaults();
 };
 
 let current: Settings = load();
@@ -58,7 +34,7 @@ export const setSettings = (patch: Partial<Settings>): void => {
 	const parsed = Settings.safeParse({ ...current, ...patch });
 	if (!parsed.success) return;
 	current = parsed.data;
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(current));
+	localStorage.setItem(SETTINGS_KEY, JSON.stringify(current));
 	for (const cb of listeners) cb();
 };
 

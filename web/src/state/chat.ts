@@ -1,16 +1,10 @@
 import { SendMsg } from "@lib/api";
+import type { ChatMessage } from "@lib/db";
 import { type ProtocolName, providers } from "@lib/providers";
 import type { AttachmentPart, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
 import { getSettings } from "./settings";
-
-export interface ChatMessage {
-	id: string;
-	role: "user" | "assistant" | "error";
-	text: string;
-	parts?: AttachmentPart[];
-}
 
 export type ChatStatus = "idle" | "streaming";
 
