@@ -12,7 +12,7 @@ export default function App() {
 
 	return (
 		<div className="flex h-full w-full text-left">
-			<ConversationList />
+			<ConversationList onOpenChat={() => setShowSettings(false)} />
 			<main className="flex min-w-0 flex-1 flex-col bg-neutral-950">
 				<header className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
 					<h1 className="text-xs font-medium uppercase tracking-widest text-neutral-300">

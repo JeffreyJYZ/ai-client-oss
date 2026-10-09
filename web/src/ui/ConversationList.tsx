@@ -8,7 +8,11 @@ import {
 	useChat,
 } from "@/state/chat";
 
-export default function ConversationList() {
+export default function ConversationList({
+	onOpenChat,
+}: {
+	onOpenChat?: () => void;
+}) {
 	const { conversations, activeId } = useChat();
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
@@ -37,7 +41,10 @@ export default function ConversationList() {
 				</span>
 				<button
 					type="button"
-					onClick={newConversation}
+					onClick={() => {
+						newConversation();
+						onOpenChat?.();
+					}}
 					className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
 				>
 					+ New
@@ -66,7 +73,10 @@ export default function ConversationList() {
 							) : (
 								<button
 									type="button"
-									onClick={() => selectConversation(conversation.id)}
+									onClick={() => {
+										selectConversation(conversation.id);
+										onOpenChat?.();
+									}}
 									onDoubleClick={() => startRename(conversation)}
 									title={conversation.title}
 									className="min-w-0 flex-1 truncate text-left text-sm text-neutral-200"
