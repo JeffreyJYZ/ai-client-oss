@@ -149,9 +149,18 @@ const persistConversationById = (id: string): void => {
 };
 
 /**
+ * Marker line shown at a tool-call boundary. Search tools read as a web search;
+ * anything else keeps its own name.
+ */
+const toolMarker = (name: string): string =>
+	/search/i.test(name) ? "🔍 searched the web" : `🔧 ${name}`;
+
+/**
  * Append one streamed chunk to the assistant message, routed by `kind`:
  * `reasoning` (thinking) lands in `reasoning`, `text` (the answer) in `text`,
- * so the two never concatenate into one squished bubble.
+ * so the two never concatenate into one squished bubble. A `tool` chunk breaks
+ * the answer run and drops a marker in its place — the model's text before and
+ * after a call must not glue together.
  */
 const appendChunk = (
 	conversationId: string,
@@ -162,9 +171,16 @@ const appendChunk = (
 		...conversation,
 		messages: conversation.messages.map((m) => {
 			if (m.id !== messageId) return m;
-			return chunk.kind === "reasoning"
-				? { ...m, reasoning: (m.reasoning ?? "") + chunk.text }
-				: { ...m, text: m.text + chunk.text };
+			if (chunk.kind === "reasoning") {
+				return { ...m, reasoning: (m.reasoning ?? "") + chunk.text };
+			}
+			if (chunk.kind === "tool") {
+				// The marker is display-only: `assistantText` (the next-turn seed)
+				// accumulates `text` chunks only, so it never reaches the wire.
+				const sep = m.text === "" ? "" : "\n\n";
+				return { ...m, text: `${m.text}${sep}${toolMarker(chunk.text)}\n\n` };
+			}
+			return { ...m, text: m.text + chunk.text };
 		}),
 	}));
 	refresh();

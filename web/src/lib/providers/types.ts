@@ -2,7 +2,11 @@ import type { Effect, Stream } from "effect";
 import type { z } from "zod";
 
 export interface Chunk {
-	readonly kind: "text" | "reasoning";
+	readonly kind: "text" | "reasoning" | "tool";
+	/**
+	 * Visible text for `text`/`reasoning`; for `tool`, the called tool's name
+	 * (used to render a marker at the call site).
+	 */
 	readonly text: string;
 }
 

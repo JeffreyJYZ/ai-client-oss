@@ -8,16 +8,35 @@ const asString = (value: unknown): string | null =>
 	typeof value === "string" ? value : null;
 
 /**
+ * Name of the tool a chat/completions `tool_calls` delta opens, or `null` when
+ * the delta carries none (argument-only continuation of an already-named call).
+ * The opening delta carries `function.name`; later deltas carry only arguments.
+ */
+const toolCallName = (delta: Record<string, unknown>): string | null => {
+	const calls = Array.isArray(delta.tool_calls) ? delta.tool_calls : [];
+	for (const call of calls) {
+		if (!isRecord(call)) continue;
+		const fn = isRecord(call.function) ? call.function : undefined;
+		const name = fn === undefined ? null : asString(fn.name);
+		if (name !== null && name !== "") return name;
+	}
+	return null;
+};
+
+/**
  * Parse one SSE line into a tagged chunk, total and pure. `null` for anything
  * that carries no visible text (blanks, `[DONE]`, non-`data:` lines, unknown
- * shapes). Two envelopes are understood:
+ * shapes). Three envelopes are understood:
  *
  * - **Responses** — a top-level `delta`; the event `type` tags it: a `type`
  *   containing `reasoning` (`response.reasoning_summary_text.delta`) is
- *   thinking, anything else (`response.output_text.delta`) is the answer.
+ *   thinking, anything else (`response.output_text.delta`) is the answer. A
+ *   function call opens with an `output_item.added` whose `item.type` is
+ *   `function_call` (name on the item); its streamed `function_call_arguments`
+ *   are raw JSON, never answer text.
  * - **chat/completions** — `choices[0].delta.reasoning_content` (or
  *   `.reasoning`) is thinking; `choices[0].delta.content` or `choices[0].text`
- *   is the answer.
+ *   is the answer; `choices[0].delta.tool_calls` opens a tool call.
  */
 const parseLine = (line: string): Chunk | null => {
 	const trimmed = line.trim();
@@ -28,14 +47,29 @@ const parseLine = (line: string): Chunk | null => {
 		type?: unknown;
 		delta?: unknown;
 		choices?: unknown;
+		item?: unknown;
 	};
 
 	if (typeof event.delta === "string") {
 		const type = asString(event.type) ?? "";
+		// A streamed function call's arguments are raw JSON, not the reply —
+		// tagging them `text` would splice them into the answer.
+		if (type.includes("function_call_arguments")) return null;
 		return {
 			kind: type.includes("reasoning") ? "reasoning" : "text",
 			text: event.delta,
 		};
+	}
+
+	const type = asString(event.type) ?? "";
+	// Responses tools surface outside the text stream: a web search announces
+	// itself as it starts, a function call arrives as a named output item.
+	if (type.includes("web_search_call") && type.includes("in_progress")) {
+		return { kind: "tool", text: "web_search" };
+	}
+	if (isRecord(event.item) && event.item.type === "function_call") {
+		const name = asString(event.item.name);
+		return name === null ? null : { kind: "tool", text: name };
 	}
 
 	const choices = Array.isArray(event.choices) ? event.choices : [];
@@ -53,6 +87,8 @@ const parseLine = (line: string): Chunk | null => {
 		return { kind: "reasoning", text: reasoning };
 	}
 	if (content !== null) return { kind: "text", text: content };
+	const toolName = delta === undefined ? null : toolCallName(delta);
+	if (toolName !== null) return { kind: "tool", text: toolName };
 	if (reasoning !== null) return { kind: "reasoning", text: reasoning };
 
 	const text = asString(choice.text);
