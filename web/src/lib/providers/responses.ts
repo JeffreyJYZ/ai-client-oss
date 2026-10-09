@@ -55,7 +55,7 @@ const appendAssistant = (send: ResponsesSend, text: string) => {
 			...prior,
 			{
 				role: "assistant" as const,
-				content: [{ type: "input_text" as const, text }],
+				content: [{ type: "output_text" as const, text }],
 			},
 		],
 	};

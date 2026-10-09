@@ -3,7 +3,12 @@ import { z } from "zod";
 export const MsgRole = z.enum(["user", "assistant", "system"]);
 export type MsgRole = z.infer<typeof MsgRole>;
 
-export const InputTypes = z.enum(["input_text", "input_file", "input_image"]);
+export const InputTypes = z.enum([
+	"input_text",
+	"input_file",
+	"input_image",
+	"output_text",
+]);
 export type InputTypes = z.infer<typeof InputTypes>;
 
 export const ResponsesSend = z.object({
