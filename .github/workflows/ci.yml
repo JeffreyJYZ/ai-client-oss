@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - name: Install dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Type-check
+        working-directory: web
+        run: bunx tsc -b --force
+      - name: Lint
+        working-directory: web
+        run: bunx biome check .
+      - name: Effect language service diagnostics
+        working-directory: web
+        run: bunx effect-language-service diagnostics --project tsconfig.app.json --format text
+      - name: Build
+        working-directory: web
+        run: bunx vite build
+
+  rust:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Tauri Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+      - uses: oven-sh/setup-bun@v2
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: web/src-tauri -> target
+      - name: Install dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+      - name: Cargo check
+        working-directory: web/src-tauri
+        run: cargo check --all-targets
