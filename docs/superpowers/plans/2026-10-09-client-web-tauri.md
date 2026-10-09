@@ -420,6 +420,19 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 25: chat/completions must request a stream
+
+**Files:**
+- Modify: `web/src/lib/providers/chatCompletions.ts`
+- Optionally: `web/src/lib/providers/responses.ts` (belt-and-braces), `web/src/lib/types/protocols.ts` (`ChatCompletionsSend` gains `stream?`)
+
+- [ ] **Step 1:** In `chatCompletions.buildRequest`, set `stream: true` explicitly on the returned body (like `responses` already does via its template), so the endpoint streams SSE instead of returning one JSON blob.
+- [ ] **Step 2:** Belt-and-braces: confirm `responses.buildRequest` always emits `stream: true` too (explicit, not only from the template).
+- [ ] **Step 3:** Verify — tsc/biome/LS + a browser smoke against a mock that returns NON-streamed JSON when `stream` is absent and SSE `data: {"choices":[{"delta":{"content":"…"}}]}` when present: with the fix, text streams.
+- [ ] **Step 4:** Commit — `fix(providers): chat/completions must request a stream (silent otherwise)`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
