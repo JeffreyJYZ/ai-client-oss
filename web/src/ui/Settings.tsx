@@ -7,9 +7,31 @@ const INPUT =
 const LABEL =
 	"flex flex-col gap-1 text-xs uppercase tracking-widest text-neutral-500";
 
+/** Only tool the UI exposes; the request body sends it verbatim. */
+const WEB_SEARCH = "web_search_preview";
+const DEFAULT_MAX_RESULTS = 5;
+
 export default function Settings() {
 	const settings = useSettings();
 	const missingKey = settings.apiKey.trim() === "";
+
+	// Enabled = a non-empty tools array (the shape the store/db persists).
+	const webSearch = settings.tools.length > 0;
+	const maxNumResults =
+		settings.tools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
+		DEFAULT_MAX_RESULTS;
+
+	const setWebSearch = (on: boolean): void => {
+		setSettings({
+			tools: on ? [{ type: WEB_SEARCH, max_num_results: maxNumResults }] : [],
+		});
+	};
+
+	const setMaxResults = (raw: string): void => {
+		const value = Number.parseInt(raw, 10);
+		if (!Number.isFinite(value)) return;
+		setSettings({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
+	};
 
 	return (
 		<div className="flex-1 overflow-y-auto bg-neutral-950 px-4 py-6">
@@ -71,6 +93,29 @@ export default function Settings() {
 						className={INPUT}
 					/>
 				</label>
+				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
+					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
+						Web search
+						<input
+							type="checkbox"
+							checked={webSearch}
+							onChange={(event) => setWebSearch(event.target.checked)}
+							className="h-4 w-4 accent-neutral-300"
+						/>
+					</label>
+					{webSearch ? (
+						<label className={LABEL}>
+							Max results
+							<input
+								type="number"
+								min={1}
+								value={maxNumResults}
+								onChange={(event) => setMaxResults(event.target.value)}
+								className={INPUT}
+							/>
+						</label>
+					) : null}
+				</div>
 			</div>
 		</div>
 	);
