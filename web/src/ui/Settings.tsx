@@ -14,6 +14,7 @@ import {
 	updateProvider,
 	useSettings,
 } from "@/state/settings";
+import ConfirmButton from "@/ui/ConfirmButton";
 
 const INPUT =
 	"rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none";
@@ -258,13 +259,12 @@ export default function Settings() {
 										>
 											Edit
 										</button>
-										<button
-											type="button"
-											onClick={() => remove(provider.id)}
+										<ConfirmButton
+											label="Remove"
+											confirmLabel="Confirm?"
+											onConfirm={() => remove(provider.id)}
 											className={BUTTON}
-										>
-											Remove
-										</button>
+										/>
 									</li>
 								);
 							})}
@@ -429,13 +429,12 @@ export default function Settings() {
 									>
 										Edit
 									</button>
-									<button
-										type="button"
-										onClick={() => removeProfileEntry(profile.id)}
+									<ConfirmButton
+										label="Remove"
+										confirmLabel="Confirm?"
+										onConfirm={() => removeProfileEntry(profile.id)}
 										className={BUTTON}
-									>
-										Remove
-									</button>
+									/>
 								</li>
 							))}
 						</ul>

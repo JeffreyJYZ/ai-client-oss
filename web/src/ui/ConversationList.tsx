@@ -7,6 +7,7 @@ import {
 	selectConversation,
 	useChat,
 } from "@/state/chat";
+import ConfirmButton from "@/ui/ConfirmButton";
 
 export default function ConversationList({
 	onOpenChat,
@@ -94,14 +95,13 @@ export default function ConversationList({
 									>
 										✎
 									</button>
-									<button
-										type="button"
-										onClick={() => deleteConversation(conversation.id)}
-										aria-label="Delete conversation"
+									<ConfirmButton
+										label="✕"
+										confirmLabel="Confirm?"
+										onConfirm={() => deleteConversation(conversation.id)}
+										ariaLabel="Delete conversation"
 										className="hidden shrink-0 rounded px-1 text-xs text-neutral-500 group-hover:block hover:text-red-400"
-									>
-										✕
-									</button>
+									/>
 								</>
 							)}
 						</div>
