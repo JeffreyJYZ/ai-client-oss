@@ -1,5 +1,5 @@
 import { type ProtocolName, protocolNames } from "@lib/providers";
-import { listModels } from "@lib/providers/models";
+import { listModels, testModel } from "@lib/providers/models";
 import { Effect } from "effect";
 import { useState } from "react";
 import { setSettings, useSettings } from "@/state/settings";
@@ -47,12 +47,13 @@ export default function Settings() {
 	};
 
 	const canFetch = settings.baseUrl.trim() !== "";
+	const canTest = canFetch && settings.model.trim() !== "";
 	const pending = modelsPending || testPending;
 
 	/**
-	 * Shared runner for both buttons: funnels the `listModels` string error
-	 * channel into `setMessage` so nothing throws out of the component, and
-	 * clears the loading flag on success or failure alike.
+	 * Runner for "Fetch models": funnels the `listModels` string error channel
+	 * into `setMessage` so nothing throws out of the component, and clears the
+	 * loading flag on success or failure alike.
 	 */
 	const runModels = (
 		setPending: (value: boolean) => void,
@@ -75,12 +76,22 @@ export default function Settings() {
 	};
 
 	const testConnection = (): void => {
-		if (!canFetch) return;
+		if (!canTest) return;
+		const model = settings.model;
 		setMessage(null);
-		runModels(setTestPending, (ids) => {
-			setModels(ids);
-			setMessage(`✓ Connected (${ids.length} models)`);
-		});
+		setTestPending(true);
+		Effect.runFork(
+			testModel(
+				settings.provider,
+				settings.baseUrl,
+				settings.apiKey,
+				model,
+			).pipe(
+				Effect.tap(() => Effect.sync(() => setMessage(`✓ ${model} responded`))),
+				Effect.catch((error) => Effect.sync(() => setMessage(error))),
+				Effect.ensuring(Effect.sync(() => setTestPending(false))),
+			),
+		);
 	};
 
 	return (
@@ -166,7 +177,7 @@ export default function Settings() {
 					<button
 						type="button"
 						onClick={testConnection}
-						disabled={!canFetch || pending}
+						disabled={!canTest || pending}
 						className={BUTTON}
 					>
 						{testPending ? "Testing…" : "Test connection"}
