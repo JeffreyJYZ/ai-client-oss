@@ -40,27 +40,34 @@ export default function ChatPane({ messages, status }: ChatPaneProps) {
 	};
 
 	return (
-		<div
-			ref={scrollRef}
-			onScroll={handleScroll}
-			className="relative flex-1 overflow-y-auto px-4 py-4"
-		>
-			{messages.length === 0 ? (
-				<div className="flex h-full items-center justify-center text-sm text-neutral-600">
-					No messages yet
-				</div>
-			) : (
-				<div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
-					{messages.map((message) => (
-						<Message key={message.id} message={message} />
-					))}
-					{status === "streaming" ? (
-						<div className="text-left text-xs text-neutral-500">streaming…</div>
-					) : null}
-				</div>
-			)}
-			<div ref={bottomRef} />
+		<div className="relative flex-1 overflow-hidden">
+			<div
+				ref={scrollRef}
+				onScroll={handleScroll}
+				className="h-full overflow-y-auto px-4 py-4"
+			>
+				{messages.length === 0 ? (
+					<div className="flex h-full items-center justify-center text-sm text-neutral-600">
+						No messages yet
+					</div>
+				) : (
+					<div className="mx-auto flex w-full max-w-3xl flex-col gap-3">
+						{messages.map((message) => (
+							<Message key={message.id} message={message} />
+						))}
+						{status === "streaming" ? (
+							<div className="text-left text-xs text-neutral-500">
+								streaming…
+							</div>
+						) : null}
+					</div>
+				)}
+				<div ref={bottomRef} />
+			</div>
 			{pinned ? null : (
+				// Rendered as an overlay over the scroller, not inside it: an
+				// `absolute` child of the scroll container anchors to the content
+				// box and scrolls out of view, so it vanishes exactly when needed.
 				<button
 					type="button"
 					onClick={jumpToLatest}
