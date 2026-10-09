@@ -36,15 +36,16 @@ const readAttachment = (file: File): Effect.Effect<AttachmentPart, string> =>
 
 export default function Composer() {
 	const { status, hydrated } = useChat();
-	const { apiKey, baseUrl } = useSettings();
+	const { providers, activeProviderId } = useSettings();
+	const active = providers.find((provider) => provider.id === activeProviderId);
 	const [text, setText] = useState("");
 	const [parts, setParts] = useState<PendingAttachment[]>([]);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const streaming = status === "streaming";
-	const missingKey = apiKey.trim() === "";
-	const missingBaseUrl = baseUrl.trim() === "";
+	const missingKey = (active?.apiKey ?? "").trim() === "";
+	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
 	// Gated until hydration settles (empty list can otherwise hide a load in
 	// flight), without a key or base URL, while streaming, and on an empty draft
 	// with no attachments.

@@ -1,9 +1,17 @@
+import type { ProviderConfig } from "@lib/db";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
 import { PROVIDER_PRESETS } from "@lib/providers/presets";
 import { Effect } from "effect";
 import { useState } from "react";
-import { setSettings, useSettings } from "@/state/settings";
+import {
+	addProvider,
+	removeProvider,
+	selectProvider,
+	setSettings,
+	updateProvider,
+	useSettings,
+} from "@/state/settings";
 
 const INPUT =
 	"rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none";
@@ -17,19 +25,24 @@ const BUTTON =
 /** Only tool the UI exposes; the request body sends it verbatim. */
 const WEB_SEARCH = "web_search_preview";
 const DEFAULT_MAX_RESULTS = 5;
-/** Sentinel for the preset select when no preset matches the current settings. */
+/** Sentinel for the preset select when no preset matches the provider. */
 const CUSTOM_PRESET = "custom";
 
 export default function Settings() {
 	const settings = useSettings();
-	const missingKey = settings.apiKey.trim() === "";
-	const missingBaseUrl = settings.baseUrl.trim() === "";
+	const active = settings.providers.find(
+		(provider) => provider.id === settings.activeProviderId,
+	);
 
-	// Model suggestions for the free-text input, plus the fetch/test status.
-	const [models, setModels] = useState<string[]>([]);
+	// `editingId` only gates the edit form; the form always edits the active
+	// provider (Edit/Add select it first), so every change writes to one entry.
+	const [editingId, setEditingId] = useState<string | null>(null);
 	const [modelsPending, setModelsPending] = useState(false);
 	const [testPending, setTestPending] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
+
+	const missingKey = (active?.apiKey ?? "").trim() === "";
+	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
 
 	// Enabled = a non-empty tools array (the shape the store/db persists).
 	const webSearch = settings.tools.length > 0;
@@ -49,63 +62,84 @@ export default function Settings() {
 		setSettings({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
 	};
 
-	const canFetch = settings.baseUrl.trim() !== "";
-	const canTest = canFetch && settings.model.trim() !== "";
-	const pending = modelsPending || testPending;
-
-	// Reflect the active preset by matching the current settings; anything that
-	// does not match a preset reads as "Custom".
-	const activePreset =
-		PROVIDER_PRESETS.find(
-			(preset) =>
-				preset.baseUrl === settings.baseUrl &&
-				preset.protocol === settings.provider,
-		)?.id ?? CUSTOM_PRESET;
-
-	const selectPreset = (id: string): void => {
-		if (id === CUSTOM_PRESET) return;
-		const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === id);
-		if (preset === undefined) return;
-		setSettings({ baseUrl: preset.baseUrl, provider: preset.protocol });
+	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
+		if (active === undefined) return;
+		updateProvider(active.id, patch);
 	};
 
+	const openEditor = (id: string): void => {
+		selectProvider(id);
+		setEditingId(id);
+		setMessage(null);
+	};
+
+	const add = (): void => {
+		const id = addProvider();
+		setEditingId(id);
+		setMessage(null);
+	};
+
+	const remove = (id: string): void => {
+		removeProvider(id);
+		if (editingId === id) setEditingId(null);
+		setMessage(null);
+	};
+
+	// Reflect the active preset by matching the provider; anything that does
+	// not match a preset reads as "Custom".
+	const activePreset =
+		active === undefined
+			? CUSTOM_PRESET
+			: (PROVIDER_PRESETS.find(
+					(preset) =>
+						preset.baseUrl === active.baseUrl &&
+						preset.protocol === active.protocol,
+				)?.id ?? CUSTOM_PRESET);
+
+	const selectPreset = (id: string): void => {
+		if (id === CUSTOM_PRESET || active === undefined) return;
+		const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === id);
+		if (preset === undefined) return;
+		patchActive({
+			baseUrl: preset.baseUrl,
+			protocol: preset.protocol,
+			// Only fill a blank label, never overwrite a user's name.
+			label: active.label.trim() === "" ? preset.label : active.label,
+		});
+	};
+
+	const canFetch = active !== undefined && active.baseUrl.trim() !== "";
+	const canTest = canFetch && (active?.model.trim() ?? "") !== "";
+	const pending = modelsPending || testPending;
+
 	/**
-	 * Runner for "Fetch models": funnels the `listModels` string error channel
-	 * into `setMessage` so nothing throws out of the component, and clears the
-	 * loading flag on success or failure alike.
+	 * "Fetch models" funnels the `listModels` string error channel into
+	 * `setMessage` so nothing throws out of the component, caches the ids on the
+	 * active provider, and clears the loading flag on success or failure alike.
 	 */
-	const runModels = (
-		setPending: (value: boolean) => void,
-		onModels: (ids: string[]) => void,
-	): void => {
-		setPending(true);
+	const fetchModels = (): void => {
+		if (active === undefined || !canFetch) return;
+		const id = active.id;
+		setMessage(null);
+		setModelsPending(true);
 		Effect.runFork(
-			listModels(settings.baseUrl, settings.apiKey).pipe(
-				Effect.tap((ids) => Effect.sync(() => onModels(ids))),
+			listModels(active.baseUrl, active.apiKey).pipe(
+				Effect.tap((ids) =>
+					Effect.sync(() => updateProvider(id, { models: ids })),
+				),
 				Effect.catch((error) => Effect.sync(() => setMessage(error))),
-				Effect.ensuring(Effect.sync(() => setPending(false))),
+				Effect.ensuring(Effect.sync(() => setModelsPending(false))),
 			),
 		);
 	};
 
-	const fetchModels = (): void => {
-		if (!canFetch) return;
-		setMessage(null);
-		runModels(setModelsPending, setModels);
-	};
-
 	const testConnection = (): void => {
-		if (!canTest) return;
-		const model = settings.model;
+		if (active === undefined || !canTest) return;
+		const model = active.model;
 		setMessage(null);
 		setTestPending(true);
 		Effect.runFork(
-			testModel(
-				settings.provider,
-				settings.baseUrl,
-				settings.apiKey,
-				model,
-			).pipe(
+			testModel(active.protocol, active.baseUrl, active.apiKey, model).pipe(
 				Effect.tap(() => Effect.sync(() => setMessage(`✓ ${model} responded`))),
 				Effect.catch((error) => Effect.sync(() => setMessage(error))),
 				Effect.ensuring(Effect.sync(() => setTestPending(false))),
@@ -113,117 +147,217 @@ export default function Settings() {
 		);
 	};
 
+	const showEditor = editingId !== null && active !== undefined;
+
 	return (
 		<div className="flex-1 overflow-y-auto bg-neutral-950 px-4 py-6">
 			<div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
 				<h2 className="text-xs uppercase tracking-widest text-neutral-500">
 					Settings
 				</h2>
-				{missingKey ? (
+				{active === undefined ? (
+					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
+						No provider configured — add one below to start sending.
+					</div>
+				) : null}
+				{active !== undefined && missingKey ? (
 					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
 						No API key set — sending is disabled until you add one below.
 					</div>
 				) : null}
-				{missingBaseUrl ? (
+				{active !== undefined && missingBaseUrl ? (
 					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
 						No base URL set — sending is disabled until you add one below.
 					</div>
 				) : null}
-				<label className={LABEL}>
-					Preset
-					<select
-						value={activePreset}
-						onChange={(event) => selectPreset(event.target.value)}
-						className={INPUT}
-					>
-						{PROVIDER_PRESETS.map((preset) => (
-							<option key={preset.id} value={preset.id}>
-								{preset.label}
-							</option>
-						))}
-						<option value={CUSTOM_PRESET}>Custom</option>
-					</select>
-				</label>
-				<label className={LABEL}>
-					Provider
-					<select
-						value={settings.provider}
-						onChange={(event) =>
-							setSettings({
-								provider: event.target.value as ProtocolName,
-							})
-						}
-						className={INPUT}
-					>
-						{protocolNames.map((name) => (
-							<option key={name} value={name}>
-								{name}
-							</option>
-						))}
-					</select>
-				</label>
-				<label className={LABEL}>
-					Base URL
-					<input
-						type="text"
-						value={settings.baseUrl}
-						onChange={(event) => setSettings({ baseUrl: event.target.value })}
-						placeholder="https://api.openai.com/v1"
-						className={INPUT}
-					/>
-				</label>
-				<label className={LABEL}>
-					API key
-					<input
-						type="password"
-						autoComplete="off"
-						value={settings.apiKey}
-						onChange={(event) => setSettings({ apiKey: event.target.value })}
-						placeholder="sk-…"
-						className={INPUT}
-					/>
-				</label>
-				<label className={LABEL}>
-					Model
-					<input
-						type="text"
-						list="model-suggestions"
-						value={settings.model}
-						onChange={(event) => setSettings({ model: event.target.value })}
-						placeholder="gpt-4o-mini"
-						className={INPUT}
-					/>
-				</label>
-				<datalist id="model-suggestions">
-					{models.map((id) => (
-						<option key={id} value={id} />
-					))}
-				</datalist>
-				<div className="flex flex-wrap items-center gap-3">
-					<button
-						type="button"
-						onClick={fetchModels}
-						disabled={!canFetch || pending}
-						className={BUTTON}
-					>
-						{modelsPending ? "Fetching…" : "Fetch models"}
-					</button>
-					<button
-						type="button"
-						onClick={testConnection}
-						disabled={!canTest || pending}
-						className={BUTTON}
-					>
-						{testPending ? "Testing…" : "Test connection"}
-					</button>
-					{message !== null ? (
-						<span
-							className={`text-sm ${message.startsWith("✓") ? "text-green-400" : "text-red-400"}`}
-						>
-							{message}
-						</span>
-					) : null}
+
+				<div className="flex flex-col gap-3">
+					<div className="flex items-center justify-between gap-3">
+						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+							Providers
+						</h3>
+						<button type="button" onClick={add} className={BUTTON}>
+							Add provider
+						</button>
+					</div>
+					{settings.providers.length === 0 ? (
+						<p className="text-sm text-neutral-500">
+							No providers yet — add one to start.
+						</p>
+					) : (
+						<ul className="flex flex-col gap-2">
+							{settings.providers.map((provider) => {
+								const isActive = provider.id === settings.activeProviderId;
+								return (
+									<li
+										key={provider.id}
+										className={`flex items-center gap-2 rounded-md border px-3 py-2 ${
+											isActive
+												? "border-neutral-500 bg-neutral-900"
+												: "border-neutral-800 bg-neutral-950"
+										}`}
+									>
+										<button
+											type="button"
+											onClick={() => selectProvider(provider.id)}
+											className="flex min-w-0 flex-1 flex-col items-start text-left"
+										>
+											<span className="flex items-center gap-2 truncate text-sm text-neutral-100">
+												{provider.label.trim() !== ""
+													? provider.label
+													: "Untitled provider"}
+												{isActive ? (
+													<span className="text-xs uppercase tracking-widest text-emerald-400">
+														active
+													</span>
+												) : null}
+											</span>
+											<span className="w-full truncate text-xs text-neutral-500">
+												{provider.baseUrl.trim() !== ""
+													? provider.baseUrl
+													: "no base URL"}
+											</span>
+										</button>
+										<button
+											type="button"
+											onClick={() => openEditor(provider.id)}
+											className={BUTTON}
+										>
+											Edit
+										</button>
+										<button
+											type="button"
+											onClick={() => remove(provider.id)}
+											className={BUTTON}
+										>
+											Remove
+										</button>
+									</li>
+								);
+							})}
+						</ul>
+					)}
 				</div>
+
+				{showEditor && active !== undefined ? (
+					<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
+						<p className="text-xs uppercase tracking-widest text-neutral-500">
+							Editing active provider
+						</p>
+						<label className={LABEL}>
+							Label
+							<input
+								type="text"
+								value={active.label}
+								onChange={(event) => patchActive({ label: event.target.value })}
+								placeholder="OpenAI"
+								className={INPUT}
+							/>
+						</label>
+						<label className={LABEL}>
+							Preset
+							<select
+								value={activePreset}
+								onChange={(event) => selectPreset(event.target.value)}
+								className={INPUT}
+							>
+								{PROVIDER_PRESETS.map((preset) => (
+									<option key={preset.id} value={preset.id}>
+										{preset.label}
+									</option>
+								))}
+								<option value={CUSTOM_PRESET}>Custom</option>
+							</select>
+						</label>
+						<label className={LABEL}>
+							Protocol
+							<select
+								value={active.protocol}
+								onChange={(event) =>
+									patchActive({
+										protocol: event.target.value as ProtocolName,
+									})
+								}
+								className={INPUT}
+							>
+								{protocolNames.map((name) => (
+									<option key={name} value={name}>
+										{name}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className={LABEL}>
+							Base URL
+							<input
+								type="text"
+								value={active.baseUrl}
+								onChange={(event) =>
+									patchActive({ baseUrl: event.target.value })
+								}
+								placeholder="https://api.openai.com/v1"
+								className={INPUT}
+							/>
+						</label>
+						<label className={LABEL}>
+							API key
+							<input
+								type="password"
+								autoComplete="off"
+								value={active.apiKey}
+								onChange={(event) =>
+									patchActive({ apiKey: event.target.value })
+								}
+								placeholder="sk-…"
+								className={INPUT}
+							/>
+						</label>
+						<label className={LABEL}>
+							Model
+							<input
+								type="text"
+								list="model-suggestions"
+								value={active.model}
+								onChange={(event) => patchActive({ model: event.target.value })}
+								placeholder="gpt-4o-mini"
+								className={INPUT}
+							/>
+						</label>
+						<datalist id="model-suggestions">
+							{active.models.map((id) => (
+								<option key={id} value={id} />
+							))}
+						</datalist>
+						<div className="flex flex-wrap items-center gap-3">
+							<button
+								type="button"
+								onClick={fetchModels}
+								disabled={!canFetch || pending}
+								className={BUTTON}
+							>
+								{modelsPending ? "Fetching…" : "Fetch models"}
+							</button>
+							<button
+								type="button"
+								onClick={testConnection}
+								disabled={!canTest || pending}
+								className={BUTTON}
+							>
+								{testPending ? "Testing…" : "Test connection"}
+							</button>
+							{message !== null ? (
+								<span
+									className={`text-sm ${
+										message.startsWith("✓") ? "text-green-400" : "text-red-400"
+									}`}
+								>
+									{message}
+								</span>
+							) : null}
+						</div>
+					</div>
+				) : null}
+
 				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
 					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
 						Web search

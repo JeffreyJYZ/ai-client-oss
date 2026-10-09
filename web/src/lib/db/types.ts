@@ -3,17 +3,41 @@ import type { AttachmentPart } from "@lib/providers/types";
 import type { Effect, Option } from "effect";
 import { z } from "zod";
 
-const defaultProvider: ProtocolName = "responses";
+const defaultProtocol: ProtocolName = "chatcompletions";
+
+/** Stable id for the seed provider; also the default active pointer. */
+export const DEFAULT_PROVIDER_ID = "provider-default";
 
 /**
- * Canonical persisted settings shape. `src/lib/db` owns this so `lib` never has
- * to depend on `state`; the settings store imports it from `@lib/db`.
+ * One persisted provider configuration. `models` caches the ids returned by
+ * "Fetch models" so a picker can offer them without another round-trip.
  */
-export const Settings = z.object({
-	provider: z.enum(protocolNames).default(defaultProvider),
+export const providerConfigSchema = z.object({
+	id: z.string(),
+	label: z.string().default(""),
+	protocol: z.enum(protocolNames).default(defaultProtocol),
 	baseUrl: z.string().default(""),
 	apiKey: z.string().default(""),
 	model: z.string().default(""),
+	models: z.array(z.string()).default([]),
+});
+
+export type ProviderConfig = z.infer<typeof providerConfigSchema>;
+
+/** A fresh, empty provider: only `id` is required, the rest fall to defaults. */
+export const emptyProviderConfig = (id: string): ProviderConfig =>
+	providerConfigSchema.parse({ id });
+
+/**
+ * Canonical persisted settings shape. `src/lib/db` owns this so `lib` never has
+ * to depend on `state`; the settings store imports it from `@lib/db`. Defaults
+ * seed one empty provider and point `activeProviderId` at it.
+ */
+export const Settings = z.object({
+	providers: z
+		.array(providerConfigSchema)
+		.default(() => [emptyProviderConfig(DEFAULT_PROVIDER_ID)]),
+	activeProviderId: z.string().default(DEFAULT_PROVIDER_ID),
 	tools: z
 		.array(
 			z.object({

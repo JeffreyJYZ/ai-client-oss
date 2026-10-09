@@ -1,4 +1,10 @@
-import { db, Settings, settingsDefaults } from "@lib/db";
+import {
+	db,
+	emptyProviderConfig,
+	type ProviderConfig,
+	Settings,
+	settingsDefaults,
+} from "@lib/db";
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
 
@@ -58,3 +64,53 @@ Effect.runFork(
 
 export const useSettings = (): Settings =>
 	useSyncExternalStore(subscribe, getSettings);
+
+/** The provider the active pointer resolves to, or `undefined` if it dangles. */
+export const getActiveProvider = (): ProviderConfig | undefined =>
+	current.providers.find(
+		(provider) => provider.id === current.activeProviderId,
+	);
+
+const newProviderId = (): string => `provider-${crypto.randomUUID()}`;
+
+/** Append a fresh provider, make it active, and return its id. */
+export const addProvider = (label = ""): string => {
+	const provider: ProviderConfig = {
+		...emptyProviderConfig(newProviderId()),
+		label,
+	};
+	setSettings({
+		providers: [...current.providers, provider],
+		activeProviderId: provider.id,
+	});
+	return provider.id;
+};
+
+/** Patch one provider's fields; `id` is immutable and an unknown id is a no-op. */
+export const updateProvider = (
+	id: string,
+	patch: Partial<Omit<ProviderConfig, "id">>,
+): void => {
+	setSettings({
+		providers: current.providers.map((provider) =>
+			provider.id === id ? { ...provider, ...patch } : provider,
+		),
+	});
+};
+
+/** Remove a provider; if it was active the pointer moves to the first survivor. */
+export const removeProvider = (id: string): void => {
+	const providers = current.providers.filter((provider) => provider.id !== id);
+	setSettings({
+		providers,
+		...(current.activeProviderId === id
+			? { activeProviderId: providers[0]?.id ?? "" }
+			: {}),
+	});
+};
+
+/** Point the active pointer at `id`; an unknown id is a no-op. */
+export const selectProvider = (id: string): void => {
+	if (!current.providers.some((provider) => provider.id === id)) return;
+	setSettings({ activeProviderId: id });
+};

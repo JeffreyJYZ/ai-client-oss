@@ -4,7 +4,7 @@ import { type ProtocolName, providers } from "@lib/providers";
 import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
-import { getSettings } from "./settings";
+import { getActiveProvider, getSettings } from "./settings";
 
 export type ChatStatus = "idle" | "streaming";
 
@@ -213,17 +213,22 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	if (conversation === undefined) return;
 	const conversationId = conversation.id;
 
+	const active = getActiveProvider();
+	// The composer gates on a configured active provider, but `send` is a public
+	// API: refuse rather than stream a request with no protocol to build from.
+	if (active === undefined) return;
+
 	const settings = getSettings();
-	const protocol: ProtocolName = settings.provider;
+	const protocol: ProtocolName = active.protocol;
 	const provider = providers[protocol];
 	const prev = prevByConversation.get(conversationId);
 
 	const ctx: SendCtx = {
 		msg,
 		prev,
-		apiUrl: settings.baseUrl,
-		apiKey: settings.apiKey,
-		model: settings.model,
+		apiUrl: active.baseUrl,
+		apiKey: active.apiKey,
+		model: active.model,
 		parts,
 		tools: settings.tools,
 	};
