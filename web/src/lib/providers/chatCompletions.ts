@@ -9,9 +9,28 @@ const template = { model: "" };
 
 const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 	const prior = (send as { messages?: unknown[] }).messages ?? [];
+	const parts = ctx.parts ?? [];
+	const content =
+		parts.length === 0
+			? ctx.msg
+			: [
+					{ type: "text" as const, text: ctx.msg },
+					...parts.map((part) =>
+						part.kind === "image"
+							? {
+									type: "image_url" as const,
+									image_url: { url: part.dataUrl },
+								}
+							: {
+									type: "file" as const,
+									file: { filename: part.name, file_data: part.dataUrl },
+								},
+					),
+				];
 	return {
 		...send,
-		messages: [...prior, { role: "user", content: ctx.msg }],
+		messages: [...prior, { role: "user", content }],
+		...(ctx.tools ? { tools: ctx.tools } : {}),
 	};
 };
 

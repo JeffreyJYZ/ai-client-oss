@@ -17,15 +17,24 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 					},
 				]
 			: send.input;
+	const attachments = (ctx.parts ?? []).map((part) =>
+		part.kind === "image"
+			? { type: "input_image" as const, file_url: part.dataUrl }
+			: { type: "input_file" as const, file_url: part.dataUrl },
+	);
 	return {
 		...send,
 		input: [
 			...prior,
 			{
 				role: "user" as const,
-				content: [{ type: "input_text" as const, text: ctx.msg }],
+				content: [
+					{ type: "input_text" as const, text: ctx.msg },
+					...attachments,
+				],
 			},
 		],
+		...(ctx.tools ? { tools: ctx.tools } : {}),
 	};
 };
 

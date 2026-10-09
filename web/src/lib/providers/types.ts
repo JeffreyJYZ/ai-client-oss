@@ -5,11 +5,24 @@ export interface Chunk {
 	readonly text: string;
 }
 
+export interface AttachmentPart {
+	readonly kind: "image" | "file";
+	readonly name: string;
+	readonly dataUrl: string;
+}
+
+export interface ToolSpec {
+	readonly type: string;
+	readonly max_num_results: number;
+}
+
 export interface SendCtx {
 	readonly msg: string;
 	readonly prev: unknown;
 	readonly apiUrl: string;
 	readonly apiKey?: string;
+	readonly parts?: readonly AttachmentPart[];
+	readonly tools?: readonly ToolSpec[];
 }
 
 export interface Provider<Send> {
