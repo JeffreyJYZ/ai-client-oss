@@ -369,8 +369,9 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 2:** `presets.ts` — `ProviderPreset` gains an optional `tools`; OpenAI presets default to `[{ type: "web_search_preview", max_num_results: 5 }]`, all others to `[]` (OpenCode/Command Code/OpenRouter reject built-ins).
 - [ ] **Step 3:** `chat.ts` — the send passes `activeProvider.tools`.
 - [ ] **Step 4:** `Settings.tsx` — the Web search toggle + `max_num_results` edit the ACTIVE provider's `tools` (per-provider), with a hint that it's endpoint-specific.
-- [ ] **Step 5:** Verify — tsc/biome/LS + a browser smoke: a Command Code provider with the toggle OFF sends no `tools` (no 400); an OpenAI provider with it ON sends the built-in.
-- [ ] **Step 6:** Commit — `fix(ui): per-provider tools (stop sending OpenAI-only tools to other endpoints)`.
+- [ ] **Step 5:** Rename the two OpenAI preset labels to `"OpenAI-compatible (Responses)"` / `"OpenAI-compatible (Chat Completions)"` (`presets.ts`), and the provider-label placeholder in `Settings.tsx` from `"OpenAI"` to `"OpenAI-compatible"` — the protocol is a *format*, not the vendor.
+- [ ] **Step 6:** Verify — tsc/biome/LS + a browser smoke: a Command Code provider with the toggle OFF sends no `tools` (no 400); an OpenAI provider with it ON sends the built-in.
+- [ ] **Step 7:** Commit — `fix(ui): per-provider tools + OpenAI-compatible labels`.
 
 ---
 
