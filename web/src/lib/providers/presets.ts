@@ -21,8 +21,8 @@ const OPENAI_TOOLS: readonly ToolSpec[] = [
 /**
  * Known OpenAI-compatible providers. The base URL carries the API version, so
  * request paths stay bare (`${baseUrl}/chat/completions`, `${baseUrl}/models`).
- * `opencode-go` and `opencode-go-plus` share an endpoint; they differ only by
- * subscription limits, so both stay listed for discoverability.
+ * `opencode-go` covers the Go and Go Plus tiers — they share an endpoint and
+ * differ only by subscription limits, so one row serves both.
  */
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 	{
@@ -55,14 +55,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 	},
 	{
 		id: "opencode-go",
-		label: "OpenCode Go",
-		baseUrl: "https://opencode.ai/zen/go/v1",
-		protocol: "chatcompletions",
-		tools: [],
-	},
-	{
-		id: "opencode-go-plus",
-		label: "OpenCode Go Plus",
+		label: "OpenCode Go / Go Plus",
 		baseUrl: "https://opencode.ai/zen/go/v1",
 		protocol: "chatcompletions",
 		tools: [],
