@@ -8,7 +8,6 @@
 		"build": "tsc -b && bun run lint && vite build",
 		"lint": "biome check . ; effect-language-service diagnostics --project tsconfig.app.json",
 		"fix": "biome check . --write",
-		"test": "bun test",
 		"preview": "vite preview"
 	},
 	"dependencies": {

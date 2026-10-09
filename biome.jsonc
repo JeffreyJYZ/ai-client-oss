@@ -13,23 +13,23 @@
 	"plugins": [
 		{
 			"path": "./biome-plugins/no-async-fn.grit",
-			"includes": ["**/web/src/**", "!**/*.test.ts"]
+			"includes": ["**/web/src/**"]
 		},
 		{
 			"path": "./biome-plugins/no-await.grit",
-			"includes": ["**/web/src/**", "!**/*.test.ts"]
+			"includes": ["**/web/src/**"]
 		},
 		{
 			"path": "./biome-plugins/no-throw.grit",
-			"includes": ["**/web/src/**", "!**/*.test.ts"]
+			"includes": ["**/web/src/**"]
 		},
 		{
 			"path": "./biome-plugins/no-try-catch.grit",
-			"includes": ["**/web/src/**", "!**/*.test.ts"]
+			"includes": ["**/web/src/**"]
 		},
 		{
 			"path": "./biome-plugins/no-new-promise.grit",
-			"includes": ["**/web/src/**", "!**/*.test.ts"]
+			"includes": ["**/web/src/**"]
 		}
 	]
 }

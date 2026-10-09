@@ -3,13 +3,5 @@
 	"references": [
 		{ "path": "./tsconfig.app.json" },
 		{ "path": "./tsconfig.node.json" }
-	],
-	"compilerOptions": {
-		"paths": {
-			"@lib/*": ["./src/lib/*"],
-			"@ui/*": ["./src/ui/*"],
-			"@/*": ["./src/*"],
-			"@root/*": ["./*"]
-		}
-	}
+	]
 }

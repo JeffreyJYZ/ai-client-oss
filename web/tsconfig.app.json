@@ -30,6 +30,5 @@
 		},
 		"plugins": [{ "name": "@effect/language-service" }]
 	},
-	"include": ["src"],
-	"exclude": ["**/*.test.ts"]
+	"include": ["src"]
 }
