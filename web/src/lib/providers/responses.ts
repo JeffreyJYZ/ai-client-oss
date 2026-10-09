@@ -5,7 +5,7 @@ import { ResponsesSend } from "@lib/types/protocols";
 import { responsesSendMinTemplate } from "@lib/util/templates";
 import type { Effect, Stream } from "effect";
 
-const endpoint = "/v1/responses";
+const endpoint = "/responses";
 
 const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 	const prior =

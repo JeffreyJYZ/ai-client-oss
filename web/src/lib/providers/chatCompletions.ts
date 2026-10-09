@@ -4,7 +4,7 @@ import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
 import { ChatCompletionsSend } from "@lib/types/protocols";
 import type { Effect, Stream } from "effect";
 
-const endpoint = "/v1/chat/completions";
+const endpoint = "/chat/completions";
 const template = { model: "" };
 
 const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {

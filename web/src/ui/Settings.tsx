@@ -1,4 +1,7 @@
 import { type ProtocolName, protocolNames } from "@lib/providers";
+import { listModels } from "@lib/providers/models";
+import { Effect } from "effect";
+import { useState } from "react";
 import { setSettings, useSettings } from "@/state/settings";
 
 const INPUT =
@@ -6,6 +9,9 @@ const INPUT =
 
 const LABEL =
 	"flex flex-col gap-1 text-xs uppercase tracking-widest text-neutral-500";
+
+const BUTTON =
+	"rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40";
 
 /** Only tool the UI exposes; the request body sends it verbatim. */
 const WEB_SEARCH = "web_search_preview";
@@ -15,6 +21,12 @@ export default function Settings() {
 	const settings = useSettings();
 	const missingKey = settings.apiKey.trim() === "";
 	const missingBaseUrl = settings.baseUrl.trim() === "";
+
+	// Model suggestions for the free-text input, plus the fetch/test status.
+	const [models, setModels] = useState<string[]>([]);
+	const [modelsPending, setModelsPending] = useState(false);
+	const [testPending, setTestPending] = useState(false);
+	const [message, setMessage] = useState<string | null>(null);
 
 	// Enabled = a non-empty tools array (the shape the store/db persists).
 	const webSearch = settings.tools.length > 0;
@@ -32,6 +44,43 @@ export default function Settings() {
 		const value = Number.parseInt(raw, 10);
 		if (!Number.isFinite(value)) return;
 		setSettings({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
+	};
+
+	const canFetch = settings.baseUrl.trim() !== "";
+	const pending = modelsPending || testPending;
+
+	/**
+	 * Shared runner for both buttons: funnels the `listModels` string error
+	 * channel into `setMessage` so nothing throws out of the component, and
+	 * clears the loading flag on success or failure alike.
+	 */
+	const runModels = (
+		setPending: (value: boolean) => void,
+		onModels: (ids: string[]) => void,
+	): void => {
+		setPending(true);
+		Effect.runFork(
+			listModels(settings.baseUrl, settings.apiKey).pipe(
+				Effect.tap((ids) => Effect.sync(() => onModels(ids))),
+				Effect.catch((error) => Effect.sync(() => setMessage(error))),
+				Effect.ensuring(Effect.sync(() => setPending(false))),
+			),
+		);
+	};
+
+	const fetchModels = (): void => {
+		if (!canFetch) return;
+		setMessage(null);
+		runModels(setModelsPending, setModels);
+	};
+
+	const testConnection = (): void => {
+		if (!canFetch) return;
+		setMessage(null);
+		runModels(setTestPending, (ids) => {
+			setModels(ids);
+			setMessage(`✓ Connected (${ids.length} models)`);
+		});
 	};
 
 	return (
@@ -93,12 +142,43 @@ export default function Settings() {
 					Model
 					<input
 						type="text"
+						list="model-suggestions"
 						value={settings.model}
 						onChange={(event) => setSettings({ model: event.target.value })}
 						placeholder="gpt-4o-mini"
 						className={INPUT}
 					/>
 				</label>
+				<datalist id="model-suggestions">
+					{models.map((id) => (
+						<option key={id} value={id} />
+					))}
+				</datalist>
+				<div className="flex flex-wrap items-center gap-3">
+					<button
+						type="button"
+						onClick={fetchModels}
+						disabled={!canFetch || pending}
+						className={BUTTON}
+					>
+						{modelsPending ? "Fetching…" : "Fetch models"}
+					</button>
+					<button
+						type="button"
+						onClick={testConnection}
+						disabled={!canFetch || pending}
+						className={BUTTON}
+					>
+						{testPending ? "Testing…" : "Test connection"}
+					</button>
+					{message !== null ? (
+						<span
+							className={`text-sm ${message.startsWith("✓") ? "text-green-400" : "text-red-400"}`}
+						>
+							{message}
+						</span>
+					) : null}
+				</div>
 				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
 					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
 						Web search
