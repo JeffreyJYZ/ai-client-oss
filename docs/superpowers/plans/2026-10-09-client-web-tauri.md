@@ -251,6 +251,44 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 16: Multi-provider settings (providers list + active pointer)
+
+**Files:**
+- Modify: `web/src/lib/db/types.ts` (`Settings` → `{ providers: ProviderConfig[]; activeProviderId }`; add `ProviderConfig`)
+- Modify: `web/src/state/settings.ts` (helpers over the list; `getActiveProvider()`)
+- Modify: `web/src/state/chat.ts` (send reads the ACTIVE provider)
+- Modify: `web/src/ui/Composer.tsx` (gates read the active provider)
+- Modify: `web/src/ui/Settings.tsx` (provider list UI — add/edit/remove/select)
+
+**Interfaces:**
+- `ProviderConfig = { id: string; label: string; protocol: ProtocolName; baseUrl: string; apiKey: string; model: string; models: string[] }`
+- `Settings = { providers: ProviderConfig[]; activeProviderId: string }` (defaults: one empty provider, active)
+- `getActiveProvider(): ProviderConfig | undefined`
+
+- [ ] **Step 1:** `lib/db/types.ts` — replace the single-provider `Settings` fields with `providers`/`activeProviderId` + add `ProviderConfig` (zod schema + type); defaults = one empty `ProviderConfig` (`protocol: "chatcompletions"`, empty base/key/model, `models: []`) with `activeProviderId` set to it.
+- [ ] **Step 2:** `state/settings.ts` — keep `getSettings`/`setSettings`/`subscribe`/`useSettings`; add `getActiveProvider()` and helpers to add/update/remove/select a provider (all through `setSettings`).
+- [ ] **Step 3:** `state/chat.ts` + `ui/Composer.tsx` — read `provider`/`baseUrl`/`apiKey`/`model` from the ACTIVE provider (not the flat settings).
+- [ ] **Step 4:** `ui/Settings.tsx` — a provider list (label + base URL summary, add / edit / remove / select-as-active); the existing Preset, Fetch models, and Test connection buttons operate on the active provider; editing a provider writes it back into the list.
+- [ ] **Step 5:** Verify — tsc/biome/LS + browser smoke: add a second provider, switch active, its base URL/key/model are used; remove one.
+- [ ] **Step 6:** Commit — `feat(ui): multi-provider settings`.
+
+---
+
+### Task 17: Chat header — provider + model dropdowns
+
+**Files:**
+- Modify: `web/src/ui/App.tsx` (or a new `web/src/ui/ProviderPicker.tsx`)
+
+**Interfaces:**
+- Consumes: `getSettings`/`useSettings` + the active-provider helpers (Task 16).
+
+- [ ] **Step 1:** In the chat header, a **provider `<select>`** listing `settings.providers` (value = `activeProviderId`); choosing one calls the select helper.
+- [ ] **Step 2:** A **model `<select>`** for the active provider: options = its `models` (from Fetch models), value = its `model`; when `models` is empty, fall back to a free-text input so a model can still be typed. Changing it writes back to the active provider.
+- [ ] **Step 3:** Verify — tsc/biome/LS + browser smoke: switch provider + model from the header, send uses them.
+- [ ] **Step 4:** Commit — `feat(ui): provider + model pickers in the chat header`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
