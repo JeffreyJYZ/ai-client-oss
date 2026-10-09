@@ -19,7 +19,8 @@ export default function App() {
 			<main className="flex min-w-0 flex-1 flex-col bg-neutral-950">
 				<header className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3">
 					<h1 className="min-w-0 truncate text-xs font-medium uppercase tracking-widest text-neutral-300">
-						Open Source AI Client
+						<span className="hidden sm:inline">Open Source AI Client</span>
+						<span className="sm:hidden">OSS AI Client</span>
 					</h1>
 					<div className="flex items-center gap-2">
 						<SystemPrompt />
