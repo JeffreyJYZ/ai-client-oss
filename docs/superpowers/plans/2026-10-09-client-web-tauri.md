@@ -310,6 +310,49 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 19: System prompt (per conversation)
+
+**Files:**
+- Modify: `web/src/lib/db/types.ts` (`Conversation` gains `systemPrompt?: string`)
+- Modify: `web/src/lib/providers/types.ts` (`SendCtx` gains `systemPrompt?: string`)
+- Modify: `web/src/lib/providers/responses.ts` (apply it)
+- Modify: `web/src/lib/providers/chatCompletions.ts` (apply it)
+- Modify: `web/src/state/chat.ts` (pass the active conversation's prompt; a setter)
+- Modify: `web/src/ui/` (a compact per-conversation editor — chat header or a Settings section)
+
+**Interfaces:**
+- `SendCtx.systemPrompt?: string`; `Conversation.systemPrompt?: string`.
+
+- [ ] **Step 1:** `Conversation` (zod + type) gains `systemPrompt?: string`.
+- [ ] **Step 2:** `SendCtx` gains `systemPrompt?: string`; `responses.buildRequest` sets `instructions` from it; `chatcompletions.buildRequest` prepends `{ role: "system", content }` to `messages` when set. Keep both pure.
+- [ ] **Step 3:** `chat.ts` — the send passes the active conversation's `systemPrompt`; add a setter that updates it (persisted via the existing conversation write-through).
+- [ ] **Step 4:** UI — a compact editor for the active conversation's system prompt (e.g. a "System" textarea reachable from the chat header / a small panel). Dark-first.
+- [ ] **Step 5:** Verify — tsc/biome/LS + browser smoke against a local mock: with a system prompt set, the request body carries it (`instructions` for responses, a `system` message for chatcompletions).
+- [ ] **Step 6:** Commit — `feat: per-conversation system prompt`.
+
+---
+
+### Task 20: Profiles (provider + model + system prompt)
+
+**Files:**
+- Modify: `web/src/lib/db/types.ts` (`Settings` gains `profiles: Profile[]`; `Profile` type)
+- Modify: `web/src/state/settings.ts` (helpers)
+- Modify: `web/src/state/chat.ts` (applying a profile)
+- Modify: `web/src/ui/App.tsx` (a profiles picker in the chat header)
+- Modify: `web/src/ui/Settings.tsx` (manage profiles)
+
+**Interfaces:**
+- `Profile = { id: string; name: string; providerId: string; model: string; systemPrompt: string }`; `Settings.profiles: Profile[]`.
+
+- [ ] **Step 1:** `Settings` (zod + type) gains `profiles: Profile[]` (default `[]`); add `Profile`.
+- [ ] **Step 2:** `state/settings.ts` — helpers to add/update/remove a profile (via `setSettings`).
+- [ ] **Step 3:** Applying a profile (chat header picker): `setSettings({ activeProviderId: profile.providerId })`, write `profile.model` into that provider's `model`, and set the active conversation's `systemPrompt` to `profile.systemPrompt`.
+- [ ] **Step 4:** UI — a **profiles `<select>`** in the chat header (apply one); add/edit/delete profiles in `Settings.tsx` (name + provider + model + system prompt).
+- [ ] **Step 5:** Verify — tsc/biome/LS + browser smoke: pick a profile → provider, model, and system prompt all switch.
+- [ ] **Step 6:** Commit — `feat: profiles (provider + model + system prompt)`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
