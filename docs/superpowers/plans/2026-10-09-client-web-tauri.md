@@ -353,6 +353,42 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 21: Per-provider tools (fix the OpenAI-only web-search 400)
+
+**Files:**
+- Modify: `web/src/lib/db/types.ts` (`ProviderConfig` gains `tools`; drop the global `Settings.tools`)
+- Modify: `web/src/lib/providers/presets.ts` (each preset carries a default `tools`)
+- Modify: `web/src/state/settings.ts` (helpers read/write the active provider's tools)
+- Modify: `web/src/state/chat.ts` (send uses the ACTIVE provider's `tools`)
+- Modify: `web/src/ui/Settings.tsx` (the Web search toggle edits the active provider)
+
+**Interfaces:**
+- `ProviderConfig.tools: { type: string; max_num_results: number }[]` (moved off `Settings`).
+
+- [ ] **Step 1:** `types.ts` — add `tools` to `ProviderConfig` (default `[]`); remove the global `Settings.tools`.
+- [ ] **Step 2:** `presets.ts` — `ProviderPreset` gains an optional `tools`; OpenAI presets default to `[{ type: "web_search_preview", max_num_results: 5 }]`, all others to `[]` (OpenCode/Command Code/OpenRouter reject built-ins).
+- [ ] **Step 3:** `chat.ts` — the send passes `activeProvider.tools`.
+- [ ] **Step 4:** `Settings.tsx` — the Web search toggle + `max_num_results` edit the ACTIVE provider's `tools` (per-provider), with a hint that it's endpoint-specific.
+- [ ] **Step 5:** Verify — tsc/biome/LS + a browser smoke: a Command Code provider with the toggle OFF sends no `tools` (no 400); an OpenAI provider with it ON sends the built-in.
+- [ ] **Step 6:** Commit — `fix(ui): per-provider tools (stop sending OpenAI-only tools to other endpoints)`.
+
+---
+
+### Task 22: Guard `prev` across protocol/provider switches
+
+**Files:**
+- Modify: `web/src/state/chat.ts`
+
+**Interfaces:**
+- `prev` becomes keyed by `(conversationId, protocol)` instead of `conversationId`.
+
+- [ ] **Step 1:** Key the in-memory `prev` map by `${conversationId}\u0000${protocol}` (or an equivalent composite), so each protocol has its own accumulated body; a protocol switch finds no entry and falls back to the template.
+- [ ] **Step 2:** Confirm the map is pruned on conversation delete for every protocol.
+- [ ] **Step 3:** Verify — tsc/biome/LS + a browser smoke: set a `prev` under `responses`, switch the active provider to a `chatcompletions` one, and send — no throw, a clean request.
+- [ ] **Step 4:** Commit — `fix(ui): scope prev per protocol so a protocol switch can't replay a foreign body`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
