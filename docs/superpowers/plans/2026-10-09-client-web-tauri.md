@@ -450,6 +450,17 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 27: Responsive header title
+
+**Files:**
+- Modify: `web/src/ui/App.tsx`
+
+- [ ] **Step 1:** The header `<h1>` shows the full `"Open Source AI Client"` on wider screens and shrinks to `"OSS AI Client"` when the viewport is small (e.g. two spans toggled by a Tailwind breakpoint: `hidden sm:inline` for the long form, `sm:hidden` for the short — or the equivalent). Keep the existing mono/uppercase/`tracking-widest` styling.
+- [ ] **Step 2:** Verify — tsc/biome/LS + a browser smoke via `agent-browser`: at a wide viewport the tab shows "Open Source AI Client"; shrunk narrow it shows "OSS AI Client".
+- [ ] **Step 3:** Commit — `feat(ui): shrink the header title to "OSS AI Client" on narrow screens`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
