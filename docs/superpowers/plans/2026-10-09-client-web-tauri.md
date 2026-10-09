@@ -195,6 +195,22 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 13: Test connection → tiny real generation of the current model
+
+**Files:**
+- Modify: `web/src/lib/providers/models.ts` (add `testModel`)
+- Modify: `web/src/ui/Settings.tsx` (Test connection calls it)
+
+**Interfaces:**
+- Produces: `testModel(protocol: ProtocolName, baseUrl: string, apiKey: string | undefined, model: string): Effect.Effect<void, string>`
+
+- [ ] **Step 1:** `testModel` — POST a minimal, **1-token-capped** body to `${baseUrl}${providers[protocol].endpoint}`: `responses` → `{ model, input: "ping", stream: true, max_output_tokens: 1 }`; `chatcompletions` → `{ model, messages: [{ role: "user", content: "ping" }], stream: true, max_tokens: 1 }`. `Authorization: Bearer` when a key is set. `response.ok` → succeed; non-2xx → `Effect.fail(\`\${status}: \${body}\`)`. No `async`/`await`/`new Promise`.
+- [ ] **Step 2:** `Settings.tsx` — "Test connection" calls `testModel(settings.provider, baseUrl, apiKey, model)` and shows `✓ <model> responded` or the error string. Require a non-empty model (disable/guard otherwise).
+- [ ] **Step 3:** Verify — tsc/biome/LS + a browser smoke against a local mock (one 2xx, one non-2xx).
+- [ ] **Step 4:** Commit — `feat(ui): test connection runs a 1-token generation of the current model`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
