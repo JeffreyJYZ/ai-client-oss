@@ -10,7 +10,6 @@ import {
 	removeProfile,
 	removeProvider,
 	selectProvider,
-	setSettings,
 	updateProfile,
 	updateProvider,
 	useSettings,
@@ -48,14 +47,22 @@ export default function Settings() {
 	const missingKey = (active?.apiKey ?? "").trim() === "";
 	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
 
-	// Enabled = a non-empty tools array (the shape the store/db persists).
-	const webSearch = settings.tools.length > 0;
+	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
+		if (active === undefined) return;
+		updateProvider(active.id, patch);
+	};
+
+	// Tools are per-provider: the toggle edits the ACTIVE provider's `tools`,
+	// because the accepted shape is endpoint-specific (OpenAI's built-in is
+	// rejected by other gateways). Enabled = a non-empty tools array.
+	const activeTools = active?.tools ?? [];
+	const webSearch = activeTools.length > 0;
 	const maxNumResults =
-		settings.tools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
+		activeTools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
 		DEFAULT_MAX_RESULTS;
 
 	const setWebSearch = (on: boolean): void => {
-		setSettings({
+		patchActive({
 			tools: on ? [{ type: WEB_SEARCH, max_num_results: maxNumResults }] : [],
 		});
 	};
@@ -63,12 +70,7 @@ export default function Settings() {
 	const setMaxResults = (raw: string): void => {
 		const value = Number.parseInt(raw, 10);
 		if (!Number.isFinite(value)) return;
-		setSettings({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
-	};
-
-	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
-		if (active === undefined) return;
-		updateProvider(active.id, patch);
+		patchActive({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
 	};
 
 	const openEditor = (id: string): void => {
@@ -133,6 +135,9 @@ export default function Settings() {
 			protocol: preset.protocol,
 			// Only fill a blank label, never overwrite a user's name.
 			label: active.label.trim() === "" ? preset.label : active.label,
+			// Presets carry their endpoint's default tools (empty where the
+			// built-in is rejected).
+			tools: [...(preset.tools ?? [])],
 		});
 	};
 
@@ -278,7 +283,7 @@ export default function Settings() {
 								type="text"
 								value={active.label}
 								onChange={(event) => patchActive({ label: event.target.value })}
-								placeholder="OpenAI"
+								placeholder="OpenAI-compatible"
 								className={INPUT}
 							/>
 						</label>
@@ -510,10 +515,16 @@ export default function Settings() {
 						<input
 							type="checkbox"
 							checked={webSearch}
+							disabled={active === undefined}
 							onChange={(event) => setWebSearch(event.target.checked)}
-							className="h-4 w-4 accent-neutral-300"
+							className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
 						/>
 					</label>
+					<p className="text-xs text-neutral-500">
+						Applies only to the active provider — the declaration is
+						endpoint-specific (OpenAI&apos;s built-in is rejected by other
+						gateways).
+					</p>
 					{webSearch ? (
 						<label className={LABEL}>
 							Max results

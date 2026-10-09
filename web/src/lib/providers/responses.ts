@@ -41,7 +41,10 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 				],
 			},
 		],
-		...(ctx.tools ? { tools: ctx.tools } : {}),
+		// Explicit key (not a conditional spread): an empty/absent list must
+		// overwrite any `tools` replayed from the previous turn's body, or a
+		// provider switch would resend the old endpoint's declaration.
+		tools: ctx.tools?.length ? ctx.tools : undefined,
 	};
 };
 

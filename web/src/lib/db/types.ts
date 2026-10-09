@@ -20,6 +20,20 @@ export const providerConfigSchema = z.object({
 	apiKey: z.string().default(""),
 	model: z.string().default(""),
 	models: z.array(z.string()).default([]),
+	/**
+	 * Tools sent verbatim on this provider's requests. Per-provider because the
+	 * accepted shape is endpoint-specific: OpenAI's built-in
+	 * `web_search_preview` is rejected by other gateways (they want a
+	 * client-executed function declaration).
+	 */
+	tools: z
+		.array(
+			z.object({
+				type: z.string(),
+				max_num_results: z.number(),
+			}),
+		)
+		.default([]),
 });
 
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;
@@ -59,14 +73,6 @@ export const Settings = z.object({
 	activeProviderId: z.string().default(DEFAULT_PROVIDER_ID),
 	/** Saved provider+model+system-prompt bundles; empty until the user adds one. */
 	profiles: z.array(profileSchema).default([]),
-	tools: z
-		.array(
-			z.object({
-				type: z.string(),
-				max_num_results: z.number(),
-			}),
-		)
-		.default([]),
 });
 
 export type Settings = z.infer<typeof Settings>;

@@ -4,7 +4,7 @@ import { type ProtocolName, providers } from "@lib/providers";
 import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
-import { getActiveProvider, getSettings } from "./settings";
+import { getActiveProvider } from "./settings";
 
 export type ChatStatus = "idle" | "streaming";
 
@@ -222,7 +222,6 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// API: refuse rather than stream a request with no protocol to build from.
 	if (active === undefined) return;
 
-	const settings = getSettings();
 	const protocol: ProtocolName = active.protocol;
 	const provider = providers[protocol];
 	const prev = prevByConversation.get(conversationId);
@@ -234,7 +233,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		apiKey: active.apiKey,
 		model: active.model,
 		parts,
-		tools: settings.tools,
+		// Tools live on the provider, not globally: the accepted shape is
+		// endpoint-specific (OpenAI's built-in is rejected elsewhere).
+		tools: active.tools,
 		systemPrompt: conversation.systemPrompt,
 	};
 
