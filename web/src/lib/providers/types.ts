@@ -18,5 +18,5 @@ export interface Provider<Send> {
 	readonly template: Send;
 	parse(raw: unknown): Effect.Effect<Send, string>;
 	buildRequest(send: Send, ctx: SendCtx): unknown;
-	send(ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk>, string>;
+	send(ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string>;
 }
