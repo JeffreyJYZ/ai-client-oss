@@ -1,5 +1,7 @@
 import { useState } from "react";
 import "@/App.css";
+import { isDesktop } from "@lib/platform";
+import { LATEST_RELEASE_URL } from "@/constants/links";
 import { useChat } from "@/state/chat";
 import ChatPane from "@/ui/ChatPane";
 import Composer from "@/ui/Composer";
@@ -26,6 +28,18 @@ export default function App() {
 						<SystemPrompt />
 						<ProfilePicker />
 						<ProviderPicker />
+						{isDesktop ? null : (
+							<a
+								href={LATEST_RELEASE_URL}
+								target="_blank"
+								rel="noreferrer noopener"
+								title="Download the desktop app"
+								className="shrink-0 rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+							>
+								<span className="hidden sm:inline">Download desktop app</span>
+								<span className="sm:hidden">Download</span>
+							</a>
+						)}
 						<button
 							type="button"
 							onClick={() => setShowSettings((value) => !value)}
