@@ -85,8 +85,7 @@ describe("registry", () => {
 
 - [ ] **Step 3: Run it and watch it fail**
 
-Run: `cd web && bun test src/lib/providers/index.test.ts`
-Expected: FAIL — cannot resolve `@lib/providers`.
+Run: `cd web && bun test src/lib/providers/index.test.ts` Expected: FAIL — cannot resolve `@lib/providers`.
 
 - [ ] **Step 4: Write the contract** — `web/src/lib/providers/types.ts`
 
@@ -175,8 +174,7 @@ Delete the `ProtocolName` export from `web/src/lib/types/protocols.ts`. Delete `
 
 - [ ] **Step 10: Run the test → pass, then typecheck**
 
-Run: `cd web && bun test src/lib/providers/index.test.ts && bunx tsc --noEmit -p tsconfig.app.json`
-Expected: tests PASS; tsc reports no error in `src/lib/providers/**` or `src/lib/api/**`.
+Run: `cd web && bun test src/lib/providers/index.test.ts && bunx tsc --noEmit -p tsconfig.app.json` Expected: tests PASS; tsc reports no error in `src/lib/providers/**` or `src/lib/api/**`.
 
 - [ ] **Step 11: Commit**
 
@@ -233,8 +231,7 @@ test("chatcompletions body appends a user message", () => {
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `cd web && bun test src/lib/providers/buildRequest.test.ts`
-Expected: FAIL — current `buildRequest` returns the send unchanged (no appended turn).
+Run: `cd web && bun test src/lib/providers/buildRequest.test.ts` Expected: FAIL — current `buildRequest` returns the send unchanged (no appended turn).
 
 - [ ] **Step 3: Implement `responses.buildRequest`**
 
@@ -246,8 +243,7 @@ Return `{ ...send, messages: [...(send as { messages?: unknown[] }).messages ?? 
 
 - [ ] **Step 5: Run the test → pass, then typecheck**
 
-Run: `cd web && bun test src/lib/providers/buildRequest.test.ts && bunx tsc --noEmit -p tsconfig.app.json`
-Expected: PASS; no new tsc errors.
+Run: `cd web && bun test src/lib/providers/buildRequest.test.ts && bunx tsc --noEmit -p tsconfig.app.json` Expected: PASS; no new tsc errors.
 
 - [ ] **Step 6: Commit**
 
@@ -318,8 +314,7 @@ Fix the `collect` helper to the actual Effect 4 `Stream`/`Chunk` API at implemen
 
 - [ ] **Step 2: Run it and watch it fail**
 
-Run: `cd web && bun test src/lib/providers/send.test.ts`
-Expected: FAIL — `send` still returns `Stream.empty`.
+Run: `cd web && bun test src/lib/providers/send.test.ts` Expected: FAIL — `send` still returns `Stream.empty`.
 
 - [ ] **Step 3: Implement a shared `send` helper** — `web/src/lib/providers/send.ts`
 
@@ -336,14 +331,11 @@ Behavior: `Effect.tryPromise({ try: () => fetch(url, { method: "POST", headers, 
 
 - [ ] **Step 5: Run the tests → pass**
 
-Run: `cd web && bun test src/lib/providers/send.test.ts`
-Expected: PASS — all three cases, plus the sentinel case from Review Focus #5.
+Run: `cd web && bun test src/lib/providers/send.test.ts` Expected: PASS — all three cases, plus the sentinel case from Review Focus #5.
 
 - [ ] **Step 6: Full gates**
 
-Run: `cd web && bun test && bunx tsc --noEmit -p tsconfig.app.json`
-Run from repo root: `biome check .`
-Expected: all green.
+Run: `cd web && bun test && bunx tsc --noEmit -p tsconfig.app.json` Run from repo root: `biome check .` Expected: all green.
 
 - [ ] **Step 7: Commit**
 

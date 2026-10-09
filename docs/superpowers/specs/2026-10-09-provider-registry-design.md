@@ -1,21 +1,14 @@
 # Provider Registry — Design
 
-Status: approved in chat, awaiting spec review
-Date: 2026-10-09
+Status: approved in chat, awaiting spec review Date: 2026-10-09
 
 ## Intent
 
-Replace the string-switch in `src/lib/api/index.ts` and the duplicated per-protocol
-parsers with a **registry of provider objects**, one per protocol. Each object owns
-everything protocol-specific: its zod schema, its `parse`, its default template, its
-endpoint, its request builder, and its HTTP + streaming call.
+Replace the string-switch in `src/lib/api/index.ts` and the duplicated per-protocol parsers with a **registry of provider objects**, one per protocol. Each object owns everything protocol-specific: its zod schema, its `parse`, its default template, its endpoint, its request builder, and its HTTP + streaming call.
 
-The registry is the **source of truth**: `ProtocolName` is derived from its keys, so
-adding a provider is one object and nothing else, and a protocol cannot exist without a
-complete provider (enforced by `satisfies`).
+The registry is the **source of truth**: `ProtocolName` is derived from its keys, so adding a provider is one object and nothing else, and a protocol cannot exist without a complete provider (enforced by `satisfies`).
 
-Goal: **extensible AND exhaustive** — add providers without touching the send path, and
-make an incomplete/omitted provider a compile error.
+Goal: **extensible AND exhaustive** — add providers without touching the send path, and make an incomplete/omitted provider a compile error.
 
 ## Constraints
 
@@ -60,8 +53,7 @@ export interface Provider<Send> {
 }
 ```
 
-`send`'s signature never mentions `Send`, so every provider's `send` has an identical
-type — that is what lets `providers[name].send(ctx)` type-check across the registry union.
+`send`'s signature never mentions `Send`, so every provider's `send` has an identical type — that is what lets `providers[name].send(ctx)` type-check across the registry union.
 
 ### 2. One object per provider — `src/lib/providers/responses.ts`, `chatCompletions.ts`
 
@@ -87,10 +79,7 @@ export const protocolNames = Object.keys(providers) as ProtocolName[];
 export const protocolSchema = z.enum(protocolNames); // only if a runtime enum is wanted
 ```
 
-The registry key **is** the protocol string, so keys must match the wire value exactly
-(`chatcompletions`, not `chatCompletions`) — this preserves the current
-`"responses" | "chatcompletions"` values. The module file / local identifier spelling is
-free (`chatCompletions.ts` exporting `chatcompletions`).
+The registry key **is** the protocol string, so keys must match the wire value exactly (`chatcompletions`, not `chatCompletions`) — this preserves the current `"responses" | "chatcompletions"` values. The module file / local identifier spelling is free (`chatCompletions.ts` exporting `chatcompletions`).
 
 ### 4. Call site — `src/lib/api/index.ts`
 
@@ -99,31 +88,21 @@ export const SendMsg = (protocol: ProtocolName, ctx: SendCtx) =>
 	providers[protocol].send(ctx);
 ```
 
-No string-switch, no `assert`, no silent default-template fallback. A bad protocol is a
-compile error at the call site.
+No string-switch, no `assert`, no silent default-template fallback. A bad protocol is a compile error at the call site.
 
 ### 5. Disposition of existing code
 
-- `src/lib/core/parse.ts` — `parseResponsesSend` / `parseChatCompletionsSend` become each
-  provider's `parse` (live in the provider modules, or stay put and be referenced; final
-  placement is an implementation detail).
+- `src/lib/core/parse.ts` — `parseResponsesSend` / `parseChatCompletionsSend` become each provider's `parse` (live in the provider modules, or stay put and be referenced; final placement is an implementation detail).
 - `src/lib/util/exhaustiveCheck.ts` (`assert`) — **deleted**; exhaustiveness is structural.
 - `src/lib/util/templates.ts` (`responsesSendMinTemplate`) — folds into the `responses` provider.
 - `ProtocolName` in `src/lib/types/protocols.ts` — removed; replaced by the derived type.
 
 ## Decisions
 
-- **Chunk** = `{ readonly text: string }`. Minimal; a `type` discriminator is deferred
-  until tool calls / non-text parts actually need it (YAGNI).
-- **Error channel** stays `string` for this pass, matching today's `Effect<_, string>`.
-  Tagged (`Data.TaggedError`) errors are a follow-up once recovery needs tags.
-- **HTTP** via raw `fetch` wrapped in `Effect.tryPromise`, response body via
-  `Stream.fromReadableStream` — no new dependency. `@effect/platform` `HttpClient` is the
-  documented upgrade path. If the effect language service flags `globalFetch` inside
-  provider files, scope that diagnostic to the provider directory rather than disable it
-  globally.
-- **Ownership**: `schema`, `parse`, `template`, `endpoint`, `buildRequest`, `send` (HTTP +
-  stream), auth headers all live on the provider.
+- **Chunk** = `{ readonly text: string }`. Minimal; a `type` discriminator is deferred until tool calls / non-text parts actually need it (YAGNI).
+- **Error channel** stays `string` for this pass, matching today's `Effect<_, string>`. Tagged (`Data.TaggedError`) errors are a follow-up once recovery needs tags.
+- **HTTP** via raw `fetch` wrapped in `Effect.tryPromise`, response body via `Stream.fromReadableStream` — no new dependency. `@effect/platform` `HttpClient` is the documented upgrade path. If the effect language service flags `globalFetch` inside provider files, scope that diagnostic to the provider directory rather than disable it globally.
+- **Ownership**: `schema`, `parse`, `template`, `endpoint`, `buildRequest`, `send` (HTTP + stream), auth headers all live on the provider.
 
 ## Success criteria
 
@@ -134,10 +113,8 @@ compile error at the call site.
 
 ## Testing
 
-- **Registry** — compile-time exhaustiveness (type test) + a runtime test that `SendMsg`
-  dispatches to the intended provider.
-- **Provider** — unit-test `parse` (valid and invalid input) and `buildRequest`
-  (msg + prev → body).
+- **Registry** — compile-time exhaustiveness (type test) + a runtime test that `SendMsg` dispatches to the intended provider.
+- **Provider** — unit-test `parse` (valid and invalid input) and `buildRequest` (msg + prev → body).
 - **HTTP/stream** — exercised against a stubbed fetch / readable stream.
 
 ## Out of scope
