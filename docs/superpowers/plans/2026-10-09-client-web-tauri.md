@@ -389,6 +389,24 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 23: Confirm destructive actions
+
+**Files:**
+- Create: `web/src/ui/ConfirmButton.tsx`
+- Modify: `web/src/ui/Settings.tsx` (provider remove + profile delete)
+- Modify: `web/src/ui/ConversationList.tsx` (conversation delete)
+
+**Interfaces:**
+- Produces: `ConfirmButton({ label, confirmLabel, onConfirm, className? })` — an inline two-step confirm (first click arms, second executes; blur/Escape/click-away disarms). No `window.confirm` (platform-dependent in the webview); no modal dependency.
+
+- [ ] **Step 1:** `ConfirmButton.tsx` — a self-contained two-step button (default `label` → armed `confirmLabel`, resets on blur/Escape; dark-first Tailwind; `aria-live` on the armed state).
+- [ ] **Step 2:** `Settings.tsx` — use it for the provider **remove** and the profile **delete** (Task 20), replacing the single-click destructive buttons.
+- [ ] **Step 3:** `ConversationList.tsx` — use it for the conversation **delete** (currently one click).
+- [ ] **Step 4:** Verify — tsc/biome/LS + browser smoke: the first click arms (no deletion), the second deletes; clicking away cancels; a conversation and a provider both require two clicks.
+- [ ] **Step 5:** Commit — `feat(ui): confirm destructive actions (provider/profile/conversation removal)`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
