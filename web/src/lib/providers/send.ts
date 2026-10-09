@@ -68,6 +68,9 @@ const parseLine = (line: string): Chunk | null => {
 		return { kind: "tool", text: "web_search" };
 	}
 	if (isRecord(event.item) && event.item.type === "function_call") {
+		// `.added` and `.done` both carry the item; only the first opens a call,
+		// so gate on `added` or every function call yields two markers.
+		if (!type.includes("output_item.added")) return null;
 		const name = asString(event.item.name);
 		return name === null ? null : { kind: "tool", text: name };
 	}

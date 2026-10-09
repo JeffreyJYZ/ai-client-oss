@@ -177,8 +177,10 @@ const appendChunk = (
 			if (chunk.kind === "tool") {
 				// The marker is display-only: `assistantText` (the next-turn seed)
 				// accumulates `text` chunks only, so it never reaches the wire.
-				const sep = m.text === "" ? "" : "\n\n";
-				return { ...m, text: `${m.text}${sep}${toolMarker(chunk.text)}\n\n` };
+				// Trim trailing blank lines first so two adjacent calls don't stack.
+				const base = m.text.replace(/\n+$/, "");
+				const sep = base === "" ? "" : "\n\n";
+				return { ...m, text: `${base}${sep}${toolMarker(chunk.text)}\n\n` };
 			}
 			return { ...m, text: m.text + chunk.text };
 		}),
