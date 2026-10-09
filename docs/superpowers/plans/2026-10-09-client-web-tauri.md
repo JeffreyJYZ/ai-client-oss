@@ -235,6 +235,22 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 15: Selecting a conversation exits Settings into the chat
+
+**Files:**
+- Modify: `web/src/ui/App.tsx`
+- Modify: `web/src/ui/ConversationList.tsx`
+
+**Interfaces:**
+- Produces: `ConversationList` gains an optional `onOpenChat?: () => void` prop.
+
+- [ ] **Step 1:** `ConversationList.tsx` — accept `onOpenChat?: () => void`; call it in BOTH the "select conversation" and "new conversation" handlers (alongside `selectConversation`/`newConversation`).
+- [ ] **Step 2:** `App.tsx` — pass `onOpenChat={() => setShowSettings(false)}` to `<ConversationList />`, so picking a chat while Settings is open navigates to that chat.
+- [ ] **Step 3:** Verify — tsc/biome/LS + browser smoke: open Settings, click a conversation → the chat for it shows (not Settings).
+- [ ] **Step 4:** Commit — `fix(ui): selecting a conversation exits Settings into the chat`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
