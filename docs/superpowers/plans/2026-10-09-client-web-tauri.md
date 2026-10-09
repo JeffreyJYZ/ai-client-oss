@@ -211,6 +211,22 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 14: Built-in provider presets (OpenAI, OpenRouter)
+
+**Files:**
+- Create: `web/src/lib/providers/presets.ts`
+- Modify: `web/src/ui/Settings.tsx`
+
+**Interfaces:**
+- Produces: `PROVIDER_PRESETS: readonly { id: string; label: string; baseUrl: string; protocol: ProtocolName }[]`
+
+- [ ] **Step 1:** `presets.ts` — `PROVIDER_PRESETS` with the base-URL presets: `openai-responses` → `https://api.openai.com/v1` + `responses`; `openai-chat` → `https://api.openai.com/v1` + `chatcompletions`; `openrouter` → `https://openrouter.ai/api/v1` + `chatcompletions`. (No attribution headers.)
+- [ ] **Step 2:** `Settings.tsx` — a "Preset" `<select>` listing the presets plus a "Custom" option; choosing a preset sets `baseUrl` + `provider` via `setSettings`; "Custom" leaves the typed values untouched. The base URL stays editable.
+- [ ] **Step 3:** Verify — tsc/biome/LS + browser smoke (pick OpenRouter → base URL + provider update, models fetch hits OpenRouter's `/models`).
+- [ ] **Step 4:** Commit — `feat(ui): built-in provider presets (OpenAI, OpenRouter)`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
