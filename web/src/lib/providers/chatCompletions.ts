@@ -36,6 +36,10 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 				];
 	return {
 		...send,
+		// Request SSE explicitly: without `stream`, the endpoint returns a single
+		// JSON body and a reader expecting `data:` lines yields nothing (silence).
+		// Explicit key also overrides any `stream` replayed from a previous turn.
+		stream: true,
 		model: ctx.model,
 		messages: [...system, ...prior, { role: "user", content }],
 		...(ctx.tools ? { tools: ctx.tools } : {}),

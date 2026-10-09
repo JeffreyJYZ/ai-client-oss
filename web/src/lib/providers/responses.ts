@@ -24,6 +24,9 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 	);
 	return {
 		...send,
+		// Belt-and-braces: emit `stream` explicitly rather than relying on the
+		// template's `prev`, so a replayed body can never silently clear it.
+		stream: true,
 		model: ctx.model,
 		// Replace any prompt carried on the previous turn's body rather than let
 		// it accumulate; `undefined` drops the key at `JSON.stringify`.

@@ -44,6 +44,9 @@ export type ResponsesSend = z.infer<typeof ResponsesSend>;
 
 export const ChatCompletionsSend = z.object({
 	model: z.string(),
+	// The request body always sets this (see `chatCompletions.buildRequest`);
+	// optional only so a replayed/template body without it still parses.
+	stream: z.boolean().optional(),
 });
 export type ChatCompletionsSend = z.infer<typeof ChatCompletionsSend>;
 
