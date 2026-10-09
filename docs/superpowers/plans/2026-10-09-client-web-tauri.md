@@ -408,6 +408,18 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 24: Fold the Go Plus preset into the Go row
+
+**Files:**
+- Modify: `web/src/lib/providers/presets.ts`
+
+- [ ] **Step 1:** Remove the `opencode-go-plus` preset (it is configurationally identical to `opencode-go` — same base URL + protocol — so it only duplicated the row and collapsed to the same label).
+- [ ] **Step 2:** Relabel `opencode-go` → `"OpenCode Go / Go Plus"` (they share the endpoint; Go Plus differs only by subscription usage limits).
+- [ ] **Step 3:** Verify — tsc/biome/LS + a browser smoke: one Go row remains, labelled with Both.
+- [ ] **Step 4:** Commit — `fix(ui): fold Go Plus into the OpenCode Go preset`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
