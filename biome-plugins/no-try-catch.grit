@@ -1,0 +1,3 @@
+`try { $tryBody } catch ($error) { $catchBody }` as $node where {
+	register_diagnostic(span=$node, message="No try/catch — use Effect.catch / Effect.result instead.")
+}

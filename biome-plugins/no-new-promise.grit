@@ -1,0 +1,3 @@
+`new Promise($executor)` as $node where {
+	register_diagnostic(span=$node, message="No raw Promise — use Effect.promise / Effect.tryPromise instead.")
+}

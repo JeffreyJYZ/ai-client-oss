@@ -1,0 +1,3 @@
+`async function $name($params) { $body }` as $node where {
+	register_diagnostic(span=$node, message="No async functions — model concurrency with Effect.")
+}

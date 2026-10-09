@@ -1,0 +1,3 @@
+`await $expr` as $node where {
+	register_diagnostic(span=$node, message="No await — use Effect.gen + yield* instead.")
+}

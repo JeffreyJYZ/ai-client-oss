@@ -1,4 +1,5 @@
 {
+	"$schema": "https://json.schemastore.org/tsconfig",
 	"compilerOptions": {
 		"tsBuildInfoFile": "./node_modules/.tmp/tsconfig.app.tsbuildinfo",
 		"target": "es2023",
@@ -20,7 +21,15 @@
 		"noUnusedLocals": true,
 		"noUnusedParameters": true,
 		"erasableSyntaxOnly": true,
-		"noFallthroughCasesInSwitch": true
+		"noFallthroughCasesInSwitch": true,
+		"paths": {
+			"@lib/*": ["./src/lib/*"],
+			"@ui/*": ["./src/ui/*"],
+			"@/*": ["./src/*"],
+			"@root/*": ["./*"]
+		},
+		"plugins": [{ "name": "@effect/language-service" }]
 	},
-	"include": ["src"]
+	"include": ["src"],
+	"exclude": ["**/*.test.ts"]
 }

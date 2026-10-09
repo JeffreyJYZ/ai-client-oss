@@ -1,0 +1,35 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
+	"vcs": {
+		"useIgnoreFile": true,
+		"enabled": true,
+		"clientKind": "git"
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		}
+	},
+	"plugins": [
+		{
+			"path": "./biome-plugins/no-async-fn.grit",
+			"includes": ["**/web/src/**", "!**/*.test.ts"]
+		},
+		{
+			"path": "./biome-plugins/no-await.grit",
+			"includes": ["**/web/src/**", "!**/*.test.ts"]
+		},
+		{
+			"path": "./biome-plugins/no-throw.grit",
+			"includes": ["**/web/src/**", "!**/*.test.ts"]
+		},
+		{
+			"path": "./biome-plugins/no-try-catch.grit",
+			"includes": ["**/web/src/**", "!**/*.test.ts"]
+		},
+		{
+			"path": "./biome-plugins/no-new-promise.grit",
+			"includes": ["**/web/src/**", "!**/*.test.ts"]
+		}
+	]
+}
