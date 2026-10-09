@@ -1,6 +1,6 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
-import { type ProtocolName, providers } from "@lib/providers";
+import { type ProtocolName, protocolNames, providers } from "@lib/providers";
 import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
@@ -27,12 +27,20 @@ const DEFAULT_TITLE = "New chat";
 const TITLE_MAX = 48;
 
 /**
- * Last request body successfully sent, per conversation, replayed as the base
- * for that conversation's next turn. `Conversation` persists only `ChatMessage`s,
- * not the provider wire body, so this is deliberately in-memory: it survives a
- * switch within a session and resets on reload (multi-turn context starts over).
+ * Last request body successfully sent, per conversation and protocol,
+ * replayed as the base for that conversation's next turn. `Conversation`
+ * persists only `ChatMessage`s, not the provider wire body, so this is
+ * deliberately in-memory: it survives a switch within a session and
+ * resets on reload (multi-turn context starts over). Keyed by
+ * `${conversationId}\u0000${protocol}` so a protocol switch finds no
+ * entry and falls back to the provider template instead of replaying a
+ * body built for a different wire shape.
  */
-const prevByConversation = new Map<string, unknown>();
+const prevByConversationProtocol = new Map<string, unknown>();
+
+/** Composite key scoping a conversation's `prev` body to one protocol. */
+const prevKey = (conversationId: string, protocol: ProtocolName): string =>
+	`${conversationId}\u0000${protocol}`;
 
 let activeFiber: Fiber.Fiber<Exit.Exit<void, string>, never> | undefined;
 
@@ -165,6 +173,7 @@ const appendChunk = (
 const finalize = (
 	myRun: number,
 	conversationId: string,
+	protocol: ProtocolName,
 	exit: Exit.Exit<void, string>,
 	next: unknown,
 ): void => {
@@ -174,7 +183,7 @@ const finalize = (
 	activeFiber = undefined;
 	streamConversationId = undefined;
 	if (Exit.isSuccess(exit)) {
-		prevByConversation.set(conversationId, next);
+		prevByConversationProtocol.set(prevKey(conversationId, protocol), next);
 	} else if (!Cause.hasInterruptsOnly(exit.cause)) {
 		const text = Option.getOrElse(
 			Cause.findErrorOption(exit.cause),
@@ -224,7 +233,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	const protocol: ProtocolName = active.protocol;
 	const provider = providers[protocol];
-	const prev = prevByConversation.get(conversationId);
+	const prev = prevByConversationProtocol.get(
+		prevKey(conversationId, protocol),
+	);
 
 	const ctx: SendCtx = {
 		msg,
@@ -287,6 +298,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 						finalize(
 							myRun,
 							conversationId,
+							protocol,
 							exit,
 							appendAssistant(nextBody, assistantText),
 						),
@@ -354,7 +366,11 @@ export const setSystemPrompt = (text: string): void => {
 export const deleteConversation = (id: string): void => {
 	if (findConversation(id) === undefined) return;
 	conversations = conversations.filter((c) => c.id !== id);
-	prevByConversation.delete(id);
+	// `prev` is keyed per protocol, so a delete must prune every
+	// protocol's entry for the conversation, not just one.
+	for (const protocol of protocolNames) {
+		prevByConversationProtocol.delete(prevKey(id, protocol));
+	}
 	Effect.runFork(
 		Effect.catch(db.deleteConversation(id), (error) =>
 			Effect.logError(`failed to delete conversation: ${error}`),
