@@ -1,5 +1,5 @@
 import { type Conversation, type Db, settingsDefaults } from "@lib/db/types";
-import { Effect } from "effect";
+import { Effect, type Option } from "effect";
 
 const notImplemented = <A>(): Effect.Effect<A, string> =>
 	Effect.fail("tauri storage not implemented");
@@ -11,7 +11,7 @@ const notImplemented = <A>(): Effect.Effect<A, string> =>
  */
 export const tauri: Db = {
 	listConversations: () => notImplemented<Conversation[]>(),
-	getConversation: () => notImplemented<Conversation | undefined>(),
+	getConversation: () => notImplemented<Option.Option<Conversation>>(),
 	upsertConversation: () => notImplemented<void>(),
 	deleteConversation: () => notImplemented<void>(),
 	getSettings: () => Effect.succeed(settingsDefaults()),

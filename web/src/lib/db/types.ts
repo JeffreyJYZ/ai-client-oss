@@ -1,6 +1,6 @@
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import type { AttachmentPart } from "@lib/providers/types";
-import type { Effect } from "effect";
+import type { Effect, Option } from "effect";
 import { z } from "zod";
 
 const defaultProvider: ProtocolName = "responses";
@@ -51,7 +51,9 @@ export type Conversation = z.infer<typeof conversationSchema>;
 
 export interface Db {
 	listConversations(): Effect.Effect<Conversation[], string>;
-	getConversation(id: string): Effect.Effect<Conversation | undefined, string>;
+	getConversation(
+		id: string,
+	): Effect.Effect<Option.Option<Conversation>, string>;
 	upsertConversation(c: Conversation): Effect.Effect<void, string>;
 	deleteConversation(id: string): Effect.Effect<void, string>;
 	getSettings(): Effect.Effect<Settings>;

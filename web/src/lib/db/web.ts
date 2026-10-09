@@ -5,7 +5,7 @@ import {
 	Settings,
 	settingsDefaults,
 } from "@lib/db/types";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 
 const DB_NAME = "ai-client";
 const DB_VERSION = 1;
@@ -48,9 +48,17 @@ const withStore = <A>(
 	Effect.gen(function* () {
 		const open = yield* cachedDatabase;
 		const database = yield* open;
+		// `database.transaction` / `objectStore` are synchronous Web APIs that can
+		// throw; `Effect.try` turns that throw into a typed `string` failure
+		// instead of letting `Effect.callback` capture it as a defect.
+		const { transaction, request } = yield* Effect.try({
+			try: () => {
+				const transaction = database.transaction(STORE, mode);
+				return { transaction, request: run(transaction.objectStore(STORE)) };
+			},
+			catch: (cause) => String(cause),
+		});
 		return yield* Effect.callback<A, string>((resume) => {
-			const transaction = database.transaction(STORE, mode);
-			const request = run(transaction.objectStore(STORE));
 			request.onsuccess = () => resume(Effect.succeed(request.result));
 			request.onerror = () =>
 				resume(
@@ -77,12 +85,12 @@ const listConversations = (): Effect.Effect<Conversation[], string> =>
 
 const getConversation = (
 	id: string,
-): Effect.Effect<Conversation | undefined, string> =>
+): Effect.Effect<Option.Option<Conversation>, string> =>
 	Effect.map(
 		withStore<unknown>("readonly", (store) => store.get(id)),
 		(row) => {
 			const parsed = conversationSchema.safeParse(row);
-			return parsed.success ? parsed.data : undefined;
+			return parsed.success ? Option.some(parsed.data) : Option.none();
 		},
 	);
 
