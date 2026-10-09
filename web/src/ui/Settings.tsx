@@ -1,5 +1,6 @@
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
+import { PROVIDER_PRESETS } from "@lib/providers/presets";
 import { Effect } from "effect";
 import { useState } from "react";
 import { setSettings, useSettings } from "@/state/settings";
@@ -16,6 +17,8 @@ const BUTTON =
 /** Only tool the UI exposes; the request body sends it verbatim. */
 const WEB_SEARCH = "web_search_preview";
 const DEFAULT_MAX_RESULTS = 5;
+/** Sentinel for the preset select when no preset matches the current settings. */
+const CUSTOM_PRESET = "custom";
 
 export default function Settings() {
 	const settings = useSettings();
@@ -49,6 +52,22 @@ export default function Settings() {
 	const canFetch = settings.baseUrl.trim() !== "";
 	const canTest = canFetch && settings.model.trim() !== "";
 	const pending = modelsPending || testPending;
+
+	// Reflect the active preset by matching the current settings; anything that
+	// does not match a preset reads as "Custom".
+	const activePreset =
+		PROVIDER_PRESETS.find(
+			(preset) =>
+				preset.baseUrl === settings.baseUrl &&
+				preset.protocol === settings.provider,
+		)?.id ?? CUSTOM_PRESET;
+
+	const selectPreset = (id: string): void => {
+		if (id === CUSTOM_PRESET) return;
+		const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === id);
+		if (preset === undefined) return;
+		setSettings({ baseUrl: preset.baseUrl, provider: preset.protocol });
+	};
 
 	/**
 	 * Runner for "Fetch models": funnels the `listModels` string error channel
@@ -110,6 +129,21 @@ export default function Settings() {
 						No base URL set — sending is disabled until you add one below.
 					</div>
 				) : null}
+				<label className={LABEL}>
+					Preset
+					<select
+						value={activePreset}
+						onChange={(event) => selectPreset(event.target.value)}
+						className={INPUT}
+					>
+						{PROVIDER_PRESETS.map((preset) => (
+							<option key={preset.id} value={preset.id}>
+								{preset.label}
+							</option>
+						))}
+						<option value={CUSTOM_PRESET}>Custom</option>
+					</select>
+				</label>
 				<label className={LABEL}>
 					Provider
 					<select
