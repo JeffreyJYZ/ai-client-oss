@@ -102,17 +102,20 @@ jobs:
         run: bun install --frozen-lockfile
         working-directory: web
 
-      - name: Guard tag version matches tauri.conf.json
+      - name: Resolve and verify the release version
+        id: release
         shell: bash
+        env:
+          TAG: ${{ needs.version.outputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
-          tag="${{ needs.version.outputs.tag || github.ref_name }}"
-          expected="${tag#desktop-v}"
+          version="${TAG#desktop-v}"
           got="$(node -p "require('./web/src-tauri/tauri.conf.json').version")"
-          if [ "$expected" != "$got" ]; then
-            echo "tag version '${expected}' does not match tauri.conf.json version '${got}'" >&2
+          if [ "$version" != "$got" ]; then
+            echo "tag version '${version}' does not match tauri.conf.json version '${got}'" >&2
             exit 1
           fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
@@ -127,7 +130,7 @@ jobs:
           projectPath: web
           tauriScript: bun run tauri
           tagName: ${{ needs.version.outputs.tag || github.ref_name }}
-          releaseName: Open Source AI Client ${{ needs.version.outputs.tag || github.ref_name }}
+          releaseName: Open Source AI Client ${{ steps.release.outputs.version }}
           releaseBody: |
             Download the installer for your platform.
 
