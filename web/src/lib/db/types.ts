@@ -29,6 +29,25 @@ export const emptyProviderConfig = (id: string): ProviderConfig =>
 	providerConfigSchema.parse({ id });
 
 /**
+ * A saved bundle of provider + model + system prompt, applied in one pick.
+ * `providerId` points at a `ProviderConfig`; a dangling pointer is tolerated
+ * (applying then only sets the system prompt).
+ */
+export const profileSchema = z.object({
+	id: z.string(),
+	name: z.string().default(""),
+	providerId: z.string().default(""),
+	model: z.string().default(""),
+	systemPrompt: z.string().default(""),
+});
+
+export type Profile = z.infer<typeof profileSchema>;
+
+/** A fresh, empty profile: only `id` is required, the rest fall to defaults. */
+export const emptyProfile = (id: string): Profile =>
+	profileSchema.parse({ id });
+
+/**
  * Canonical persisted settings shape. `src/lib/db` owns this so `lib` never has
  * to depend on `state`; the settings store imports it from `@lib/db`. Defaults
  * seed one empty provider and point `activeProviderId` at it.
@@ -38,6 +57,8 @@ export const Settings = z.object({
 		.array(providerConfigSchema)
 		.default(() => [emptyProviderConfig(DEFAULT_PROVIDER_ID)]),
 	activeProviderId: z.string().default(DEFAULT_PROVIDER_ID),
+	/** Saved provider+model+system-prompt bundles; empty until the user adds one. */
+	profiles: z.array(profileSchema).default([]),
 	tools: z
 		.array(
 			z.object({

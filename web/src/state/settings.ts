@@ -1,6 +1,8 @@
 import {
 	db,
+	emptyProfile,
 	emptyProviderConfig,
+	type Profile,
 	type ProviderConfig,
 	Settings,
 	settingsDefaults,
@@ -113,4 +115,35 @@ export const removeProvider = (id: string): void => {
 export const selectProvider = (id: string): void => {
 	if (!current.providers.some((provider) => provider.id === id)) return;
 	setSettings({ activeProviderId: id });
+};
+
+const newProfileId = (): string => `profile-${crypto.randomUUID()}`;
+
+/**
+ * Append a fresh profile and return its id. Defaults its `providerId` to the
+ * active provider so a new profile starts pointing at something real.
+ */
+export const addProfile = (providerId = current.activeProviderId): string => {
+	const profile: Profile = { ...emptyProfile(newProfileId()), providerId };
+	setSettings({ profiles: [...current.profiles, profile] });
+	return profile.id;
+};
+
+/** Patch one profile's fields; `id` is immutable and an unknown id is a no-op. */
+export const updateProfile = (
+	id: string,
+	patch: Partial<Omit<Profile, "id">>,
+): void => {
+	setSettings({
+		profiles: current.profiles.map((profile) =>
+			profile.id === id ? { ...profile, ...patch } : profile,
+		),
+	});
+};
+
+/** Remove a profile; an unknown id is a no-op. */
+export const removeProfile = (id: string): void => {
+	setSettings({
+		profiles: current.profiles.filter((profile) => profile.id !== id),
+	});
 };

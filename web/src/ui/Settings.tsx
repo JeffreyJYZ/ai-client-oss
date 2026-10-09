@@ -1,14 +1,17 @@
-import type { ProviderConfig } from "@lib/db";
+import type { Profile, ProviderConfig } from "@lib/db";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
 import { PROVIDER_PRESETS } from "@lib/providers/presets";
 import { Effect } from "effect";
 import { useState } from "react";
 import {
+	addProfile,
 	addProvider,
+	removeProfile,
 	removeProvider,
 	selectProvider,
 	setSettings,
+	updateProfile,
 	updateProvider,
 	useSettings,
 } from "@/state/settings";
@@ -37,6 +40,7 @@ export default function Settings() {
 	// `editingId` only gates the edit form; the form always edits the active
 	// provider (Edit/Add select it first), so every change writes to one entry.
 	const [editingId, setEditingId] = useState<string | null>(null);
+	const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
 	const [modelsPending, setModelsPending] = useState(false);
 	const [testPending, setTestPending] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
@@ -84,6 +88,30 @@ export default function Settings() {
 		if (editingId === id) setEditingId(null);
 		setMessage(null);
 	};
+
+	const editingProfile = settings.profiles.find(
+		(profile) => profile.id === editingProfileId,
+	);
+
+	const patchProfile = (patch: Partial<Omit<Profile, "id">>): void => {
+		if (editingProfile === undefined) return;
+		updateProfile(editingProfile.id, patch);
+	};
+
+	const addProfileEntry = (): void => {
+		setEditingProfileId(addProfile());
+	};
+
+	const removeProfileEntry = (id: string): void => {
+		removeProfile(id);
+		if (editingProfileId === id) setEditingProfileId(null);
+	};
+
+	// Models offered for the profile's chosen provider, from its last fetch.
+	const editingProfileModels =
+		settings.providers.find(
+			(provider) => provider.id === editingProfile?.providerId,
+		)?.models ?? [];
 
 	// Reflect the active preset by matching the provider; anything that does
 	// not match a preset reads as "Custom".
@@ -355,6 +383,124 @@ export default function Settings() {
 								</span>
 							) : null}
 						</div>
+					</div>
+				) : null}
+
+				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
+					<div className="flex items-center justify-between gap-3">
+						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+							Profiles
+						</h3>
+						<button type="button" onClick={addProfileEntry} className={BUTTON}>
+							Add profile
+						</button>
+					</div>
+					{settings.profiles.length === 0 ? (
+						<p className="text-sm text-neutral-500">
+							No profiles yet — add one to bundle a provider, model and system
+							prompt.
+						</p>
+					) : (
+						<ul className="flex flex-col gap-2">
+							{settings.profiles.map((profile) => (
+								<li
+									key={profile.id}
+									className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
+								>
+									<span className="flex min-w-0 flex-1 flex-col items-start text-left">
+										<span className="w-full truncate text-sm text-neutral-100">
+											{profile.name.trim() !== ""
+												? profile.name
+												: "Untitled profile"}
+										</span>
+										<span className="w-full truncate text-xs text-neutral-500">
+											{profile.model.trim() !== "" ? profile.model : "no model"}
+										</span>
+									</span>
+									<button
+										type="button"
+										onClick={() => setEditingProfileId(profile.id)}
+										className={BUTTON}
+									>
+										Edit
+									</button>
+									<button
+										type="button"
+										onClick={() => removeProfileEntry(profile.id)}
+										className={BUTTON}
+									>
+										Remove
+									</button>
+								</li>
+							))}
+						</ul>
+					)}
+				</div>
+
+				{editingProfile !== undefined ? (
+					<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
+						<p className="text-xs uppercase tracking-widest text-neutral-500">
+							Editing profile
+						</p>
+						<label className={LABEL}>
+							Name
+							<input
+								type="text"
+								value={editingProfile.name}
+								onChange={(event) => patchProfile({ name: event.target.value })}
+								placeholder="Fast"
+								className={INPUT}
+							/>
+						</label>
+						<label className={LABEL}>
+							Provider
+							<select
+								value={editingProfile.providerId}
+								onChange={(event) =>
+									patchProfile({ providerId: event.target.value })
+								}
+								className={INPUT}
+							>
+								<option value="">—</option>
+								{settings.providers.map((provider) => (
+									<option key={provider.id} value={provider.id}>
+										{provider.label.trim() !== ""
+											? provider.label
+											: "Untitled provider"}
+									</option>
+								))}
+							</select>
+						</label>
+						<label className={LABEL}>
+							Model
+							<input
+								type="text"
+								list="profile-model-suggestions"
+								value={editingProfile.model}
+								onChange={(event) =>
+									patchProfile({ model: event.target.value })
+								}
+								placeholder="gpt-4o-mini"
+								className={INPUT}
+							/>
+						</label>
+						<datalist id="profile-model-suggestions">
+							{editingProfileModels.map((id) => (
+								<option key={id} value={id} />
+							))}
+						</datalist>
+						<label className={LABEL}>
+							System prompt
+							<textarea
+								rows={4}
+								value={editingProfile.systemPrompt}
+								onChange={(event) =>
+									patchProfile({ systemPrompt: event.target.value })
+								}
+								placeholder="Instructions applied when this profile is picked…"
+								className={INPUT}
+							/>
+						</label>
 					</div>
 				) : null}
 

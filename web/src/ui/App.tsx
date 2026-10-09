@@ -4,6 +4,7 @@ import { useChat } from "@/state/chat";
 import ChatPane from "@/ui/ChatPane";
 import Composer from "@/ui/Composer";
 import ConversationList from "@/ui/ConversationList";
+import ProfilePicker from "@/ui/ProfilePicker";
 import ProviderPicker from "@/ui/ProviderPicker";
 import Settings from "@/ui/Settings";
 import SystemPrompt from "@/ui/SystemPrompt";
@@ -22,6 +23,7 @@ export default function App() {
 					</h1>
 					<div className="flex items-center gap-2">
 						<SystemPrompt />
+						<ProfilePicker />
 						<ProviderPicker />
 						<button
 							type="button"
