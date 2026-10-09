@@ -2,6 +2,7 @@ import type { Effect, Stream } from "effect";
 import type { z } from "zod";
 
 export interface Chunk {
+	readonly kind: "text" | "reasoning";
 	readonly text: string;
 }
 

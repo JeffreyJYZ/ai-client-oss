@@ -26,6 +26,16 @@ export default function Message({ message }: MessageProps) {
 				<div className="mb-1 text-[10px] uppercase tracking-widest text-neutral-400">
 					{ROLE_LABEL[message.role]}
 				</div>
+				{message.reasoning !== undefined && message.reasoning !== "" ? (
+					<details className="mb-2 rounded border border-neutral-700/60 bg-neutral-900/60 px-2 py-1.5">
+						<summary className="cursor-pointer select-none text-[10px] uppercase tracking-widest text-neutral-500">
+							Thinking…
+						</summary>
+						<p className="mt-1 whitespace-pre-wrap break-words text-xs italic text-neutral-500">
+							{message.reasoning}
+						</p>
+					</details>
+				) : null}
 				{message.text === "" ? null : (
 					<p className="whitespace-pre-wrap break-words text-sm">
 						{message.text}

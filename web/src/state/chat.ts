@@ -1,7 +1,7 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { type ProtocolName, providers } from "@lib/providers";
-import type { AttachmentPart, SendCtx } from "@lib/providers/types";
+import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
 import { getSettings } from "./settings";
@@ -136,16 +136,24 @@ const persistConversationById = (id: string): void => {
 	if (conversation !== undefined) persistConversation(conversation);
 };
 
-const appendText = (
+/**
+ * Append one streamed chunk to the assistant message, routed by `kind`:
+ * `reasoning` (thinking) lands in `reasoning`, `text` (the answer) in `text`,
+ * so the two never concatenate into one squished bubble.
+ */
+const appendChunk = (
 	conversationId: string,
 	messageId: string,
-	text: string,
+	chunk: Chunk,
 ): void => {
 	updateConversation(conversationId, (conversation) => ({
 		...conversation,
-		messages: conversation.messages.map((m) =>
-			m.id === messageId ? { ...m, text: m.text + text } : m,
-		),
+		messages: conversation.messages.map((m) => {
+			if (m.id !== messageId) return m;
+			return chunk.kind === "reasoning"
+				? { ...m, reasoning: (m.reasoning ?? "") + chunk.text }
+				: { ...m, text: m.text + chunk.text };
+		}),
 	}));
 	refresh();
 };
@@ -251,8 +259,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		const stream = yield* SendMsg(protocol, ctx);
 		yield* Stream.runForEach(stream, (chunk) =>
 			Effect.sync(() => {
-				assistantText += chunk.text;
-				appendText(conversationId, assistantId, chunk.text);
+				// Only the answer seeds the next turn; reasoning is display-only.
+				if (chunk.kind === "text") assistantText += chunk.text;
+				appendChunk(conversationId, assistantId, chunk);
 			}),
 		);
 	});

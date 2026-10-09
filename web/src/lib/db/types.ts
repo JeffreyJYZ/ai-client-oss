@@ -33,6 +33,7 @@ export const chatMessageSchema = z.object({
 	id: z.string(),
 	role: z.enum(["user", "assistant", "error"]),
 	text: z.string(),
+	reasoning: z.string().optional(),
 	parts: z.array(z.custom<AttachmentPart>()).optional(),
 });
 
