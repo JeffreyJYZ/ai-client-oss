@@ -13,6 +13,12 @@ export interface ChatSnapshot {
 	readonly activeId: string;
 	readonly messages: readonly ChatMessage[];
 	readonly status: ChatStatus;
+	/**
+	 * True once the initial `db.listConversations()` load has settled (success or
+	 * failure). The UI gates the composer on this so a send cannot race hydration
+	 * and get dropped when the store replaces its bootstrap conversation.
+	 */
+	readonly hydrated: boolean;
 }
 
 const DEFAULT_TITLE = "New chat";
@@ -55,11 +61,13 @@ const notify = (): void => {
 let conversations: Conversation[] = [];
 let activeId = "";
 let status: ChatStatus = "idle";
+let hydrated = false;
 let state: ChatSnapshot = {
 	conversations: [],
 	activeId: "",
 	messages: [],
 	status: "idle",
+	hydrated: false,
 };
 
 const activeConversation = (): Conversation | undefined =>
@@ -75,6 +83,7 @@ const refresh = (): void => {
 		activeId,
 		messages: activeConversation()?.messages ?? [],
 		status,
+		hydrated,
 	};
 	notify();
 };
@@ -321,6 +330,12 @@ state = {
 	activeId,
 	messages: [],
 	status: "idle",
+	hydrated: false,
+};
+
+const finishHydration = (): void => {
+	hydrated = true;
+	refresh();
 };
 
 Effect.runFork(
@@ -328,16 +343,18 @@ Effect.runFork(
 		Effect.sync(() => {
 			if (list.length === 0) {
 				persistConversationById(bootstrap.id);
-				return;
+			} else {
+				const ordered = sortByRecency(list);
+				conversations = ordered;
+				activeId = ordered[0].id;
 			}
-			const ordered = sortByRecency(list);
-			conversations = ordered;
-			activeId = ordered[0].id;
-			refresh();
 		}),
 	).pipe(
 		Effect.catch((error) =>
 			Effect.logError(`failed to load conversations: ${error}`),
 		),
+		// Runs on success and failure alike, so the composer un-gates even if the
+		// load failed — never leave the UI permanently disabled.
+		Effect.ensuring(Effect.sync(finishHydration)),
 	),
 );

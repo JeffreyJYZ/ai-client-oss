@@ -1,5 +1,19 @@
+@import "tailwindcss";
 @import "ui/fonts.css";
 
-:root {
-	--font-sf-pro: "SF Pro";
+html {
+	font-family: var(--mono);
+	background-color: #0a0a0a;
+	color: whitesmoke;
+	height: 100%;
+}
+
+body {
+	height: inherit;
+	padding: 0;
+	margin: 0;
+}
+
+#root {
+	height: inherit;
 }
