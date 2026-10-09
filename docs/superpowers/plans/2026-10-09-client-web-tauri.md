@@ -461,6 +461,18 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 28: Don't yank the transcript while streaming
+
+**Files:**
+- Modify: `web/src/ui/ChatPane.tsx`
+
+- [ ] **Step 1:** Track whether the user is "pinned to the bottom" (e.g. a ref updated on `onScroll`: pinned when `scrollHeight - scrollTop - clientHeight` is under a small threshold). Auto-scroll to the bottom on new content ONLY while pinned. When the user has scrolled up, do NOT force-scroll — let them read.
+- [ ] **Step 2:** (Optional) a small "jump to latest" affordance when unpinned — only if cheap.
+- [ ] **Step 3:** Verify — tsc/biome/LS + a browser smoke via `agent-browser`: start a long reply, scroll up mid-stream → the view stays put; scroll back to the bottom → it follows again.
+- [ ] **Step 4:** Commit — `fix(ui): don't force-scroll the transcript while streaming if the user scrolled up`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
