@@ -1,1 +1,5 @@
 @import "ui/fonts.css";
+
+:root {
+	--font-sf-pro: "SF Pro";
+}
