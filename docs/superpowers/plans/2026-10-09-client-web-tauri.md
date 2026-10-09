@@ -173,17 +173,25 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
-### Task 12: SSE parser — handle chat/completions + responses envelopes
+### Task 12: SSE parser — envelopes + reasoning/text tagging
 
 **Files:**
-- Modify: `web/src/lib/providers/send.ts`
+- Modify: `web/src/lib/providers/send.ts` (parse + tag)
+- Modify: `web/src/lib/providers/types.ts` (`Chunk` gains `kind`)
+- Modify: `web/src/lib/db/types.ts` (`ChatMessage` gains `reasoning?`)
+- Modify: `web/src/state/chat.ts` (route chunks to `reasoning` vs `text`)
+- Modify: `web/src/ui/Message.tsx` (dimmed "Thinking…" block above the answer)
 
 **Interfaces:**
-- Produces: `sendStream` unchanged; `parseLine` (internal) now reads more envelopes.
+- Produces: `Chunk = { kind: "text" | "reasoning"; text: string }`; `ChatMessage.reasoning?: string`.
 
-- [ ] **Step 1:** Widen `parseLine` — for a `data:` line, extract text from, in order: a top-level `delta` (string, Responses events); `choices[0].delta.content` (string) and `choices[0].text` (chat/completions); a top-level `output_text`/`text` (string); else `null`. Still skip `[DONE]`, blanks, and non-`data:` lines. Keep it total (never throws) and pure.
-- [ ] **Step 2:** Verify — tsc/biome/LS + a browser smoke against a **local mock SSE** emitting `data: {"choices":[{"delta":{"content":"Hi"}}]}` (spin a throwaway `bun` server; do not commit it).
-- [ ] **Step 3:** Commit — `fix(providers): parse chat/completions + responses SSE envelopes`.
+- [ ] **Step 1:** `web/src/lib/providers/types.ts` — `Chunk` gains `readonly kind: "text" | "reasoning"`.
+- [ ] **Step 2:** `web/src/lib/providers/send.ts` — `parseLine` returns a tagged chunk: a `data:` payload is parsed; **answer** = a top-level `delta` where the event `type` has no "reasoning" (Responses `response.output_text.delta`), or `choices[0].delta.content` / `choices[0].text` (chat/completions); **reasoning** = a top-level `delta` whose event `type` includes `reasoning` (Responses `response.reasoning_summary_text.delta`), or `choices[0].delta.reasoning_content` / `.reasoning` (chat/completions). Skip `[DONE]`, blanks, non-`data:` lines, and unknown shapes (`null`). Keep it total and pure.
+- [ ] **Step 3:** `web/src/lib/db/types.ts` — `ChatMessage` schema + type gain `reasoning?: string`.
+- [ ] **Step 4:** `web/src/state/chat.ts` — route streamed chunks: `kind === "reasoning"` appends to the assistant message's `reasoning`, `kind === "text"` to its `text`.
+- [ ] **Step 5:** `web/src/ui/Message.tsx` — when `reasoning` is present, render a dimmed/collapsible "Thinking…" block above the answer text.
+- [ ] **Step 6:** Verify — tsc/biome/LS + a browser smoke against a **local mock SSE** that emits a reasoning event then an output event (throwaway `bun` server, not committed): the thinking appears in its own block, the answer separate, no squish.
+- [ ] **Step 7:** Commit — `fix(providers): parse SSE envelopes + separate reasoning from the answer`.
 
 ---
 
