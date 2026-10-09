@@ -153,6 +153,26 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 11: Fetch models + test connection (bare paths)
+
+**Files:**
+- Create: `web/src/lib/providers/models.ts`
+- Modify: `web/src/lib/providers/responses.ts` (endpoint `/v1/responses` → `/responses`)
+- Modify: `web/src/lib/providers/chatCompletions.ts` (endpoint `/v1/chat/completions` → `/chat/completions`)
+- Modify: `web/src/ui/Settings.tsx` (Fetch models + Test connection buttons)
+
+**Interfaces:**
+- Consumes: `Settings.baseUrl` / `apiKey`.
+- Produces: `listModels(baseUrl: string, apiKey: string | undefined): Effect.Effect<string[], string>`.
+
+- [ ] **Step 1:** `models.ts` — `listModels` GETs `${baseUrl}/models` with `Authorization: Bearer <apiKey>` when the key is set, parses `data[].id` (string[]), and `Effect.fail(String)` on non-2xx (mirror `send.ts`'s Effect pattern; no `async`/`await`/`new Promise`).
+- [ ] **Step 2:** Drop `/v1` from both providers' `endpoint` fields (the base URL now carries the version).
+- [ ] **Step 3:** `Settings.tsx` — a **"Fetch models"** button that fills a `<datalist>` for the existing free-text Model input; a **"Test connection"** button that runs the same call and shows `✓ Connected (N models)` or the error string; loading states on both.
+- [ ] **Step 4:** Verify — tsc/biome/LS + browser smoke.
+- [ ] **Step 5:** Commit — `feat(ui): fetch models + test connection; bare base-url paths`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
