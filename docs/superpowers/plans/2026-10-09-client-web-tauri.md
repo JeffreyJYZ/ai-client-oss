@@ -473,6 +473,24 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 29: Break and mark the tool-call seam
+
+**Files:**
+- Modify: `web/src/lib/providers/types.ts` (`Chunk.kind` gains `"tool"`)
+- Modify: `web/src/lib/providers/send.ts` (recognize tool-call deltas; stop tagging Responses function-call arguments as answer text)
+- Modify: `web/src/state/chat.ts` (break the answer run + render a marker at the boundary)
+
+**Interfaces:**
+- Extends: `Chunk = { kind: "text" | "reasoning" | "tool"; text: string }` — for `"tool"`, `text` is the tool/function name.
+
+- [ ] **Step 1:** `types.ts` — `Chunk.kind` gains `"tool"` (doc: `text` carries the function name).
+- [ ] **Step 2:** `send.ts` — `parseLine` emits `{ kind: "tool", text: <name> }` for a chat/completions `choices[0].delta.tool_calls[…]` whose `function.name` is non-empty (argument-only continuations carry no name → `null`), a Responses `output_item.added` item typed `function_call`, and a Responses `web_search_call.*.in_progress`. Returns `null` — **not** answer text — for `response.function_call_arguments.delta` (previously mistagged `text`, leaking the raw arguments JSON into the reply).
+- [ ] **Step 3:** `chat.ts` — `appendChunk` routes `kind: "tool"`: append a display-only marker line to `text` (`🔍 searched the web` when the name matches `/search/i`, else `🔧 <name>`) fenced by blank lines, so the pre-call and post-call runs no longer glue. `assistantText` (the next-turn seed) accumulates `kind === "text"` only, so the marker never reaches the wire.
+- [ ] **Step 4:** Verify — tsc/biome/LS + a browser smoke against a throwaway mock SSE (`content` → a `tool_calls` delta → `content`): the marker sits **between** the two runs, and the mock's logged next request body contains no marker.
+- [ ] **Step 5:** Commit — `fix(providers): break and mark the tool-call seam`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
