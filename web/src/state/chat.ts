@@ -13,6 +13,8 @@ export interface ChatSnapshot {
 	readonly activeId: string;
 	readonly messages: readonly ChatMessage[];
 	readonly status: ChatStatus;
+	/** Active conversation's system prompt; `""` when unset. */
+	readonly systemPrompt: string;
 	/**
 	 * True once the initial `db.listConversations()` load has settled (success or
 	 * failure). The UI gates the composer on this so a send cannot race hydration
@@ -67,6 +69,7 @@ let state: ChatSnapshot = {
 	activeId: "",
 	messages: [],
 	status: "idle",
+	systemPrompt: "",
 	hydrated: false,
 };
 
@@ -83,6 +86,7 @@ const refresh = (): void => {
 		activeId,
 		messages: activeConversation()?.messages ?? [],
 		status,
+		systemPrompt: activeConversation()?.systemPrompt ?? "",
 		hydrated,
 	};
 	notify();
@@ -231,6 +235,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		model: active.model,
 		parts,
 		tools: settings.tools,
+		systemPrompt: conversation.systemPrompt,
 	};
 
 	// Body that would be sent *this* turn. The provider's own `send` builds the
@@ -332,6 +337,19 @@ export const renameConversation = (id: string, title: string): void => {
 	persistConversationById(id);
 };
 
+/** Update the active conversation's system prompt and persist it. */
+export const setSystemPrompt = (text: string): void => {
+	const conversation = activeConversation();
+	if (conversation === undefined) return;
+	updateConversation(conversation.id, (current) => ({
+		...current,
+		systemPrompt: text,
+		updatedAt: Date.now(),
+	}));
+	refresh();
+	persistConversationById(conversation.id);
+};
+
 export const deleteConversation = (id: string): void => {
 	if (findConversation(id) === undefined) return;
 	conversations = conversations.filter((c) => c.id !== id);
@@ -362,6 +380,7 @@ state = {
 	activeId,
 	messages: [],
 	status: "idle",
+	systemPrompt: "",
 	hydrated: false,
 };
 

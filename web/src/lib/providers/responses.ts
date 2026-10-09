@@ -25,6 +25,9 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 	return {
 		...send,
 		model: ctx.model,
+		// Replace any prompt carried on the previous turn's body rather than let
+		// it accumulate; `undefined` drops the key at `JSON.stringify`.
+		instructions: ctx.systemPrompt || undefined,
 		input: [
 			...prior,
 			{

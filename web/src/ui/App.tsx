@@ -6,6 +6,7 @@ import Composer from "@/ui/Composer";
 import ConversationList from "@/ui/ConversationList";
 import ProviderPicker from "@/ui/ProviderPicker";
 import Settings from "@/ui/Settings";
+import SystemPrompt from "@/ui/SystemPrompt";
 
 export default function App() {
 	const { messages, status } = useChat();
@@ -20,6 +21,7 @@ export default function App() {
 						Open Source AI Client
 					</h1>
 					<div className="flex items-center gap-2">
+						<SystemPrompt />
 						<ProviderPicker />
 						<button
 							type="button"

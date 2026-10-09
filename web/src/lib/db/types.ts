@@ -67,6 +67,8 @@ export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export const conversationSchema = z.object({
 	id: z.string(),
 	title: z.string(),
+	/** Per-conversation system prompt, sent on every request. Blank = none. */
+	systemPrompt: z.string().optional(),
 	messages: z.array(chatMessageSchema),
 	createdAt: z.number(),
 	updatedAt: z.number(),

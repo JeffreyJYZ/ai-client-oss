@@ -25,6 +25,8 @@ export interface SendCtx {
 	readonly model: string;
 	readonly parts?: readonly AttachmentPart[];
 	readonly tools?: readonly ToolSpec[];
+	/** Per-conversation system prompt; absent/blank sends none. */
+	readonly systemPrompt?: string;
 }
 
 export interface Provider<Send> {

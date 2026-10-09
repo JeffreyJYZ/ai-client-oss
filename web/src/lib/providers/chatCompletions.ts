@@ -8,7 +8,14 @@ const endpoint = "/chat/completions";
 const template = { model: "" };
 
 const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
-	const prior = (send as { messages?: unknown[] }).messages ?? [];
+	// Drop system messages prepended on an earlier turn: the prompt below is
+	// rebuilt from `ctx` each turn so edits replace it instead of stacking.
+	const prior = ((send as { messages?: unknown[] }).messages ?? []).filter(
+		(message) => (message as { role?: unknown }).role !== "system",
+	);
+	const system = ctx.systemPrompt
+		? [{ role: "system" as const, content: ctx.systemPrompt }]
+		: [];
 	const parts = ctx.parts ?? [];
 	const content =
 		parts.length === 0
@@ -30,7 +37,7 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 	return {
 		...send,
 		model: ctx.model,
-		messages: [...prior, { role: "user", content }],
+		messages: [...system, ...prior, { role: "user", content }],
 		...(ctx.tools ? { tools: ctx.tools } : {}),
 	};
 };
