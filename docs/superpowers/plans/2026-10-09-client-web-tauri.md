@@ -211,7 +211,7 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
-### Task 14: Built-in provider presets (OpenAI, OpenRouter)
+### Task 14: Built-in provider presets (OpenAI, OpenRouter, OpenCode Zen/Go, Command Code)
 
 **Files:**
 - Create: `web/src/lib/providers/presets.ts`
@@ -220,10 +220,18 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 **Interfaces:**
 - Produces: `PROVIDER_PRESETS: readonly { id: string; label: string; baseUrl: string; protocol: ProtocolName }[]`
 
-- [ ] **Step 1:** `presets.ts` — `PROVIDER_PRESETS` with the base-URL presets: `openai-responses` → `https://api.openai.com/v1` + `responses`; `openai-chat` → `https://api.openai.com/v1` + `chatcompletions`; `openrouter` → `https://openrouter.ai/api/v1` + `chatcompletions`. (No attribution headers.)
+- [ ] **Step 1:** `presets.ts` — `PROVIDER_PRESETS` (base URLs, all OpenAI-compatible; each is a `${baseUrl}` + bare provider path, e.g. `…/chat/completions`):
+  - `openai-responses` → `https://api.openai.com/v1` + `responses`
+  - `openai-chat` → `https://api.openai.com/v1` + `chatcompletions`
+  - `openrouter` → `https://openrouter.ai/api/v1` + `chatcompletions`
+  - `opencode-zen` → `https://opencode.ai/zen/v1` + `chatcompletions`
+  - `opencode-go` → `https://opencode.ai/zen/go/v1` + `chatcompletions`
+  - `opencode-go-plus` → `https://opencode.ai/zen/go/v1` + `chatcompletions` (Go Plus shares Go's endpoint; differ only by subscription limits)
+  - `commandcode` → `https://api.commandcode.ai/provider/v1` + `chatcompletions`
+  (No attribution headers. Code/Command Code also expose `/responses`; `chatcompletions` is the safe default, and the protocol stays switchable.)
 - [ ] **Step 2:** `Settings.tsx` — a "Preset" `<select>` listing the presets plus a "Custom" option; choosing a preset sets `baseUrl` + `provider` via `setSettings`; "Custom" leaves the typed values untouched. The base URL stays editable.
 - [ ] **Step 3:** Verify — tsc/biome/LS + browser smoke (pick OpenRouter → base URL + provider update, models fetch hits OpenRouter's `/models`).
-- [ ] **Step 4:** Commit — `feat(ui): built-in provider presets (OpenAI, OpenRouter)`.
+- [ ] **Step 4:** Commit — `feat(ui): built-in provider presets (OpenAI, OpenRouter, OpenCode, Command Code)`.
 
 ---
 
