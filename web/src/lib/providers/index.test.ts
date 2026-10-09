@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { SendMsg } from "@lib/api";
-import { protocolNames, providers } from "@lib/providers";
+import { type ProtocolName, protocolNames, providers } from "@lib/providers";
 import type { SendCtx } from "@lib/providers/types";
 import { Effect } from "effect";
 
@@ -22,5 +22,12 @@ describe("registry", () => {
 			providers.responses.parse(providers.responses.template),
 		);
 		expect(exit._tag).toBe("Success");
+	});
+
+	test("SendMsg fails cleanly on an unknown protocol", async () => {
+		const exit = await Effect.runPromiseExit(
+			SendMsg("nope" as ProtocolName, ctx),
+		);
+		expect(exit._tag).toBe("Failure");
 	});
 });

@@ -61,3 +61,13 @@ test("sends a bearer token when apiKey is set", async () => {
 	await Effect.runPromise(providers.responses.send(ctx({ apiKey: "secret" })));
 	expect(seen?.get("authorization")).toBe("Bearer secret");
 });
+
+test("skips a malformed data line instead of failing the stream", async () => {
+	globalThis.fetch = (async () =>
+		new Response('data: {not json\n\ndata: {"delta":"ok"}\n\n', {
+			status: 200,
+		})) as unknown as typeof fetch;
+
+	const chunks = await Effect.runPromise(providers.responses.send(ctx()));
+	expect(await collectText(chunks)).toEqual(["ok"]);
+});

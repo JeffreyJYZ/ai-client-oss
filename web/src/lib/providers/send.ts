@@ -10,6 +10,12 @@ const parseLine = (line: string): Chunk | null => {
 	return typeof event.delta === "string" ? { text: event.delta } : null;
 };
 
+const parseLineSafe = (line: string): Effect.Effect<Chunk | null> =>
+	Effect.try({
+		try: () => parseLine(line),
+		catch: () => null,
+	}).pipe(Effect.orElseSucceed((): Chunk | null => null));
+
 export const sendStream = (
 	url: string,
 	apiKey: string | undefined,
@@ -48,7 +54,7 @@ export const sendStream = (
 		}).pipe(
 			Stream.decodeText(),
 			Stream.splitLines,
-			Stream.map(parseLine),
+			Stream.mapEffect(parseLineSafe),
 			Stream.filter((chunk): chunk is Chunk => chunk !== null),
 		);
 	});
