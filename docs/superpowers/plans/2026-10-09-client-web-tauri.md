@@ -433,6 +433,23 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 26: App mark — favicon (web + desktop) + Tauri window title
+
+**Files:**
+- Create: `web/public/favicon.svg`
+- Modify: `web/index.html` (icon link)
+- Modify: `web/src-tauri/tauri.conf.json` (window title)
+- Regenerate: `web/src-tauri/icons/*` (via `bunx tauri icon`)
+
+- [ ] **Step 1:** `web/public/favicon.svg` — a minimal **geometric** mark (a diamond/hexagon), `neutral-200` on a near-black (`#0a0a0a`) rounded square, `viewBox="0 0 32 32"`, no text.
+- [ ] **Step 2:** `web/index.html` — add `<link rel="icon" type="image/svg+xml" href="/favicon.svg" />` (plus a PNG/`.ico` fallback if trivially available).
+- [ ] **Step 3:** Rasterize the SVG to a 1024×1024 PNG using whatever is installed (`qlmanage -t -s 1024 -o <dir>` on macOS, `rsvg-convert`, or `magick`), then `bunx tauri icon <png>` to regenerate `web/src-tauri/icons/`.
+- [ ] **Step 4:** `web/src-tauri/tauri.conf.json` — set `app.windows[0].title` to `"Open Source AI Client"`.
+- [ ] **Step 5:** Verify — `bunx tsc -b --force` / `biome check .` / effect-LS; a browser smoke shows the tab icon; `bunx tauri dev` shows the window title.
+- [ ] **Step 6:** Commit — `feat: app mark (geometric favicon) + Tauri window title`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
