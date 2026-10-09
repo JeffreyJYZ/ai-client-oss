@@ -221,10 +221,15 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	};
 
 	// Body that would be sent *this* turn. The provider's own `send` builds the
-	// identical request from the same ctx; we keep this only to seed the next turn.
+	// identical request from the same ctx; we keep this — plus the streamed reply
+	// appended on success — to seed the next turn.
 	const nextBody = (
 		provider.buildRequest as (send: unknown, ctx: SendCtx) => unknown
 	)(prev ?? provider.template, ctx);
+	const appendAssistant = provider.appendAssistant as (
+		send: unknown,
+		text: string,
+	) => unknown;
 
 	const myRun = ++runSeq;
 	streamConversationId = conversationId;
@@ -241,18 +246,31 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	status = "streaming";
 	refresh();
 
+	let assistantText = "";
 	const run = Effect.gen(function* () {
 		const stream = yield* SendMsg(protocol, ctx);
 		yield* Stream.runForEach(stream, (chunk) =>
-			Effect.sync(() => appendText(conversationId, assistantId, chunk.text)),
+			Effect.sync(() => {
+				assistantText += chunk.text;
+				appendText(conversationId, assistantId, chunk.text);
+			}),
 		);
 	});
 
+	// On success, seed the next turn with the reply appended so the model sees
+	// its own prior answer (`[user, assistant, user]`, not `[user, user]`).
 	activeFiber = Effect.runFork(
 		Effect.exit(
 			run.pipe(
 				Effect.onExit((exit) =>
-					Effect.sync(() => finalize(myRun, conversationId, exit, nextBody)),
+					Effect.sync(() =>
+						finalize(
+							myRun,
+							conversationId,
+							exit,
+							appendAssistant(nextBody, assistantText),
+						),
+					),
 				),
 			),
 		),

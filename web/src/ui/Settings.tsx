@@ -14,6 +14,7 @@ const DEFAULT_MAX_RESULTS = 5;
 export default function Settings() {
 	const settings = useSettings();
 	const missingKey = settings.apiKey.trim() === "";
+	const missingBaseUrl = settings.baseUrl.trim() === "";
 
 	// Enabled = a non-empty tools array (the shape the store/db persists).
 	const webSearch = settings.tools.length > 0;
@@ -42,6 +43,11 @@ export default function Settings() {
 				{missingKey ? (
 					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
 						No API key set — sending is disabled until you add one below.
+					</div>
+				) : null}
+				{missingBaseUrl ? (
+					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
+						No base URL set — sending is disabled until you add one below.
 					</div>
 				) : null}
 				<label className={LABEL}>

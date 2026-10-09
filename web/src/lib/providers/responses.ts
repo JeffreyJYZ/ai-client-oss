@@ -39,12 +39,35 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 	};
 };
 
+const appendAssistant = (send: ResponsesSend, text: string) => {
+	const prior =
+		typeof send.input === "string"
+			? [
+					{
+						role: "user" as const,
+						content: [{ type: "input_text" as const, text: send.input }],
+					},
+				]
+			: send.input;
+	return {
+		...send,
+		input: [
+			...prior,
+			{
+				role: "assistant" as const,
+				content: [{ type: "input_text" as const, text }],
+			},
+		],
+	};
+};
+
 export const responses = {
 	schema: ResponsesSend,
 	endpoint,
 	template: responsesSendMinTemplate,
 	parse: parseResponsesSend,
 	buildRequest,
+	appendAssistant,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(
 			`${ctx.apiUrl}${endpoint}`,

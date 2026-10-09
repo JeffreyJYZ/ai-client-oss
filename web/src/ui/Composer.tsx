@@ -36,7 +36,7 @@ const readAttachment = (file: File): Effect.Effect<AttachmentPart, string> =>
 
 export default function Composer() {
 	const { status, hydrated } = useChat();
-	const { apiKey } = useSettings();
+	const { apiKey, baseUrl } = useSettings();
 	const [text, setText] = useState("");
 	const [parts, setParts] = useState<PendingAttachment[]>([]);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -44,12 +44,14 @@ export default function Composer() {
 
 	const streaming = status === "streaming";
 	const missingKey = apiKey.trim() === "";
+	const missingBaseUrl = baseUrl.trim() === "";
 	// Gated until hydration settles (empty list can otherwise hide a load in
-	// flight), without a key, while streaming, and on an empty draft with no
-	// attachments.
+	// flight), without a key or base URL, while streaming, and on an empty draft
+	// with no attachments.
 	const disabled =
 		!hydrated ||
 		missingKey ||
+		missingBaseUrl ||
 		streaming ||
 		(text.trim() === "" && parts.length === 0);
 	const attachDisabled = !hydrated || streaming;
@@ -193,7 +195,9 @@ export default function Composer() {
 						placeholder={
 							missingKey
 								? "Add an API key in settings to send"
-								: "Message… (Enter to send, Shift+Enter for a newline)"
+								: missingBaseUrl
+									? "Add a base URL in settings to send"
+									: "Message… (Enter to send, Shift+Enter for a newline)"
 						}
 						className="min-h-[2.5rem] flex-1 resize-none rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none disabled:opacity-50"
 					/>

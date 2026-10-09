@@ -32,5 +32,11 @@ export interface Provider<Send> {
 	readonly template: Send;
 	parse(raw: unknown): Effect.Effect<Send, string>;
 	buildRequest(send: Send, ctx: SendCtx): unknown;
+	/**
+	 * Append the streamed assistant reply to a request body, returning the new
+	 * body. Feeds the assistant's own turns back into the next request so
+	 * multi-turn context includes what the model previously said. Pure.
+	 */
+	appendAssistant(send: Send, text: string): unknown;
 	send(ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string>;
 }

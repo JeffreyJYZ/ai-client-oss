@@ -35,12 +35,21 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 	};
 };
 
+const appendAssistant = (send: ChatCompletionsSend, text: string) => {
+	const prior = (send as { messages?: unknown[] }).messages ?? [];
+	return {
+		...send,
+		messages: [...prior, { role: "assistant", content: text }],
+	};
+};
+
 export const chatcompletions = {
 	schema: ChatCompletionsSend,
 	endpoint,
 	template,
 	parse: parseChatCompletionsSend,
 	buildRequest,
+	appendAssistant,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(
 			`${ctx.apiUrl}${endpoint}`,
