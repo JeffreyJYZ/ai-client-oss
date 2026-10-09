@@ -1,0 +1,4 @@
+# Store LF in the repository and check out LF on every OS. Biome's formatter is
+# LF-based, so a Windows checkout (runner images set core.autocrlf=true) would
+# otherwise diff every line as CRLF and fail `bun run lint` in the release build.
+* text=auto eol=lf
