@@ -595,7 +595,7 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 5:** Verify — `cargo check` + gates; the signed flow needs the secret, so it is proven on the first release after the key is set.
 - [ ] **Step 6:** Commit — `feat: in-app updates via the Tauri updater`.
 
-**Human step (cannot be automated):** generate the keypair and add the secrets — `bunx tauri signer generate -w ~/.tauri/ai-client.key`, then `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/ai-client.key` (plus the password secret). Keep the private key out of the repo.
+**Human step (done):** the keypair exists at `~/.tauri/ai-client.key` (+ its password file, both 600) and the two repo secrets are set; never print or commit either.
 
 ---
 
@@ -605,13 +605,30 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 **Why:** only the two OpenAI wire formats exist, so Anthropic's Messages API (and the many gateways that proxy it) cannot be used at all.
 
-- [ ] **Step 1:** `anthropicMessages.ts` — a `Provider` implementing the Messages API. **Verify every wire detail against the current Anthropic docs (fetch them) before coding** — this is a new format and a local mock can only prove the code matches whatever you assumed.
-- [ ] **Step 2:** auth differs: `x-api-key` (not `Bearer`) plus `anthropic-version`, and the header that lets a browser call it. `sendStream` must take per-provider headers.
-- [ ] **Step 3:** `max_tokens` is required by the API and the app has no such setting, so ship a named default constant. The system prompt is a top-level `system` field, not a message.
-- [ ] **Step 4:** SSE — the events are Anthropic's, not OpenAI's: text and thinking arrive as different delta types, and tool/server-tool use announces itself on a content-block start. Map them onto the existing `Chunk` kinds.
-- [ ] **Step 5:** register the protocol, add a preset (`Anthropic-compatible (Messages)`), and teach `searchKindFor`/`searchTools` the provider's server-side web-search tool.
-- [ ] **Step 6:** Verify — gates + a mock server replaying the **documented** event sequence, asserting the chunk stream, plus the built request body.
-- [ ] **Step 7:** Commit — `feat(providers): Anthropic-compatible Messages protocol`.
+- [x] **Step 1:** `anthropicMessages.ts` — a `Provider` implementing the Messages API. **Verify every wire detail against the current Anthropic docs (fetch them) before coding** — this is a new format and a local mock can only prove the code matches whatever you assumed.
+- [x] **Step 2:** auth differs: `x-api-key` (not `Bearer`) plus `anthropic-version`, and the header that lets a browser call it. `sendStream` must take per-provider headers.
+- [x] **Step 3:** `max_tokens` is required by the API and the app has no such setting, so ship a named default constant. The system prompt is a top-level `system` field, not a message.
+- [x] **Step 4:** SSE — the events are Anthropic's, not OpenAI's: text and thinking arrive as different delta types, and tool/server-tool use announces itself on a content-block start. Map them onto the existing `Chunk` kinds.
+- [x] **Step 5:** register the protocol, add a preset (`Anthropic-compatible (Messages)`), and teach `searchKindFor`/`searchTools` the provider's server-side web-search tool.
+- [x] **Step 6:** Verify — gates + a mock server replaying the **documented** event sequence, asserting the chunk stream, plus the built request body.
+- [x] **Step 7:** Commit — `feat(providers): Anthropic-compatible Messages protocol`.
+
+---
+
+### Task 38: Long-term memory (notes)
+
+**Files:** create `web/src/lib/memory.ts`; modify `lib/db/types.ts`, `state/chat.ts`, `ui/Settings.tsx`.
+
+**Why:** every conversation starts from nothing; the app should carry durable facts about the user across sessions.
+
+- [ ] **Step 1:** Storage — `Settings.memories` (id, text, createdAt, source) plus `memoriesEnabled`, zod-defaulted so an existing stored settings file still parses, and carried by the existing export/import backup. Global, not per-conversation.
+- [ ] **Step 2:** `memory.ts` — `extractMemories` (pure: removes complete memory tags, hides an unterminated one), `mergeMemories` (dedupe + cap, clock passed in), `memoryPrompt` (the model instruction plus the current notes; empty string when there are none). Named constants, never a repeated literal.
+- [ ] **Step 3:** `state/chat.ts` — inject `memoryPrompt` into the outgoing system prompt only (never into the stored conversation), and run the accumulating reply through `extractMemories` so the tag never reaches the UI or the store; persist completed notes when the stream ends. Re-extraction must be a no-op.
+- [ ] **Step 4:** `ui/Settings.tsx` — a Memory section: enable toggle, the notes with delete, an add field.
+- [ ] **Step 5:** Verify — gates; a throwaway script proving the pure functions (deleted after, never committed); the UI driven in a browser.
+- [ ] **Step 6:** Commit — `feat: long-term memory notes`.
+
+**Design note:** deliberately no tool calling — see "Tool *execution*" under out of scope. The model records a fact by ending its reply with a tag the app strips, so one mechanism works on all three protocols and nothing needs a tool-execution loop.
 
 ---
 
