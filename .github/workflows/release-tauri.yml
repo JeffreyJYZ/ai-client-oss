@@ -142,7 +142,7 @@ jobs:
 
             Add `sudo` if it reports a permission error, and change the path if the app is installed elsewhere.
 
-            **Windows** — run the `-setup.exe` (or the `.msi`).
+            **Windows** — run the `-setup.exe` (or the `.msi`). These builds are unsigned, so SmartScreen may warn: choose **More info → Run anyway**.
             **Linux** — install the `.deb` / `.rpm`, or `chmod +x` the `.AppImage` and run it.
           releaseDraft: false
           prerelease: false
