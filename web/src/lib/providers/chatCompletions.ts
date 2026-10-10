@@ -47,7 +47,15 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 		// Explicit key also overrides any `stream` replayed from a previous turn.
 		stream: true,
 		model: ctx.model,
-		messages: [...system, ...prior, { role: "user", content }],
+		// A tool round replays the body its first round sent, which
+		// already carries the turn's user message: appending it
+		// again would repeat the prompt at the model. The tool loop
+		// sets `skipUserMessage` from round 2 on; a fresh turn
+		// leaves it unset and the message rides as the last user
+		// turn, exactly as before.
+		messages: ctx.skipUserMessage
+			? [...system, ...prior]
+			: [...system, ...prior, { role: "user", content }],
 		// Explicit key (not a conditional spread): an empty/absent list must
 		// overwrite any `tools` replayed from the previous turn's body, or a
 		// provider switch would resend the old endpoint's declaration.

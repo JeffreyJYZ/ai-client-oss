@@ -37,16 +37,24 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 		// Replace any prompt carried on the previous turn's body rather than let
 		// it accumulate; `undefined` drops the key at `JSON.stringify`.
 		instructions: ctx.systemPrompt || undefined,
-		input: [
-			...prior,
-			{
-				role: "user" as const,
-				content: [
-					{ type: "input_text" as const, text: ctx.msg },
-					...attachments,
+		// A tool round replays the body its first round sent, which
+		// already carries the turn's user message: appending it
+		// again would repeat the prompt at the model. The tool loop
+		// sets `skipUserMessage` from round 2 on; a fresh turn
+		// leaves it unset and the message rides as the last user
+		// turn, exactly as before.
+		input: ctx.skipUserMessage
+			? [...prior]
+			: [
+					...prior,
+					{
+						role: "user" as const,
+						content: [
+							{ type: "input_text" as const, text: ctx.msg },
+							...attachments,
+						],
+					},
 				],
-			},
-		],
 		// Explicit key (not a conditional spread): an empty/absent list must
 		// overwrite any `tools` replayed from the previous turn's body, or a
 		// provider switch would resend the old endpoint's declaration.

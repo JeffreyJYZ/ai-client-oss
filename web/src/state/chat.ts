@@ -557,9 +557,15 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	const run = Effect.gen(function* () {
 		for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
 			finalTextStart = raw.value.length;
+			// From round 2 the replayed body already carries the
+			// turn's user message (round 1 sent it), so the request
+			// must not append it again — the question would reach
+			// the model once per tool round. Round 1 sends with the
+			// flag unset, byte-identical to a single-round send.
 			const stream = yield* SendMsg(protocol, {
 				...ctx,
 				prev: replay,
+				skipUserMessage: round > 0,
 			});
 			const roundCalls: ToolCallData[] = [];
 			yield* Stream.runForEach(stream, (chunk) =>
@@ -594,10 +600,14 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			}
 			// The extended body is the next round's
 			// base: the provider rebuilds the request
-			// from it (system prompt and the new user
-			// message included).
+			// from it (system prompt included). The next
+			// round is always a tool round (2+), so its
+			// body is built as its request will be —
+			// without re-appending the user message the
+			// replay already carries (and so the next
+			// turn's seed carries the question once).
 			replay = wire;
-			wire = buildBody(replay, ctx);
+			wire = buildBody(replay, { ...ctx, skipUserMessage: true });
 		}
 	});
 

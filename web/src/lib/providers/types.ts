@@ -110,6 +110,15 @@ export interface SendCtx {
 	readonly fetchTool?: boolean;
 	/** Per-conversation system prompt; absent/blank sends none. */
 	readonly systemPrompt?: string;
+	/**
+	 * Set by the tool loop from its second round on: the request
+	 * replays the body round 1 sent, which already carries the
+	 * turn's user message, so `buildRequest` must not append
+	 * `ctx.msg` again — the question would reach the model once
+	 * per tool round. Absent or `false` (every fresh turn)
+	 * appends the message as the final user turn.
+	 */
+	readonly skipUserMessage?: boolean;
 }
 
 export interface Provider<Send> {
