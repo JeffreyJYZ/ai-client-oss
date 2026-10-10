@@ -132,9 +132,18 @@ jobs:
           tagName: ${{ needs.version.outputs.tag || github.ref_name }}
           releaseName: Open Source AI Client ${{ steps.release.outputs.version }}
           releaseBody: |
-            Download the installer for your platform.
+            Download the installer for your platform from the assets below.
 
-            macOS builds are unsigned — right-click → Open the first time.
+            **macOS** — open the `.dmg`, drag the app into Applications, then clear the download quarantine flag. These builds are unsigned and not notarized, and **right-click → Open no longer bypasses Gatekeeper** on current macOS:
+
+            ```sh
+            xattr -dr com.apple.quarantine "/Applications/oss-ai-client.app"
+            ```
+
+            Add `sudo` if it reports a permission error, and change the path if the app is installed elsewhere.
+
+            **Windows** — run the `-setup.exe` (or the `.msi`).
+            **Linux** — install the `.deb` / `.rpm`, or `chmod +x` the `.AppImage` and run it.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
