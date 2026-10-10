@@ -8,7 +8,7 @@ Desktop and web client for OpenAI-compatible and Anthropic endpoints. Tauri shel
 
 - **Any OpenAI or Anthropic compatible endpoint**: no vendor lock-in.
 - **Runs local models**: point it at Ollama or LM Studio and chat without a cloud account.
-- **Small and fast**: Rust over the OS webview with no bundled browser engine, fonts or icons. ~21MB on disk, under 40MB of RAM.
+- **Small and fast**: Rust over the OS webview with no bundled browser engine, fonts or icons. ~21MB on disk.
 - **Secure and private**: conversations and API keys stay on your machine, and the app has no analytics.
 - **Remembers you**: durable notes the model writes as it works, plus your own, sent with every chat.
 - **Updates itself**: the desktop build finds a newer release, downloads it and relaunches.
