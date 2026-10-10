@@ -12,6 +12,12 @@ const CONVERSATIONS_DIR: &str = "conversations";
 /// park the command — and the UI awaiting it — indefinitely.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Whole-request deadline for the third-party API pass-through: that
+/// API documents a 110-second per-URL backend timeout and tells
+/// clients to allow 150, so the page-fetch command's 30 seconds
+/// does not fit here.
+const API_REQUEST_TIMEOUT: Duration = Duration::from_secs(150);
+
 /// Page-size cap: a runaway endpoint must fail loudly instead of
 /// buffering an unbounded response into app memory.
 const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
@@ -155,6 +161,72 @@ async fn fetch_url(url: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
+/// Forward one HTTP request to a third-party API, bypassing the
+/// browser's CORS limit the way [`fetch_url`] bypasses it for pages.
+/// The caller's headers ride along verbatim — the API authenticates
+/// with an `X-API-Key` header — and the body is sent only when the
+/// caller supplied one.
+#[tauri::command]
+async fn http_request(
+    method: String,
+    url: String,
+    headers: std::collections::HashMap<String, String>,
+    body: Option<String>,
+) -> Result<String, String> {
+    let method = method.to_ascii_uppercase();
+    if method != "GET" && method != "POST" {
+        return Err(format!(
+            "http_request: only GET and POST methods are allowed: {method}"
+        ));
+    }
+    if !url.starts_with("http://") && !url.starts_with("https://") {
+        return Err(format!(
+            "http_request: only http:// and https:// URLs are allowed: {url}"
+        ));
+    }
+    let client = http_client()?;
+    let mut request = match method.as_str() {
+        "GET" => client.get(url.as_str()),
+        _ => client.post(url.as_str()),
+    };
+    // The shared client carries the 30-second page-fetch deadline;
+    // this API's own, longer deadline replaces it for this request.
+    request = request.timeout(API_REQUEST_TIMEOUT);
+    for (name, value) in &headers {
+        request = request.header(name.as_str(), value.as_str());
+    }
+    if let Some(body) = body {
+        request = request.body(body);
+        // Set a JSON content type only when the caller did not.
+        if !headers
+            .keys()
+            .any(|name| name.eq_ignore_ascii_case("content-type"))
+        {
+            request = request.header("content-type", "application/json");
+        }
+    }
+    let mut response = request
+        .send()
+        .await
+        .map_err(|e| format!("failed to send {method} {url}: {e}"))?;
+    let mut body = Vec::new();
+    while let Some(chunk) = response
+        .chunk()
+        .await
+        .map_err(|e| format!("failed to read response from {url}: {e}"))?
+    {
+        if body.len() + chunk.len() > MAX_RESPONSE_BYTES {
+            return Err(format!(
+                "response from {url} exceeds the {MAX_RESPONSE_BYTES}-byte cap"
+            ));
+        }
+        body.extend_from_slice(&chunk);
+    }
+    // Lossy, not an error: a response that is mostly readable beats
+    // no response at all.
+    Ok(String::from_utf8_lossy(&body).into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -168,6 +240,7 @@ pub fn run() {
             db_upsert_conversation,
             db_delete_conversation,
             fetch_url,
+            http_request,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
