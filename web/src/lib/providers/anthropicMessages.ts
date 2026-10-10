@@ -3,6 +3,7 @@ import { requestTools } from "@lib/providers/presets";
 import { sendStream } from "@lib/providers/send";
 import type {
 	Chunk,
+	HistoryTurn,
 	Provider,
 	SendCtx,
 	ToolCallData,
@@ -121,6 +122,22 @@ const appendAssistant = (send: AnthropicSend, text: string) => ({
 	messages: [...send.messages, { role: "assistant" as const, content: text }],
 });
 
+/**
+ * Rebuild a Messages body from the conversation's text
+ * turns: every turn rides as a `messages` entry with its
+ * text as string content — the shape `appendAssistant`
+ * writes assistant turns in — so the seed of a stored
+ * conversation equals the body its successful turns left
+ * behind. Pure.
+ */
+const seedHistory = (turns: readonly HistoryTurn[]): AnthropicSend => ({
+	...template,
+	messages: turns.map((turn) => ({
+		role: turn.role,
+		content: turn.text,
+	})),
+});
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
 
@@ -203,6 +220,7 @@ export const anthropic = {
 	parse: parseAnthropicSend,
 	buildRequest,
 	appendAssistant,
+	seedHistory,
 	appendToolResult,
 	headers: anthropicHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>

@@ -3,6 +3,7 @@ import { requestTools } from "@lib/providers/presets";
 import { bearerHeaders, sendStream } from "@lib/providers/send";
 import type {
 	Chunk,
+	HistoryTurn,
 	Provider,
 	SendCtx,
 	ToolCallData,
@@ -85,6 +86,27 @@ const appendAssistant = (send: ResponsesSend, text: string) => {
 };
 
 /**
+ * Rebuild a Responses body from the conversation's text
+ * turns: every turn rides as an `input` item — user turns
+ * as `input_text`, assistant turns as `output_text`, the
+ * shapes `buildRequest` and `appendAssistant` write — so
+ * the seed of a stored conversation equals the body its
+ * successful turns left behind. Pure.
+ */
+const seedHistory = (turns: readonly HistoryTurn[]): ResponsesSend => ({
+	...responsesSendMinTemplate,
+	input: turns.map((turn) => ({
+		role: turn.role,
+		content: [
+			{
+				type: turn.role === "assistant" ? "output_text" : "input_text",
+				text: turn.text,
+			},
+		],
+	})),
+});
+
+/**
  * Append a tool call and its result: a `function_call`
  * item (keyed by the call's `call_id`) followed by its
  * `function_call_output`, after the assistant message that
@@ -130,6 +152,7 @@ export const responses = {
 	parse: parseResponsesSend,
 	buildRequest,
 	appendAssistant,
+	seedHistory,
 	appendToolResult,
 	headers: bearerHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>

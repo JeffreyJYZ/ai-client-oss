@@ -129,6 +129,19 @@ export interface SendCtx {
 	readonly skipUserMessage?: boolean;
 }
 
+/**
+ * One text turn of a conversation, the minimal shape a
+ * history seed needs: the stored message's role and its
+ * marker-free `text`, with display markers and attachments
+ * left behind. `error` rows never reach a seed — the caller
+ * skips them, since they are the app's own words and no
+ * wire role matches them.
+ */
+export interface HistoryTurn {
+	readonly role: "user" | "assistant";
+	readonly text: string;
+}
+
 export interface Provider<Send> {
 	readonly schema: z.ZodType<Send>;
 	readonly endpoint: string;
@@ -141,6 +154,19 @@ export interface Provider<Send> {
 	 * multi-turn context includes what the model previously said. Pure.
 	 */
 	appendAssistant(send: Send, text: string): unknown;
+	/**
+	 * Rebuild a request body from the conversation's text
+	 * turns — the inverse of `appendAssistant`: the seed
+	 * `buildRequest` then extends exactly as it extends a
+	 * body replayed from a previous turn, and a turn list
+	 * ending in an assistant turn seeds to the same body
+	 * `appendAssistant` produces over the seed of the turns
+	 * before it. Pure; takes bare `HistoryTurn`s so no
+	 * provider depends on `lib/db`, and carries no
+	 * attachments — only the text turns, which is all the
+	 * transcript records. Callers skip `error` rows.
+	 */
+	seedHistory(turns: readonly HistoryTurn[]): Send;
 	/**
 	 * Append one tool call and its result to a request body,
 	 * returning the new body: the call joins the round's assistant

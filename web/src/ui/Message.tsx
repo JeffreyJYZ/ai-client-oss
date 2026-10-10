@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@lib/db";
+import { interleaveMarkers } from "@lib/text";
 import Markdown from "@ui/Markdown";
 
 interface MessageProps {
@@ -19,6 +20,9 @@ const ROLE_STYLE: Record<ChatMessage["role"], string> = {
 
 export default function Message({ message }: MessageProps) {
 	const isUser = message.role === "user";
+	// A marker-only message (a tool call with no text around it) still
+	// renders: the marker is its whole visible content.
+	const empty = message.text === "" && message.markers.length === 0;
 	return (
 		<div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
 			<div
@@ -37,8 +41,10 @@ export default function Message({ message }: MessageProps) {
 						</p>
 					</details>
 				) : null}
-				{message.text === "" ? null : message.role === "assistant" ? (
-					<Markdown text={message.text} />
+				{empty ? null : message.role === "assistant" ? (
+					// Markers are display-only: interleaved with the
+					// answer text for the transcript, never part of it.
+					<Markdown text={interleaveMarkers(message.text, message.markers)} />
 				) : (
 					// Only the model's answer is markdown; user input and error
 					// strings stay literal, so `#` in pasted config is not a heading.

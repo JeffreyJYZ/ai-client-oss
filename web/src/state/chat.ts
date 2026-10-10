@@ -47,11 +47,12 @@ const MAX_TOOL_ROUNDS = 4;
  * Last request body successfully sent, per conversation and protocol,
  * replayed as the base for that conversation's next turn. `Conversation`
  * persists only `ChatMessage`s, not the provider wire body, so this is
- * deliberately in-memory: it survives a switch within a session and
- * resets on reload (multi-turn context starts over). Keyed by
- * `${conversationId}\u0000${protocol}` so a protocol switch finds no
- * entry and falls back to the provider template instead of replaying a
- * body built for a different wire shape.
+ * deliberately in-memory: it survives a switch within a session. Keyed
+ * by `${conversationId}\u0000${protocol}` so a protocol switch finds no
+ * entry and falls back to a transcript seed instead of replaying a body
+ * built for a different wire shape. When there is no entry — a fresh
+ * session, a reload, or a turn whose request failed (`finalize` deletes
+ * it) — `send` seeds it from the conversation's persisted messages.
  */
 const prevByConversationProtocol = new Map<string, unknown>();
 
@@ -176,44 +177,21 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null;
 
 /**
- * A message's text with a display-only marker line appended:
- * trailing blank lines are trimmed first so two adjacent
- * markers never stack, and the marker is separated from any
- * text before it.
+ * The answer text of the accumulation: the model's own
+ * words, memory blocks stripped. Markers never enter
+ * it — `text` is exactly what may go on the wire.
  */
-const withMarker = (text: string, marker: string): string => {
-	const base = text.replace(/\n+$/, "");
-	const sep = base === "" ? "" : "\n\n";
-	return `${base}${sep}${marker}\n\n`;
-};
+const answerText = (raw: RawText): string => extractMemories(raw.value).text;
 
 /**
- * The visible text of the accumulation: its text runs with the
- * marker lines interleaved between them. Each run is sliced out of
- * `value` at the next marker's recorded boundary, so a marker always
- * sits between the runs around it.
+ * Record a display-only marker line at the current answer
+ * boundary. The offset is the stripped answer's length, so
+ * it names a stable position in `text` even once the memory
+ * blocks before it are removed (extraction is idempotent and
+ * prefix-preserving).
  */
-const renderRaw = (raw: RawText): string => {
-	let text = "";
-	let from = 0;
-	for (const marker of raw.markers) {
-		text = withMarker(
-			`${text}${raw.value.slice(from, marker.at)}`,
-			marker.line,
-		);
-		from = marker.at;
-	}
-	return `${text}${raw.value.slice(from)}`;
-};
-
-/**
- * Record a display-only marker line at the current run boundary and
- * return the visible text with it interleaved. Used for the `tool`
- * chunk marker and, after execution, for a tool call's outcome.
- */
-const pushMarker = (raw: RawText, line: string): string => {
-	raw.markers.push({ at: raw.value.length, line });
-	return renderRaw(raw);
+const pushMarker = (raw: RawText, line: string): void => {
+	raw.markers.push({ at: answerText(raw).length, line });
 };
 
 /**
@@ -222,10 +200,10 @@ const pushMarker = (raw: RawText, line: string): string => {
  * single source both the visible text and the next-turn seed derive
  * from: re-extracting over the whole accumulation is idempotent, and
  * a tag split across chunks still never reaches the UI or the store.
- * Markers are kept apart from it — with the `value` length each was
- * inserted at — so the visible text interleaves them with the text
- * runs while the accumulation itself stays marker-free (a marker is
- * display-only and must never reach the wire).
+ * Markers are kept apart from it — at the stripped answer length
+ * each was inserted at — so the transcript interleaves them with the
+ * answer text while the accumulation itself stays marker-free (a
+ * marker is display-only and must never reach the wire).
  */
 interface RawText {
 	value: string;
@@ -253,12 +231,14 @@ const appendChunk = (
 				return { ...m, reasoning: (m.reasoning ?? "") + chunk.text };
 			}
 			if (chunk.kind === "tool") {
-				// The marker is display-only: the visible text (the next-turn
-				// seed) accumulates `text` chunks only, so it never reaches the
-				// wire.
+				// The marker is display-only: it is recorded in `markers`
+				// at the answer offset, so `text` stays the model's own
+				// words — exactly what may go on the wire.
+				pushMarker(raw, toolMarker(chunk.text));
 				return {
 					...m,
-					text: extractMemories(pushMarker(raw, toolMarker(chunk.text))).text,
+					text: answerText(raw),
+					markers: [...raw.markers],
 				};
 			}
 			// Only `text` accumulates into the answer; every other kind is a
@@ -266,7 +246,7 @@ const appendChunk = (
 			// cannot leak into the reply.
 			if (chunk.kind !== "text") return m;
 			raw.value += chunk.text;
-			return { ...m, text: extractMemories(renderRaw(raw)).text };
+			return { ...m, text: answerText(raw), markers: [...raw.markers] };
 		}),
 	}));
 	refresh();
@@ -287,10 +267,8 @@ const appendMarker = (
 		...conversation,
 		messages: conversation.messages.map((m) => {
 			if (m.id !== messageId) return m;
-			return {
-				...m,
-				text: extractMemories(pushMarker(raw, marker)).text,
-			};
+			pushMarker(raw, marker);
+			return { ...m, text: answerText(raw), markers: [...raw.markers] };
 		}),
 	}));
 	refresh();
@@ -327,6 +305,12 @@ const finalize = (
 		prevByConversationProtocol.set(prevKey(conversationId, protocol), next);
 		commitMemories(memories);
 	} else if (!Cause.hasInterruptsOnly(exit.cause)) {
+		// The turn failed: drop the stored body so the next turn
+		// rebuilds from the transcript — which carries this turn's
+		// user message — rather than replay a body that predates
+		// it. The failed request's body was never stored, so a
+		// rebuild that only fired "when absent" would never run.
+		prevByConversationProtocol.delete(prevKey(conversationId, protocol));
 		const text = Option.getOrElse(
 			Cause.findErrorOption(exit.cause),
 			() => "request failed",
@@ -335,7 +319,7 @@ const finalize = (
 			...conversation,
 			messages: [
 				...conversation.messages,
-				{ id: nextMessageId(), role: "error", text },
+				{ id: nextMessageId(), role: "error", text, markers: [] },
 			],
 		}));
 	}
@@ -541,9 +525,29 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	const protocol: ProtocolName = active.protocol;
 	const provider = providers[protocol];
-	const prev = prevByConversationProtocol.get(
+	const stored = prevByConversationProtocol.get(
 		prevKey(conversationId, protocol),
 	);
+	// No body stored for this conversation+protocol — a fresh
+	// session (the map is in-memory), a reload, or a turn whose
+	// request failed (`finalize` deletes the entry): rebuild it
+	// from the conversation's persisted messages. `conversation`
+	// is the snapshot read before this turn's user message was
+	// appended, so the seed cannot replay the incoming message
+	// twice, and `text` is the marker-free words that may go
+	// back on the wire. `error` rows are the app's own words —
+	// no wire role matches them — so the seed skips them.
+	const prev =
+		stored ??
+		provider.seedHistory(
+			conversation.messages.flatMap((message) => {
+				// The app's own rows are not turns the model said anything in,
+				// and a failed turn leaves an empty assistant placeholder
+				// behind; a row with no words carries nothing to replay.
+				if (message.role === "error" || message.text === "") return [];
+				return [{ role: message.role, text: message.text }];
+			}),
+		);
 
 	const searchKind = searchKindFor(active.baseUrl);
 	// Only an endpoint with a real mechanism searches; the stored `tools` array is
@@ -621,8 +625,8 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		title: deriveTitle(c, msg),
 		messages: [
 			...c.messages,
-			{ id: nextMessageId(), role: "user", text: msg, parts },
-			{ id: assistantId, role: "assistant", text: "" },
+			{ id: nextMessageId(), role: "user", text: msg, parts, markers: [] },
+			{ id: assistantId, role: "assistant", text: "", markers: [] },
 		],
 	}));
 	status = "streaming";

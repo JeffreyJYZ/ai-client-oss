@@ -114,11 +114,34 @@ export type Settings = z.infer<typeof Settings>;
 
 export const settingsDefaults = (): Settings => Settings.parse({});
 
-/** Canonical persisted chat message shape (was `state/chat.ts`). */
+/**
+ * Canonical persisted chat message shape (was `state/chat.ts`).
+ */
 export const chatMessageSchema = z.object({
 	id: z.string(),
 	role: z.enum(["user", "assistant", "error"]),
+	/**
+	 * The model's own words — memory blocks stripped, and no
+	 * display marker ever concatenated in. This is exactly the
+	 * text that may go back on the wire: a later task replays
+	 * stored messages to the model safely.
+	 */
 	text: z.string(),
+	/**
+	 * Display-only marker lines (tool calls, fetch and search
+	 * outcomes), each recorded at the `text` offset it belongs
+	 * to. Interleaved with `text` for the transcript only —
+	 * never sent to the model. Defaulted so a stored
+	 * conversation without them still parses.
+	 */
+	markers: z
+		.array(
+			z.object({
+				at: z.number(),
+				line: z.string(),
+			}),
+		)
+		.default([]),
 	reasoning: z.string().optional(),
 	parts: z.array(z.custom<AttachmentPart>()).optional(),
 });
