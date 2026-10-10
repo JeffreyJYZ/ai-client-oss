@@ -1,6 +1,6 @@
 import { useState } from "react";
 import "@/App.css";
-import { isDesktop } from "@lib/platform";
+import { isDesktop, isMacOS } from "@lib/platform";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import { useChat } from "@/state/chat";
 import ChatPane from "@/ui/ChatPane";
@@ -49,6 +49,17 @@ export default function App() {
 						</button>
 					</div>
 				</header>
+				{isDesktop || !isMacOS ? null : (
+					<div className="shrink-0 border-b border-neutral-800 bg-neutral-900/60 px-4 py-1.5 text-[11px] break-words text-neutral-400">
+						The desktop build is unsigned — after installing, run{" "}
+						<code className="text-neutral-300">
+							{
+								'xattr -dr com.apple.quarantine "/Applications/oss-ai-client.app"'
+							}
+						</code>{" "}
+						once, or macOS will refuse to open it.
+					</div>
+				)}
 				{showSettings ? (
 					<Settings />
 				) : (
