@@ -8,6 +8,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - `web/src-tauri/` — Rust shell (`tauri.conf.json`, `Cargo.toml`); Tauri `beforeDevCommand`/`beforeBuildCommand` = `bun run dev` / `bun run build`.
 - `web/src/` — all frontend source.
 - `android/`, `ios/` at repo root — empty placeholders, not real mobile output.
+- License: **GPL-3.0-only** (`LICENSE` + `web/src-tauri/Cargo.toml` `license`, and `web/package.json`). The published **0.1.x releases were MIT and stay MIT** — those grants are irrevocable, so never claim the released versions are GPL.
 
 ## Fonts
 

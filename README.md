@@ -42,4 +42,4 @@ Gates: `bunx tsc -b --force`, `bunx biome check .`, `bunx effect-language-servic
 
 ## License
 
-MIT
+GPL-3.0-only. The 0.1.x releases were published under MIT and remain MIT.
