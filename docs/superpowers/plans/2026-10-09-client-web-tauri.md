@@ -671,7 +671,38 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 41: TinyFish search and fetch (API key)
+
+**Files:** create `web/src/lib/tinyfish.ts`; modify `web/src-tauri/src/lib.rs`, `lib/providers/presets.ts`, `lib/providers/types.ts`, `lib/fetch.ts`, `state/chat.ts`, `ui/Settings.tsx`, `lib/db/types.ts`.
+
+**Why:** search exists only where the endpoint provides it — local models and Command Code have none at all — and a page fetch is a blind HTTP GET that runs no scripts. TinyFish (search and fetch are free; the key comes from `agent.tinyfish.ai/api-keys`) fills both, client-side, for every endpoint.
+
+**Wire — verify against the docs before coding** (`docs.tinyfish.ai`, the Search and Fetch overview pages; `llms-full.txt` is the single-file reference): auth is the `X-API-Key` header; `GET https://api.search.tinyfish.ai?query=…`; `POST https://api.fetch.tinyfish.ai`. Search takes 1-3s, fetch 1-20s, with a 110s per-URL backend timeout — the docs tell clients to allow 150s, so this command needs its own generous timeout rather than the page fetch's 30s.
+
+- [ ] **Step 1:** Rust: one generic `http_request(method, url, headers, body)` command — reusing the existing client, with its own longer timeout and the same size cap and string-error style — so the desktop reaches TinyFish with no CORS limit. `fetch_url` stays exactly as it is.
+- [ ] **Step 2:** `lib/tinyfish.ts` — `searchWeb(query)` and `fetchPage(url)`, returning compact text (search: title/url/snippet per result; fetch: the extracted content, capped), each mapping every failure to a sentence. Desktop through the new command, web through `fetch` with the same best-effort CORS wording as `lib/fetch.ts`.
+- [ ] **Step 3:** `Settings.tinyfishApiKey` — zod-defaulted so a stored settings file still parses, masked in the UI, with a link to the key page and a line noting search and fetch are free. It rides export/import like the provider keys.
+- [ ] **Step 4:** Declare `web_search` (a required `query`) beside `fetch_url`, in each wire shape as Task 39 established. TinyFish search is declared **only** where the endpoint has no native mechanism — the endpoint's own search wins, TinyFish fills the gap — and only while the per-provider search toggle is on. The fetch tool's routing changes: with a key, TinyFish first, the app's own fetch as the fallback.
+- [ ] **Step 5:** `state/chat.ts` — dispatch by tool name in the loop (`fetch_url`, `web_search`), validating each call's arguments the way the URL is validated today, marking each outcome in the transcript, and keeping the round bounds.
+- [ ] **Step 6:** Verify — gates; a mock TinyFish API (a page-level `fetch` override, as Task 40's live run used, since the base URL is a constant) proving search results reach the second request, that fetch prefers TinyFish and falls back when it errors, and that no key means no search declaration; plus `cargo check --all-targets`.
+- [ ] **Step 7:** Commit — `feat: TinyFish search and fetch`.
+
+---
+
+### Task 42: Multi-turn context must survive a reload
+
+**Files:** modify `state/chat.ts`, `lib/db/types.ts`, `ui/Message.tsx`, `lib/providers/{chatCompletions,responses,anthropicMessages}.ts`.
+
+**Why:** the request body that carries the conversation is deliberately in-memory and "resets on reload (multi-turn context starts over)". So after any page reload — including every HMR reload during development — the transcript still shows the history while the model receives only the newest message, and it answers "there's no prior attempt in this conversation". The transcript is persisted; it should be the source of truth.
+
+- [ ] **Step 1:** Stop writing display markers into `ChatMessage.text`. Add `markers` (defaulted, so a stored conversation still parses) and keep `text` the model's own words, so the stored text is exactly what may go on the wire. `Message.tsx` already interleaves markers with the text runs for display; it should render from the two fields instead.
+- [ ] **Step 2:** Rebuild the wire history from the conversation's messages when the in-memory body is absent — one per-protocol builder, the inverse of `appendAssistant`, faithful (text **and** attachments, since the API is stateless). Do not try to reconstruct tool rounds: they live inside the turn that made them.
+- [ ] **Step 3:** Verify — a throwaway script that rebuilds each protocol's body from a conversation and asserts the wire shape; then the live proof: send a turn, reload the page, send a follow-up, and assert from a mock's request log that the second turn's body carries the first turn's user message and answer.
+- [ ] **Step 4:** Commit — `fix: rebuild conversation history after a reload`.
+
+---
+
 ## Out of scope (this plan)
 
-- General tool execution — Task 39 ships `fetch_url` only.
+- General tool execution beyond the two client tools this plan ships (`fetch_url`, `web_search`).
 - Auth beyond a bearer key or `x-api-key`.
