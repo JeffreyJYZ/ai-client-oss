@@ -26,6 +26,7 @@
 	"bundle": {
 		"active": true,
 		"targets": "all",
+		"createUpdaterArtifacts": true,
 		"icon": [
 			"icons/32x32.png",
 			"icons/128x128.png",
@@ -35,6 +36,14 @@
 		],
 		"android": {
 			"debugApplicationIdSuffix": ".debug"
+		}
+	},
+	"plugins": {
+		"updater": {
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENCNEY1OTRBRUYxRUNFNkEKUldScXpoN3ZTbGxQeThvN29DQW9vL0g1c0Y2YVVGOTdJS0tCckQ4dmpmcW9FYXdSeWU2WmRSNVMK",
+			"endpoints": [
+				"https://github.com/JeffreyJYZ/ai-client-oss/releases/latest/download/latest.json"
+			]
 		}
 	}
 }

@@ -121,6 +121,15 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Updater signing. `bundle.createUpdaterArtifacts` is on, so the
+          # bundler only emits the `.tar.gz`/`.zip` + `.sig` pair and the
+          # updater `latest.json` when these are present. The repo secrets
+          # hold the private key content and its password — never print or
+          # commit either, and never rotate the key: the public key baked
+          # into shipped binaries is what verifies the download, so a new
+          # keypair orphans every installed app.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           # Tauri's dmg bundler runs a Finder AppleScript to prettify the window,
           # which hangs/fails without a GUI+Automation session. `CI` makes it skip
           # that step. Runners export CI=true already; pinned here so the release
