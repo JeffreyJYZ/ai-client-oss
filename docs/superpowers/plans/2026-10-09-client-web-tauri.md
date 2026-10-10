@@ -588,12 +588,12 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 **Why:** real in-app updates once the builds are signed; the updater's own signature is independent of Apple/Windows code signing.
 
-- [ ] **Step 1:** `tauri-plugin-updater` (Rust) + `@tauri-apps/plugin-updater` (JS); register the plugin and add the capability.
-- [ ] **Step 2:** `tauri.conf.json` — `bundle.createUpdaterArtifacts: true` and `plugins.updater` (endpoints + the **public** key). The private key never enters the repo.
-- [ ] **Step 3:** `release-tauri.yml` — pass `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` from secrets so tauri-action publishes the `.sig` files and `latest.json`.
-- [ ] **Step 4:** UI — when a newer version exists, offer Download & install, then relaunch.
-- [ ] **Step 5:** Verify — `cargo check` + gates; the signed flow needs the secret, so it is proven on the first release after the key is set.
-- [ ] **Step 6:** Commit — `feat: in-app updates via the Tauri updater`.
+- [x] **Step 1:** `tauri-plugin-updater` (Rust) + `@tauri-apps/plugin-updater` (JS); register the plugin and add the capability.
+- [x] **Step 2:** `tauri.conf.json` — `bundle.createUpdaterArtifacts: true` and `plugins.updater` (endpoints + the **public** key). The private key never enters the repo.
+- [x] **Step 3:** `release-tauri.yml` — pass `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` from secrets so tauri-action publishes the `.sig` files and `latest.json`.
+- [x] **Step 4:** UI — when a newer version exists, offer Download & install, then relaunch.
+- [x] **Step 5:** Verify — `cargo check` + gates; the signed flow needs the secret, so it is proven on the first release after the key is set.
+- [x] **Step 6:** Commit — `feat: in-app updates via the Tauri updater`.
 
 **Human step (done):** the keypair exists at `~/.tauri/ai-client.key` (+ its password file, both 600) and the two repo secrets are set; never print or commit either.
 
@@ -621,12 +621,12 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 **Why:** every conversation starts from nothing; the app should carry durable facts about the user across sessions.
 
-- [ ] **Step 1:** Storage — `Settings.memories` (id, text, createdAt, source) plus `memoriesEnabled`, zod-defaulted so an existing stored settings file still parses, and carried by the existing export/import backup. Global, not per-conversation.
-- [ ] **Step 2:** `memory.ts` — `extractMemories` (pure: removes complete memory tags, hides an unterminated one), `mergeMemories` (dedupe + cap, clock passed in), `memoryPrompt` (the model instruction plus the current notes; empty string when there are none). Named constants, never a repeated literal.
-- [ ] **Step 3:** `state/chat.ts` — inject `memoryPrompt` into the outgoing system prompt only (never into the stored conversation), and run the accumulating reply through `extractMemories` so the tag never reaches the UI or the store; persist completed notes when the stream ends. Re-extraction must be a no-op.
-- [ ] **Step 4:** `ui/Settings.tsx` — a Memory section: enable toggle, the notes with delete, an add field.
-- [ ] **Step 5:** Verify — gates; a throwaway script proving the pure functions (deleted after, never committed); the UI driven in a browser.
-- [ ] **Step 6:** Commit — `feat: long-term memory notes`.
+- [x] **Step 1:** Storage — `Settings.memories` (id, text, createdAt, source) plus `memoriesEnabled`, zod-defaulted so an existing stored settings file still parses, and carried by the existing export/import backup. Global, not per-conversation.
+- [x] **Step 2:** `memory.ts` — `extractMemories` (pure: removes complete memory tags, hides an unterminated one), `mergeMemories` (dedupe + cap, clock passed in), `memoryPrompt` (the model instruction plus the current notes; empty string when there are none). Named constants, never a repeated literal.
+- [x] **Step 3:** `state/chat.ts` — inject `memoryPrompt` into the outgoing system prompt only (never into the stored conversation), and run the accumulating reply through `extractMemories` so the tag never reaches the UI or the store; persist completed notes when the stream ends. Re-extraction must be a no-op.
+- [x] **Step 4:** `ui/Settings.tsx` — a Memory section: enable toggle, the notes with delete, an add field.
+- [x] **Step 5:** Verify — gates; a throwaway script proving the pure functions (deleted after, never committed); the UI driven in a browser.
+- [x] **Step 6:** Commit — `feat: long-term memory notes`.
 
 **Design note:** deliberately no tool calling — see "Tool *execution*" under out of scope. The model records a fact by ending its reply with a tag the app strips, so one mechanism works on all three protocols and nothing needs a tool-execution loop.
 
