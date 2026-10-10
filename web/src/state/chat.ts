@@ -1,6 +1,7 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { type ProtocolName, protocolNames, providers } from "@lib/providers";
+import { searchKindFor } from "@lib/providers/presets";
 import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
@@ -255,6 +256,17 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		prevKey(conversationId, protocol),
 	);
 
+	const searchKind = searchKindFor(active.baseUrl);
+	// Only an endpoint with a real mechanism searches; the stored `tools` array is
+	// just the on/off + result-count carrier.
+	const search =
+		searchKind !== null && (active.tools ?? []).length > 0
+			? {
+					kind: searchKind,
+					maxResults: active.tools?.[0]?.max_num_results ?? 5,
+				}
+			: undefined;
+
 	const ctx: SendCtx = {
 		msg,
 		prev,
@@ -265,6 +277,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		// Tools live on the provider, not globally: the accepted shape is
 		// endpoint-specific (OpenAI's built-in is rejected elsewhere).
 		tools: active.tools,
+		search,
 		systemPrompt: conversation.systemPrompt,
 	};
 

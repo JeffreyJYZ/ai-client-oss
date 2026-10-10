@@ -21,10 +21,10 @@ export const providerConfigSchema = z.object({
 	model: z.string().default(""),
 	models: z.array(z.string()).default([]),
 	/**
-	 * Tools sent verbatim on this provider's requests. Per-provider because the
-	 * accepted shape is endpoint-specific: OpenAI's built-in
-	 * `web_search_preview` is rejected by other gateways (they want a
-	 * client-executed function declaration).
+	 * Tools sent verbatim on this provider's requests. Per-provider
+	 * on/off + result-count carrier; the endpoint's mechanism (see
+	 * `searchKindFor`) decides the wire shape, and
+	 * `web_search_preview` is OpenAI's marker.
 	 */
 	tools: z
 		.array(

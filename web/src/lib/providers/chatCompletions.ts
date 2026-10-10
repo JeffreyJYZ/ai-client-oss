@@ -45,7 +45,15 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 		// Explicit key (not a conditional spread): an empty/absent list must
 		// overwrite any `tools` replayed from the previous turn's body, or a
 		// provider switch would resend the old endpoint's declaration.
-		tools: ctx.tools?.length ? ctx.tools : undefined,
+		// Only an OpenAI endpoint executes the built-in web-search tool;
+		// OpenRouter rides `plugins` instead, and both are explicit keys so
+		// a value replayed from the previous turn's body (`...send`) is
+		// overwritten rather than inherited.
+		tools: ctx.search?.kind === "openai" ? ctx.tools : undefined,
+		plugins:
+			ctx.search?.kind === "openrouter"
+				? [{ id: "web", max_results: ctx.search.maxResults }]
+				: undefined,
 	};
 };
 

@@ -1,7 +1,7 @@
 import type { Profile, ProviderConfig } from "@lib/db";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
-import { PROVIDER_PRESETS } from "@lib/providers/presets";
+import { PROVIDER_PRESETS, searchKindFor } from "@lib/providers/presets";
 import { Effect } from "effect";
 import { useState } from "react";
 import {
@@ -53,11 +53,12 @@ export default function Settings() {
 		updateProvider(active.id, patch);
 	};
 
-	// Tools are per-provider: the toggle edits the ACTIVE provider's `tools`,
-	// because the accepted shape is endpoint-specific (OpenAI's built-in is
-	// rejected by other gateways). Enabled = a non-empty tools array.
+	// Tools are per-provider: the toggle edits the ACTIVE provider's
+	// `tools`. Enabled = a non-empty tools array, but only an endpoint
+	// with a real search mechanism executes it.
 	const activeTools = active?.tools ?? [];
-	const webSearch = activeTools.length > 0;
+	const searchKind = searchKindFor(active?.baseUrl ?? "");
+	const webSearch = searchKind !== null && activeTools.length > 0;
 	const maxNumResults =
 		activeTools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
 		DEFAULT_MAX_RESULTS;
@@ -514,16 +515,26 @@ export default function Settings() {
 						<input
 							type="checkbox"
 							checked={webSearch}
-							disabled={active === undefined}
+							disabled={active === undefined || searchKind === null}
 							onChange={(event) => setWebSearch(event.target.checked)}
 							className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
 						/>
 					</label>
-					<p className="text-xs text-neutral-500">
-						Applies only to the active provider — the declaration is
-						endpoint-specific (OpenAI&apos;s built-in is rejected by other
-						gateways).
-					</p>
+					{searchKind === null ? (
+						<p className="text-xs text-neutral-500">
+							This endpoint has no server-side web search.
+						</p>
+					) : searchKind === "openrouter" ? (
+						<p className="text-xs text-neutral-500">
+							Search runs through OpenRouter&apos;s web plugin (billed by
+							OpenRouter).
+						</p>
+					) : (
+						<p className="text-xs text-neutral-500">
+							Applies only to the active provider — OpenAI executes its built-in
+							search tool on its own API.
+						</p>
+					)}
 					{webSearch ? (
 						<label className={LABEL}>
 							Max results

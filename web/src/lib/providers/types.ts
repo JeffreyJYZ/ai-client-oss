@@ -21,6 +21,15 @@ export interface ToolSpec {
 	readonly max_num_results: number;
 }
 
+/** How an endpoint serves web search on the wire. */
+export type SearchKind = "openai" | "openrouter";
+
+/** An enabled web-search request: the endpoint's mechanism plus the result cap. */
+export interface SearchSpec {
+	readonly kind: SearchKind;
+	readonly maxResults: number;
+}
+
 export interface SendCtx {
 	readonly msg: string;
 	readonly prev: unknown;
@@ -29,6 +38,8 @@ export interface SendCtx {
 	readonly model: string;
 	readonly parts?: readonly AttachmentPart[];
 	readonly tools?: readonly ToolSpec[];
+	/** Web-search request, when the endpoint has a mechanism for it. */
+	readonly search?: SearchSpec;
 	/** Per-conversation system prompt; absent/blank sends none. */
 	readonly systemPrompt?: string;
 }

@@ -1,5 +1,5 @@
 import type { ProtocolName } from "@lib/providers";
-import type { ToolSpec } from "@lib/providers/types";
+import type { SearchKind, ToolSpec } from "@lib/providers/types";
 
 export interface ProviderPreset {
 	readonly id: string;
@@ -7,8 +7,8 @@ export interface ProviderPreset {
 	readonly baseUrl: string;
 	readonly protocol: ProtocolName;
 	/**
-	 * Default tools for this endpoint. Omitted/empty for gateways that reject
-	 * OpenAI's built-in — their web search is client-executed, not a declaration.
+	 * Default tools for this endpoint. The wire shape is chosen by the
+	 * endpoint itself (see `searchKindFor`), not by this array.
 	 */
 	readonly tools?: readonly ToolSpec[];
 }
@@ -17,6 +17,17 @@ export interface ProviderPreset {
 const OPENAI_TOOLS: readonly ToolSpec[] = [
 	{ type: "web_search_preview", max_num_results: 5 },
 ];
+
+/**
+ * How an endpoint serves web search, read from its base URL. `null` means
+ * the endpoint has no server-side search — the toggle must stay inert there.
+ */
+export const searchKindFor = (baseUrl: string): SearchKind | null => {
+	const url = baseUrl.toLowerCase();
+	if (url.includes("openrouter.ai")) return "openrouter";
+	if (url.includes("api.openai.com")) return "openai";
+	return null;
+};
 
 /**
  * Known OpenAI-compatible providers. The base URL carries the API version, so

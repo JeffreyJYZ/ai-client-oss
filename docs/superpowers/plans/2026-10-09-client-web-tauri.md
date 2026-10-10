@@ -491,6 +491,28 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 31: Per-endpoint web search (kill the phantom tool)
+
+**Files:**
+- Modify: `web/src/lib/providers/types.ts` (`SearchKind`, `SearchSpec`, `SendCtx.search`)
+- Modify: `web/src/lib/providers/presets.ts` (`searchKindFor`)
+- Modify: `web/src/lib/providers/responses.ts` + `chatCompletions.ts` (send the endpoint's own mechanism)
+- Modify: `web/src/state/chat.ts` (derive `search` from the active provider)
+- Modify: `web/src/ui/Settings.tsx` (disable the toggle where search cannot work)
+- Modify: `web/src/lib/db/types.ts` (update the `tools` doc comment)
+
+**Why:** the Web-search toggle wrote OpenAI's built-in `web_search_preview` for *every* endpoint, but only OpenAI executes it. On OpenRouter (real search = `plugins:[{id:"web",max_results}]`) and OpenCode/Command Code (no server-side search) the model got a tool nothing runs → it believed it had searched and answered from its training cutoff (a 2025 reply).
+
+- [ ] **Step 1:** `types.ts` — `export type SearchKind = "openai" | "openrouter"`; `export interface SearchSpec { kind: SearchKind; maxResults: number }`; `SendCtx` gains `search?: SearchSpec` (keep `tools`).
+- [ ] **Step 2:** `presets.ts` — `searchKindFor(baseUrl): SearchKind | null` (`openrouter.ai` → `"openrouter"`, `api.openai.com` → `"openai"`, else `null`). Preset `tools` defaults unchanged.
+- [ ] **Step 3:** `responses.ts` / `chatCompletions.ts` — send `tools: ctx.tools` **only** when `ctx.search?.kind === "openai"`; for `"openrouter"` send `plugins: [{ id: "web", max_results }]` instead. Explicit keys, so nothing replayed from `prev` leaks.
+- [ ] **Step 4:** `chat.ts` — `search` present only when the endpoint has a mechanism and the provider's `tools` is non-empty.
+- [ ] **Step 5:** `Settings.tsx` — toggle `disabled` + a hint when `searchKindFor(baseUrl)` is `null`; an OpenRouter hint that search is billed by OpenRouter.
+- [ ] **Step 6:** Verify — tsc/biome/LS + a mock-SSE smoke asserting the request body per endpoint.
+- [ ] **Step 7:** Commit — `fix(providers): per-endpoint web search (OpenRouter plugin; no phantom tool)`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
