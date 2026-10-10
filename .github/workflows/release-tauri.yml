@@ -49,7 +49,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add web/package.json web/src-tauri/tauri.conf.json web/src-tauri/Cargo.toml web/src-tauri/Cargo.lock
-          git commit -m "chore(release): desktop ${tag}"
+          git commit -m "chore(release): desktop v${version}"
           git push origin "HEAD:${{ github.event.repository.default_branch }}"
           git tag "${tag}"
           git push origin "${tag}"
