@@ -513,6 +513,25 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 32: Export / import a backup file (desktop ↔ website)
+
+**Files:**
+- Create: `web/src/lib/backup.ts` (schema + `exportBackup`/`importBackup`)
+- Modify: `web/src/ui/Settings.tsx` (a Backup section)
+
+**Interfaces:**
+- `backupSchema = z.object({ version: z.literal(1), exportedAt: z.string(), settings: Settings, conversations: z.array(conversationSchema) })`.
+- `exportBackup(): Effect.Effect<Backup, string>` — `db.getSettings()` + `db.listConversations()`.
+- `importBackup(raw: unknown): Effect.Effect<{ conversations: number }, string>` — validate, `db.setSettings(backup.settings)`, then `db.upsertConversation` for each conversation (additive; never deletes).
+
+- [ ] **Step 1:** `lib/backup.ts` — the zod schema (reuse `Settings`/`conversationSchema` from `@lib/db/types`), `exportBackup`, and `importBackup` (a bad payload fails with a readable message; storage untouched).
+- [ ] **Step 2:** `Settings.tsx` — a Backup section: **Export** (a `.json` download plus a Copy-to-clipboard fallback, since a webview may not surface the download) and **Import** (a file input read via `Effect.callback` + `FileReader.readAsText`), with an inline status/error line and a warning that the file contains API keys.
+- [ ] **Step 3:** On a successful import, `window.location.reload()` so both stores re-hydrate from `db` — no partial in-memory state.
+- [ ] **Step 4:** Verify — gates + a browser round-trip.
+- [ ] **Step 5:** Commit — `feat: export/import a backup file (settings + conversations)`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).

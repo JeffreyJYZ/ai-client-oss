@@ -1,9 +1,10 @@
+import { type Backup, exportBackup, importBackup } from "@lib/backup";
 import type { Profile, ProviderConfig } from "@lib/db";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
 import { PROVIDER_PRESETS, searchKindFor } from "@lib/providers/presets";
 import { Effect } from "effect";
-import { useState } from "react";
+import { type ChangeEvent, useRef, useState } from "react";
 import {
 	addProfile,
 	addProvider,
@@ -44,6 +45,11 @@ export default function Settings() {
 	const [modelsPending, setModelsPending] = useState(false);
 	const [testPending, setTestPending] = useState(false);
 	const [message, setMessage] = useState<string | null>(null);
+	const [backupStatus, setBackupStatus] = useState<{
+		readonly ok: boolean;
+		readonly text: string;
+	} | null>(null);
+	const importInputRef = useRef<HTMLInputElement>(null);
 
 	const missingKey = (active?.apiKey ?? "").trim() === "";
 	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
@@ -180,6 +186,113 @@ export default function Settings() {
 				Effect.ensuring(Effect.sync(() => setTestPending(false))),
 			),
 		);
+	};
+
+	/** Identical bytes for the download and the clipboard copy. */
+	const serializeBackup = (backup: Backup): string =>
+		`${JSON.stringify(backup, null, 2)}\n`;
+
+	/** Download the backup as `ai-client-backup-<YYYY-MM-DD>.json`. */
+	const exportBackupFile = (): void => {
+		Effect.runFork(
+			exportBackup().pipe(
+				Effect.tap((backup) =>
+					Effect.sync(() => {
+						const blob = new Blob([serializeBackup(backup)], {
+							type: "application/json",
+						});
+						const url = URL.createObjectURL(blob);
+						const anchor = document.createElement("a");
+						anchor.href = url;
+						anchor.download = `ai-client-backup-${new Date()
+							.toISOString()
+							.slice(0, 10)}.json`;
+						anchor.click();
+						URL.revokeObjectURL(url);
+					}),
+				),
+				Effect.catch((error) =>
+					Effect.sync(() => setBackupStatus({ ok: false, text: error })),
+				),
+			),
+		);
+	};
+
+	/**
+	 * Copy the same JSON — the desktop webview may not surface a
+	 * download, so this is the other half of export.
+	 */
+	const copyBackupJson = (): void => {
+		Effect.runFork(
+			exportBackup().pipe(
+				Effect.tap((backup) =>
+					Effect.tryPromise({
+						try: () => navigator.clipboard.writeText(serializeBackup(backup)),
+						catch: (cause) => String(cause),
+					}),
+				),
+				Effect.tap(() =>
+					Effect.sync(() =>
+						setBackupStatus({
+							ok: true,
+							text: "Copied backup JSON to the clipboard.",
+						}),
+					),
+				),
+				Effect.catch((error) =>
+					Effect.sync(() => setBackupStatus({ ok: false, text: error })),
+				),
+			),
+		);
+	};
+
+	/**
+	 * Read the picked file as text. `FileReader` is a callback-based
+	 * Web API, so `Effect.callback` keeps it inside Effect without a
+	 * raw `Promise` (banned in `web/src` by the `no-new-promise`
+	 * plugin).
+	 */
+	const readBackupFile = (file: File): Effect.Effect<unknown, string> =>
+		Effect.callback<string, string>((resume) => {
+			const reader = new FileReader();
+			reader.onload = () => resume(Effect.succeed(String(reader.result ?? "")));
+			reader.onerror = () =>
+				resume(Effect.fail(String(reader.error ?? "file read failed")));
+			reader.readAsText(file);
+		}).pipe(
+			Effect.flatMap((text) =>
+				Effect.try({
+					try: () => JSON.parse(text),
+					catch: (cause) => String(cause),
+				}),
+			),
+		);
+
+	const onImportFile = (event: ChangeEvent<HTMLInputElement>): void => {
+		const file = event.target.files?.[0];
+		if (file !== undefined) {
+			Effect.runFork(
+				readBackupFile(file).pipe(
+					Effect.flatMap((raw) => importBackup(raw)),
+					Effect.tap((result) =>
+						Effect.sync(() => {
+							setBackupStatus({
+								ok: true,
+								text: `Imported ${result.conversations} conversations.`,
+							});
+							// Both stores re-hydrate from `db` on the
+							// fresh load; no partial in-memory state.
+							window.location.reload();
+						}),
+					),
+					Effect.catch((error) =>
+						Effect.sync(() => setBackupStatus({ ok: false, text: error })),
+					),
+				),
+			);
+		}
+		// Reset so re-selecting the same file fires `change` again.
+		event.target.value = "";
 	};
 
 	const showEditor = editingId !== null && active !== undefined;
@@ -526,8 +639,8 @@ export default function Settings() {
 						</p>
 					) : searchKind === "openrouter" ? (
 						<p className="text-xs text-neutral-500">
-							Search runs through OpenRouter&apos;s web plugin (billed by
-							OpenRouter).
+							OpenRouter&apos;s search server tool lets the model decide when to
+							search (billed by OpenRouter).
 						</p>
 					) : (
 						<p className="text-xs text-neutral-500">
@@ -546,6 +659,53 @@ export default function Settings() {
 								className={INPUT}
 							/>
 						</label>
+					) : null}
+				</div>
+				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
+					<div className="flex flex-wrap items-center justify-between gap-3">
+						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+							Backup
+						</h3>
+						<div className="flex gap-2">
+							<button
+								type="button"
+								onClick={exportBackupFile}
+								className={BUTTON}
+							>
+								Export
+							</button>
+							<button type="button" onClick={copyBackupJson} className={BUTTON}>
+								Copy
+							</button>
+							<button
+								type="button"
+								onClick={() => importInputRef.current?.click()}
+								className={BUTTON}
+							>
+								Import
+							</button>
+						</div>
+					</div>
+					<input
+						ref={importInputRef}
+						type="file"
+						accept="application/json,.json"
+						onChange={onImportFile}
+						className="hidden"
+					/>
+					<p className="text-xs text-neutral-500">
+						Move settings and conversations between the desktop app and the
+						website as a JSON file. The file contains your API keys — keep it
+						private.
+					</p>
+					{backupStatus !== null ? (
+						<span
+							className={`text-sm ${
+								backupStatus.ok ? "text-green-400" : "text-red-400"
+							}`}
+						>
+							{backupStatus.text}
+						</span>
 					) : null}
 				</div>
 			</div>
