@@ -12,6 +12,8 @@ Desktop and web client for OpenAI-compatible endpoints. Tauri shell, Vite + Reac
 - **One codebase, two targets**: the same app ships as a desktop binary and as a website.
 - **Any OpenAI-compatible endpoint**: no vendor lock-in.
 - **Local by default**: conversations and API keys stay on your machine, and the app has no analytics.
+- **Remembers you**: durable notes the model writes as it works, plus your own, sent with every chat.
+- **Updates itself**: the desktop build finds a newer release, downloads it and relaunches.
 
 ## Download
 
@@ -33,8 +35,6 @@ On Windows, SmartScreen warns: pick **More info → Run anyway**.
 - Per-conversation system prompts, and profiles bundling provider, model and prompt.
 - File and image attachments.
 - Export/Import moves settings and conversations between the desktop and web builds.
-- Long-term memory: notes the model writes as it works, plus your own, sent with every request.
-- In-app updates: the desktop build checks for a newer release, downloads it and relaunches.
 
 ![Settings](docs/screenshots/settings.png)
 
