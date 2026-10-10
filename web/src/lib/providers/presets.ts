@@ -1,5 +1,10 @@
 import type { ProtocolName } from "@lib/providers";
-import type { SearchKind, SearchSpec, ToolSpec } from "@lib/providers/types";
+import type {
+	SearchKind,
+	SearchSpec,
+	SendCtx,
+	ToolSpec,
+} from "@lib/providers/types";
 
 export interface ProviderPreset {
 	readonly id: string;
@@ -83,6 +88,89 @@ export const searchKindFor = (baseUrl: string): SearchKind | null => {
 	// Anthropic runs its built-in `web_search` server tool itself.
 	if (url.includes("api.anthropic.com")) return "anthropic";
 	return null;
+};
+
+/**
+ * The protocols that declare tools on the wire. Local to
+ * this module: importing `ProtocolName` from the provider
+ * index for these signatures would close a type cycle (the
+ * provider modules import `requestTools` from here).
+ */
+type WireProtocol = "anthropic" | "responses" | "chatcompletions";
+
+/** The built-in URL-fetch tool's name on the wire. */
+const FETCH_URL_NAME = "fetch_url";
+
+/**
+ * What makes the model use the tool at the right moment: it
+ * fetches a URL and returns the page's readable text, so a
+ * link in the prompt or a question about a specific page is
+ * a call, not a guess.
+ */
+const FETCH_URL_DESCRIPTION =
+	"Fetches a URL and returns the page's readable text. Use it when the user shares a link or asks about a specific page.";
+
+/** The `fetch_url` parameter schema, shared by every envelope. */
+const fetchUrlParameters = {
+	type: "object",
+	properties: {
+		url: {
+			type: "string",
+			description: "The URL to fetch.",
+		},
+	},
+	required: ["url"],
+} as const;
+
+/**
+ * The built-in `fetch_url` tool in the envelope the
+ * protocol wants: chat/completions nests it under
+ * `function`, the Responses API takes the flat function
+ * shape, and Anthropic declares it with `input_schema`.
+ */
+export const fetchUrlTool = (protocol: WireProtocol): unknown => {
+	if (protocol === "anthropic") {
+		return {
+			name: FETCH_URL_NAME,
+			description: FETCH_URL_DESCRIPTION,
+			input_schema: fetchUrlParameters,
+		};
+	}
+	if (protocol === "responses") {
+		return {
+			type: "function",
+			name: FETCH_URL_NAME,
+			description: FETCH_URL_DESCRIPTION,
+			parameters: fetchUrlParameters,
+		};
+	}
+	return {
+		type: "function",
+		function: {
+			name: FETCH_URL_NAME,
+			description: FETCH_URL_DESCRIPTION,
+			parameters: fetchUrlParameters,
+		},
+	};
+};
+
+/**
+ * The tools one request carries: the endpoint's web-search
+ * declaration plus the built-in `fetch_url` tool when the
+ * request asks for it (`ctx.fetchTool`). `undefined` when
+ * neither applies, so a request with no mechanism sends no
+ * `tools` key at all.
+ */
+export const requestTools = (
+	ctx: SendCtx,
+	protocol: WireProtocol,
+): readonly unknown[] | undefined => {
+	const search = searchTools(ctx.search, ctx.tools);
+	const fetchTool =
+		ctx.fetchTool === true ? [fetchUrlTool(protocol)] : undefined;
+	if (search === undefined) return fetchTool;
+	if (fetchTool === undefined) return search;
+	return [...search, ...fetchTool];
 };
 
 /**

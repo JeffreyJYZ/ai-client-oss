@@ -1,7 +1,12 @@
 import { parseResponsesSend } from "@lib/core/parse";
-import { searchTools } from "@lib/providers/presets";
+import { requestTools } from "@lib/providers/presets";
 import { bearerHeaders, sendStream } from "@lib/providers/send";
-import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
+import type {
+	Chunk,
+	Provider,
+	SendCtx,
+	ToolCallData,
+} from "@lib/providers/types";
 import { ResponsesSend } from "@lib/types/protocols";
 import { responsesSendMinTemplate } from "@lib/util/templates";
 import type { Effect, Stream } from "effect";
@@ -45,7 +50,7 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 		// Explicit key (not a conditional spread): an empty/absent list must
 		// overwrite any `tools` replayed from the previous turn's body, or a
 		// provider switch would resend the old endpoint's declaration.
-		tools: searchTools(ctx.search, ctx.tools),
+		tools: requestTools(ctx, "responses"),
 	};
 };
 
@@ -71,6 +76,45 @@ const appendAssistant = (send: ResponsesSend, text: string) => {
 	};
 };
 
+/**
+ * Append a tool call and its result: a `function_call`
+ * item (keyed by the call's `call_id`) followed by its
+ * `function_call_output`, after the assistant message that
+ * carries the round's text. Pure.
+ */
+const appendToolResult = (
+	send: ResponsesSend,
+	call: ToolCallData,
+	result: string,
+): unknown => {
+	const prior =
+		typeof send.input === "string"
+			? [
+					{
+						role: "user" as const,
+						content: [{ type: "input_text" as const, text: send.input }],
+					},
+				]
+			: send.input;
+	return {
+		...send,
+		input: [
+			...prior,
+			{
+				type: "function_call" as const,
+				call_id: call.id,
+				name: call.name,
+				arguments: call.args,
+			},
+			{
+				type: "function_call_output" as const,
+				call_id: call.id,
+				output: result,
+			},
+		],
+	};
+};
+
 export const responses = {
 	schema: ResponsesSend,
 	endpoint,
@@ -78,6 +122,7 @@ export const responses = {
 	parse: parseResponsesSend,
 	buildRequest,
 	appendAssistant,
+	appendToolResult,
 	headers: bearerHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(

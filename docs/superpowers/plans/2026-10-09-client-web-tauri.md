@@ -632,7 +632,46 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 39: Model-requested URL fetch (`fetch_url` tool)
+
+**Files:** create `web/src/lib/fetch.ts`; modify `web/src-tauri/src/lib.rs`, `web/src-tauri/Cargo.toml`, `lib/providers/types.ts`, `lib/providers/send.ts`, `lib/providers/presets.ts`, `lib/providers/{chatCompletions,responses,anthropicMessages}.ts`, `state/chat.ts`, `ui/Message.tsx`, `ui/Settings.tsx`, `lib/db/types.ts`.
+
+**Why:** the model can only talk about a page if the user pastes its text — it has no way to ask for a URL. This is the first task that *executes* a tool (tool execution was out of scope until now): exactly one narrow tool, not a general loop.
+
+**Dependency note:** adds two *direct* Rust crates — `reqwest` (`default-features = false, features = ["rustls-no-provider"]`) and `rustls` (`ring`). The lock resolves reqwest to **0.13.5**, where the old `rustls-tls` feature no longer exists, and the no-provider build needs a `ring` crypto provider installed once at runtime. Both are already in `Cargo.lock` via `tauri-plugin-updater`, so the tree must not grow — `git diff --stat Cargo.lock` shows only the two new direct-dependency lines.
+
+- [x] **Step 1:** Rust transport — `fetch_url(url)`: GET with a desktop user agent, a timeout and a response-size cap (named constants), `http`/`https` only, every failure a `Result::Err(String)` and never a panic. `async fn` with `reqwest`'s async client so the UI thread is never blocked; register it in `generate_handler!`.
+- [x] **Step 2:** `web/src/lib/fetch.ts` — `fetchUrlText(url): Effect<string, string>`. Desktop invokes the command (mirror how `lib/db/tauri.ts` imports `@tauri-apps/api/core`, and select with `isDesktop` from `lib/platform.ts`); the web build uses `fetch` and turns a network/CORS failure into a plain sentence rather than a raw `TypeError`.
+- [x] **Step 3:** `htmlToText(html)` — pure: drop `script`/`style`/`head`, tags to whitespace, decode the common entities, collapse runs, cap at a named character limit with an explicit truncation note. No new dependency.
+- [x] **Step 4:** Declare the tool per wire shape in `presets.ts` — `fetchToolSpec(kind)` returns what each endpoint wants (`{type:"function",function:{…}}` for chat/completions, the flat `{type:"function",name,…}` for Responses, `{name,input_schema}` for Anthropic) with a one-property JSON schema (`url`, required). Merge with the search declaration so one request can carry both.
+- [x] **Step 5:** Parse the call — extend `Chunk` with the call envelope (id, name, arguments) and accumulate per protocol: chat/completions streams `tool_calls[].function.arguments` in pieces and completes on `finish_reason: "tool_calls"`; Responses carries the whole string on `function_call_arguments.done`; Anthropic accumulates `input_json_delta.partial_json` and closes on `content_block_stop`. The per-line parser stays pure; accumulation lives in the stream builder.
+- [x] **Step 6:** `appendToolResult` on every provider, plus the loop in `chat.ts`: when a run settles with calls pending, fetch each (bounded by named max calls per turn and max rounds), append the results to the body, mark each result in the transcript (display-only — never on the wire), and re-send with the extended body. `stop` must interrupt a fetch in flight, and the finalizer still respects the run-identity token. The body of every round must carry the user message exactly once: a round that re-appends it repeats the question at the model.
+- [x] **Step 7:** Settings toggle `fetchToolEnabled` (zod-defaulted so a stored settings file still parses) and the transcript marker for both a successful and a failed fetch.
+- [ ] **Step 8:** Verify — gates, then a local mock endpoint that answers with a tool call followed by a final answer, driven in a browser, proving the loop closes and the fetched text reaches the second request; `cargo check --all-targets` for the Rust path.
+- [x] **Step 9:** Commit — `feat: model-requested URL fetch`.
+
+**Design note:** the tool result is appended to the request body, not stored as a `ChatMessage` — the transcript keeps a display-only marker (the same seam Task 29 established for tool calls), so the DB schema and every wire shape stay untouched. Deliberately do *not* echo reasoning back for tool continuity: OpenRouter recommends preserving `reasoning_details` across a tool call, but the chunk pipeline flattens reasoning to plain text, so the structured blocks are gone by then — that continuity is not worth restructuring the pipeline for.
+
+---
+
+### Task 40: Thinking streams — the `reasoning_details` shape and live progress
+
+**Files:** modify `lib/providers/send.ts`, `ui/Message.tsx`.
+
+**Why:** a mock-SSE repro (identical 250 ms pacing for reasoning and answer, driven in a browser) split the report in two:
+
+- OpenRouter's newer `reasoning_details` shape renders **no thinking at all**: `parseLine` reads only `delta.reasoning_content ?? delta.reasoning`, so those deltas parse to `null` and are filtered out — 0 of 12 reasoning words reached the page.
+- The client's read→paint path does **not** lump: with the handled shape, one event painted per event, as smoothly as the answer. So a "few big jumps" off the wire is the endpoint's own emission pattern (a model sending coarse `reasoning` beside fine `reasoning_details`), not the render loop.
+- Independent of both: in-progress thinking is invisible — the `<details>` is closed by default and its `<summary>` is a static "Thinking…", so the screen shows nothing moving while the model thinks.
+
+- [x] **Step 1:** `parseLine` — also read `reasoning_details`. **Verify every item shape against OpenRouter's current docs before coding** (a text item carries `text`, a summary item `summary`, an encrypted item carries nothing renderable). When one delta carries both fields, prefer the structured one so the same text is never appended twice. Stays pure.
+- [x] **Step 2:** the collapsed row shows progress: the summary carries the thinking's growing size, so a reader sees the model working without expanding the box.
+- [x] **Step 3:** Verify — re-run the mock-SSE harness (it already drives both shapes) and assert the box appears for the `reasoning_details` shape and that its text grows event by event; then the usual gates.
+- [x] **Step 4:** Commit — `fix: read OpenRouter reasoning_details so thinking streams`.
+
+---
+
 ## Out of scope (this plan)
 
-- The Rust implementation of the Tauri storage adapter (stubbed in Task 4).
-- Tool *execution* (declaring tools only), non-OpenAI-shaped SSE parsing, auth beyond a bearer key.
+- General tool execution — Task 39 ships `fetch_url` only.
+- Auth beyond a bearer key or `x-api-key`.

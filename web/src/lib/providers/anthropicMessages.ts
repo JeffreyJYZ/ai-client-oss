@@ -1,7 +1,12 @@
 import { parseAnthropicSend } from "@lib/core/parse";
-import { searchTools } from "@lib/providers/presets";
+import { requestTools } from "@lib/providers/presets";
 import { sendStream } from "@lib/providers/send";
-import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
+import type {
+	Chunk,
+	Provider,
+	SendCtx,
+	ToolCallData,
+} from "@lib/providers/types";
 import { AnthropicSend } from "@lib/types/protocols";
 import type { Effect, Stream } from "effect";
 
@@ -99,7 +104,7 @@ const buildRequest = (send: AnthropicSend, ctx: SendCtx) => {
 		// list must overwrite any `tools` replayed from the previous
 		// turn's body, or a provider switch would resend the old
 		// endpoint's declaration.
-		tools: searchTools(ctx.search, ctx.tools),
+		tools: requestTools(ctx, "anthropic"),
 	};
 };
 
@@ -108,6 +113,81 @@ const appendAssistant = (send: AnthropicSend, text: string) => ({
 	messages: [...send.messages, { role: "assistant" as const, content: text }],
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null;
+
+/**
+ * Append a tool call and its result: a `tool_use` block
+ * (keyed by the call's `id`, carrying the parsed arguments
+ * as `input`) joins the assistant message that carries the
+ * round's text, and the result follows as a user
+ * `tool_result` block keyed by `tool_use_id` — merged into
+ * a trailing tool-result message when the round already
+ * produced one, which is the API's canonical multi-result
+ * shape. `failed` sets the block's error flag. Pure.
+ */
+const appendToolResult = (
+	send: AnthropicSend,
+	call: ToolCallData,
+	result: string,
+	failed: boolean,
+): unknown => {
+	const messages = [...send.messages];
+	const use = {
+		type: "tool_use",
+		id: call.id,
+		name: call.name,
+		input: isRecord(call.input) ? call.input : {},
+	};
+	// The round's text was appended first, so the last
+	// assistant message carries the round's calls — a later
+	// call in the same round joins it there (a body without
+	// any assistant message, a hand-edited replay, gets a
+	// fresh one). Its text rides as a text block ahead of
+	// the call's blocks.
+	let index = messages.length - 1;
+	while (index >= 0 && messages[index].role !== "assistant") {
+		index -= 1;
+	}
+	if (index >= 0) {
+		const assistant = messages[index];
+		const content = Array.isArray(assistant.content)
+			? assistant.content
+			: [{ type: "text", text: assistant.content }];
+		messages[index] = {
+			...assistant,
+			content: [...content, use],
+		};
+	} else {
+		messages.push({ role: "assistant" as const, content: [use] });
+	}
+	const resultBlock = {
+		type: "tool_result",
+		tool_use_id: call.id,
+		content: result,
+		...(failed ? { is_error: true } : {}),
+	};
+	const tail = messages[messages.length - 1];
+	const tailContent = tail?.content;
+	// A round's results collect into one user message — the
+	// API's canonical multi-result shape — so a trailing
+	// tool-result message takes the block.
+	if (
+		tail?.role === "user" &&
+		Array.isArray(tailContent) &&
+		tailContent.length > 0 &&
+		tailContent[tailContent.length - 1].type === "tool_result"
+	) {
+		messages[messages.length - 1] = {
+			...tail,
+			content: [...tailContent, resultBlock],
+		};
+	} else {
+		messages.push({ role: "user" as const, content: [resultBlock] });
+	}
+	return { ...send, messages };
+};
+
 export const anthropic = {
 	schema: AnthropicSend,
 	endpoint,
@@ -115,6 +195,7 @@ export const anthropic = {
 	parse: parseAnthropicSend,
 	buildRequest,
 	appendAssistant,
+	appendToolResult,
 	headers: anthropicHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(

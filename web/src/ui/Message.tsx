@@ -30,7 +30,7 @@ export default function Message({ message }: MessageProps) {
 				{message.reasoning !== undefined && message.reasoning !== "" ? (
 					<details className="mb-2 rounded border border-neutral-700/60 bg-neutral-900/60 px-2 py-1.5">
 						<summary className="cursor-pointer select-none text-[10px] uppercase tracking-widest text-neutral-500">
-							Thinking…
+							Thinking… {message.reasoning.length.toLocaleString()} chars
 						</summary>
 						<p className="mt-1 whitespace-pre-wrap break-words text-xs italic text-neutral-500">
 							{message.reasoning}

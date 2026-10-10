@@ -1,7 +1,12 @@
 import { parseChatCompletionsSend } from "@lib/core/parse";
-import { searchTools } from "@lib/providers/presets";
+import { requestTools } from "@lib/providers/presets";
 import { bearerHeaders, sendStream } from "@lib/providers/send";
-import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
+import type {
+	Chunk,
+	Provider,
+	SendCtx,
+	ToolCallData,
+} from "@lib/providers/types";
 import { ChatCompletionsSend } from "@lib/types/protocols";
 import type { Effect, Stream } from "effect";
 
@@ -48,7 +53,7 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 		// provider switch would resend the old endpoint's declaration.
 		// Explicit keys: a value replayed from the previous turn's body
 		// (`...send`) must be overwritten rather than inherited.
-		tools: searchTools(ctx.search, ctx.tools),
+		tools: requestTools(ctx, "chatcompletions"),
 		// OpenRouter deprecated the `web` plugin — it searched **once per
 		// request**, so a bare "nice" became a query for the city; the
 		// `openrouter:web_search` server tool lets the model decide per
@@ -66,6 +71,54 @@ const appendAssistant = (send: ChatCompletionsSend, text: string) => {
 	};
 };
 
+/**
+ * Append a tool call and its result: the call joins the assistant
+ * message that carries the round's text (`tool_calls`, keyed by the
+ * call's `id`), and the result follows as a `role: "tool"` message
+ * keyed by `tool_call_id`. Pure.
+ */
+const appendToolResult = (
+	send: ChatCompletionsSend,
+	call: ToolCallData,
+	result: string,
+): unknown => {
+	const messages = ((send as { messages?: unknown[] }).messages ??
+		[]) as Record<string, unknown>[];
+	const next = [...messages];
+	const toolCall = {
+		id: call.id,
+		type: "function",
+		function: { name: call.name, arguments: call.args },
+	};
+	// The round's text was appended first, so the last
+	// assistant message carries the round's calls — a later
+	// call in the same round joins it there (a body without
+	// any assistant message, a hand-edited replay, gets a
+	// fresh one).
+	let index = next.length - 1;
+	while (index >= 0 && next[index].role !== "assistant") {
+		index -= 1;
+	}
+	if (index >= 0) {
+		const assistant = next[index];
+		const calls = Array.isArray(assistant.tool_calls)
+			? assistant.tool_calls
+			: [];
+		next[index] = {
+			...assistant,
+			tool_calls: [...calls, toolCall],
+		};
+	} else {
+		next.push({
+			role: "assistant",
+			content: "",
+			tool_calls: [toolCall],
+		});
+	}
+	next.push({ role: "tool", tool_call_id: call.id, content: result });
+	return { ...send, messages: next };
+};
+
 export const chatcompletions = {
 	schema: ChatCompletionsSend,
 	endpoint,
@@ -73,6 +126,7 @@ export const chatcompletions = {
 	parse: parseChatCompletionsSend,
 	buildRequest,
 	appendAssistant,
+	appendToolResult,
 	headers: bearerHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(

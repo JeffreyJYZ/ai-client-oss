@@ -1,9 +1,15 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
+import { fetchUrlText } from "@lib/fetch";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
 import { type ProtocolName, protocolNames, providers } from "@lib/providers";
 import { searchKindFor } from "@lib/providers/presets";
-import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
+import type {
+	AttachmentPart,
+	Chunk,
+	SendCtx,
+	ToolCallData,
+} from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
 import { getActiveProvider, getSettings, setSettings } from "./settings";
@@ -27,6 +33,14 @@ export interface ChatSnapshot {
 
 const DEFAULT_TITLE = "New chat";
 const TITLE_MAX = 48;
+
+/**
+ * Tool-loop bounds: a model must not be able to spin. At most
+ * this many `fetch_url` calls execute in one turn, spread over
+ * at most this many request rounds.
+ */
+const MAX_TOOL_CALLS_PER_TURN = 8;
+const MAX_TOOL_ROUNDS = 4;
 
 /**
  * Last request body successfully sent, per conversation and protocol,
@@ -157,15 +171,64 @@ const persistConversationById = (id: string): void => {
 const toolMarker = (name: string): string =>
 	/search/i.test(name) ? "🔍 searched the web" : `🔧 ${name}`;
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null;
+
 /**
- * Raw text accumulation shared with `appendChunk`. Memory tags are stripped
- * from the visible text, so the raw accumulation is the single source both
- * the visible text and the next-turn seed derive from: re-extracting over
- * the whole accumulation is idempotent, and a tag split across chunks still
- * never reaches the UI or the store.
+ * A message's text with a display-only marker line appended:
+ * trailing blank lines are trimmed first so two adjacent
+ * markers never stack, and the marker is separated from any
+ * text before it.
+ */
+const withMarker = (text: string, marker: string): string => {
+	const base = text.replace(/\n+$/, "");
+	const sep = base === "" ? "" : "\n\n";
+	return `${base}${sep}${marker}\n\n`;
+};
+
+/**
+ * The visible text of the accumulation: its text runs with the
+ * marker lines interleaved between them. Each run is sliced out of
+ * `value` at the next marker's recorded boundary, so a marker always
+ * sits between the runs around it.
+ */
+const renderRaw = (raw: RawText): string => {
+	let text = "";
+	let from = 0;
+	for (const marker of raw.markers) {
+		text = withMarker(
+			`${text}${raw.value.slice(from, marker.at)}`,
+			marker.line,
+		);
+		from = marker.at;
+	}
+	return `${text}${raw.value.slice(from)}`;
+};
+
+/**
+ * Record a display-only marker line at the current run boundary and
+ * return the visible text with it interleaved. Used for the `tool`
+ * chunk marker and, after execution, for a tool call's outcome.
+ */
+const pushMarker = (raw: RawText, line: string): string => {
+	raw.markers.push({ at: raw.value.length, line });
+	return renderRaw(raw);
+};
+
+/**
+ * Raw text accumulation shared with `appendChunk`. Memory tags are
+ * stripped from the visible text, so the raw accumulation is the
+ * single source both the visible text and the next-turn seed derive
+ * from: re-extracting over the whole accumulation is idempotent, and
+ * a tag split across chunks still never reaches the UI or the store.
+ * Markers are kept apart from it — with the `value` length each was
+ * inserted at — so the visible text interleaves them with the text
+ * runs while the accumulation itself stays marker-free (a marker is
+ * display-only and must never reach the wire).
  */
 interface RawText {
 	value: string;
+	markers: { readonly at: number; readonly line: string }[];
 }
 
 /**
@@ -191,14 +254,42 @@ const appendChunk = (
 			if (chunk.kind === "tool") {
 				// The marker is display-only: the visible text (the next-turn
 				// seed) accumulates `text` chunks only, so it never reaches the
-				// wire. Trim trailing blank lines first so two adjacent calls
-				// don't stack.
-				const base = m.text.replace(/\n+$/, "");
-				const sep = base === "" ? "" : "\n\n";
-				return { ...m, text: `${base}${sep}${toolMarker(chunk.text)}\n\n` };
+				// wire.
+				return {
+					...m,
+					text: extractMemories(pushMarker(raw, toolMarker(chunk.text))).text,
+				};
 			}
+			// Only `text` accumulates into the answer; every other kind is a
+			// no-op, so a new chunk kind (a completed `tool_call` above all)
+			// cannot leak into the reply.
+			if (chunk.kind !== "text") return m;
 			raw.value += chunk.text;
-			return { ...m, text: extractMemories(raw.value).text };
+			return { ...m, text: extractMemories(renderRaw(raw)).text };
+		}),
+	}));
+	refresh();
+};
+
+/**
+ * Append a display-only marker line to the assistant message — the
+ * same seam the `tool` chunk marker uses — for a tool execution's
+ * outcome (a fetched page, a failure).
+ */
+const appendMarker = (
+	conversationId: string,
+	messageId: string,
+	marker: string,
+	raw: RawText,
+): void => {
+	updateConversation(conversationId, (conversation) => ({
+		...conversation,
+		messages: conversation.messages.map((m) => {
+			if (m.id !== messageId) return m;
+			return {
+				...m,
+				text: extractMemories(pushMarker(raw, marker)).text,
+			};
 		}),
 	}));
 	refresh();
@@ -255,6 +346,85 @@ const finalize = (
 	refresh();
 	persistConversationById(conversationId);
 };
+
+/**
+ * One `fetch_url` execution: the text returned to the model (the
+ * page, or a failure sentence) and the marker line the transcript
+ * shows for it.
+ */
+interface FetchOutcome {
+	readonly result: string;
+	readonly marker: string;
+	readonly failed: boolean;
+	/** The call's arguments, parsed; the loop validated them. */
+	readonly input: unknown;
+}
+
+/** The transcript marker for a failed fetch. */
+const fetchFailedMarker = (sentence: string): string =>
+	`🔗 fetch failed: ${sentence}`;
+
+/**
+ * Execute one `fetch_url` call: parse its arguments, fetch the
+ * URL's page as text, and render both outcomes as strings — a
+ * missing or non-string `url` is a failed result (a sentence, no
+ * fetch attempted), never an exception out of the loop. The fetch
+ * runs inside the calling fiber, so `stop` interrupts a fetch in
+ * flight.
+ */
+const runFetch = (call: ToolCallData): Effect.Effect<FetchOutcome> =>
+	Effect.gen(function* () {
+		// The arguments may not be JSON at all; a parse failure is
+		// `null` here, not a failed effect — the call still runs,
+		// and fails, as a missing URL.
+		const parsed = yield* Effect.orElseSucceed(
+			Effect.try({
+				try: () => JSON.parse(call.args) as unknown,
+				catch: () => "arguments were not JSON",
+			}),
+			() => null,
+		);
+		const url = isRecord(parsed) ? parsed.url : undefined;
+		if (typeof url !== "string" || url.trim() === "") {
+			const sentence = `${call.name} was called without a URL.`;
+			return {
+				result: sentence,
+				marker: fetchFailedMarker(sentence),
+				failed: true,
+				input: parsed,
+			};
+		}
+		// The fetch's failure channel is the sentence the transcript
+		// shows; either way the outcome is a string for the model.
+		const outcome = yield* Effect.catch(
+			Effect.map(fetchUrlText(url), (page) => ({
+				ok: true as const,
+				page,
+			})),
+			(sentence) => Effect.succeed({ ok: false as const, sentence }),
+		);
+		if (!outcome.ok) {
+			return {
+				result: outcome.sentence,
+				marker: fetchFailedMarker(outcome.sentence),
+				failed: true,
+				input: parsed,
+			};
+		}
+		const host = yield* Effect.orElseSucceed(
+			Effect.try({
+				try: () => new URL(url).host,
+				catch: () => "not a URL",
+			}),
+			() => url,
+		);
+		return {
+			result: outcome.page,
+			marker: `🔗 fetched ${host} (${outcome.page.length.toLocaleString()} chars)`,
+			failed: false,
+			input: parsed,
+		};
+	});
 
 export const getChat = (): ChatSnapshot => state;
 
@@ -317,6 +487,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		// endpoint-specific (OpenAI's built-in is rejected elsewhere).
 		tools: active.tools,
 		search,
+		// The built-in page-fetch tool is a capability the user
+		// can turn off; off sends no declaration, so the model
+		// cannot call it.
+		fetchTool: settings.fetchToolEnabled,
 		systemPrompt: [conversation.systemPrompt ?? "", memory]
 			.filter((part) => part !== "")
 			.join("\n\n"),
@@ -325,12 +499,20 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// Body that would be sent *this* turn. The provider's own `send` builds the
 	// identical request from the same ctx; we keep this — plus the streamed reply
 	// appended on success — to seed the next turn.
-	const nextBody = (
-		provider.buildRequest as (send: unknown, ctx: SendCtx) => unknown
-	)(prev ?? provider.template, ctx);
+	const buildBody = provider.buildRequest as (
+		send: unknown,
+		ctx: SendCtx,
+	) => unknown;
+	const nextBody = buildBody(prev ?? provider.template, ctx);
 	const appendAssistant = provider.appendAssistant as (
 		send: unknown,
 		text: string,
+	) => unknown;
+	const appendToolResult = provider.appendToolResult as (
+		send: unknown,
+		call: ToolCallData,
+		result: string,
+		failed: boolean,
 	) => unknown;
 
 	const myRun = ++runSeq;
@@ -351,14 +533,72 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// Raw accumulation of every `text` chunk. `appendChunk` derives the
 	// visible text from it (extraction is idempotent), and the finalizer
 	// harvests completed memory blocks once the stream settles.
-	const raw: RawText = { value: "" };
+	const raw: RawText = { value: "", markers: [] };
+	/**
+	 * The body the current round's request replays from: the
+	 * turn's `prev` until a tool round extends it, so the
+	 * first round's request is byte-identical to a
+	 * single-round send (the user message appears once).
+	 */
+	let replay: unknown = prev;
+	/**
+	 * The current round's full request body — what the
+	 * provider sends and the tool loop extends. Seeded with
+	 * this turn's body; a turn with no tool calls never
+	 * touches it, so the next-turn seed is byte-identical to
+	 * a single-round send.
+	 */
+	let wire: unknown = nextBody;
+	/** Where the final round's text starts in `raw`: its slice is
+	 * the reply that seeds the next turn. */
+	let finalTextStart = 0;
+	/** `fetch_url` calls executed so far this turn (the spin bound). */
+	let executed = 0;
 	const run = Effect.gen(function* () {
-		const stream = yield* SendMsg(protocol, ctx);
-		yield* Stream.runForEach(stream, (chunk) =>
-			Effect.sync(() => {
-				appendChunk(conversationId, assistantId, chunk, raw);
-			}),
-		);
+		for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
+			finalTextStart = raw.value.length;
+			const stream = yield* SendMsg(protocol, {
+				...ctx,
+				prev: replay,
+			});
+			const roundCalls: ToolCallData[] = [];
+			yield* Stream.runForEach(stream, (chunk) =>
+				Effect.sync(() => {
+					appendChunk(conversationId, assistantId, chunk, raw);
+					if (chunk.kind === "tool_call" && chunk.call !== undefined) {
+						roundCalls.push(chunk.call);
+					}
+				}),
+			);
+			// A round with no calls is the final answer: the streamed
+			// text, already in the message, ends the turn.
+			if (roundCalls.length === 0) return;
+			// The model's text before the call(s) rides on the
+			// assistant message that carries them.
+			wire = appendAssistant(wire, raw.value.slice(finalTextStart));
+			// Bound the calls: the calls past the cap are dropped, not
+			// executed — a tool_call without its result would corrupt
+			// the replayed body.
+			const room = MAX_TOOL_CALLS_PER_TURN - executed;
+			if (room <= 0) return;
+			for (const call of roundCalls.slice(0, room)) {
+				executed += 1;
+				const outcome = yield* runFetch(call);
+				appendMarker(conversationId, assistantId, outcome.marker, raw);
+				wire = appendToolResult(
+					wire,
+					{ ...call, input: outcome.input },
+					outcome.result,
+					outcome.failed,
+				);
+			}
+			// The extended body is the next round's
+			// base: the provider rebuilds the request
+			// from it (system prompt and the new user
+			// message included).
+			replay = wire;
+			wire = buildBody(replay, ctx);
+		}
 	});
 
 	// On success, seed the next turn with the reply appended so the model sees
@@ -374,7 +614,13 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 							conversationId,
 							protocol,
 							exit,
-							appendAssistant(nextBody, extracted.text),
+							// The final round's text (memory tags
+							// stripped), appended to the body the tool
+							// loop extended.
+							appendAssistant(
+								wire,
+								extractMemories(raw.value.slice(finalTextStart)).text,
+							),
 							extracted.memories,
 						);
 					}),

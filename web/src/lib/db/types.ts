@@ -91,6 +91,11 @@ export const Settings = z.object({
 	memories: z.array(memoryNoteSchema).default([]),
 	/** Off = no notes injected into requests and none recorded from replies. */
 	memoriesEnabled: z.boolean().default(true),
+	/**
+	 * Declare the built-in `fetch_url` tool on requests. Off
+	 * sends no declaration, so the model cannot call it.
+	 */
+	fetchToolEnabled: z.boolean().default(true),
 	/** A dismissed notice stays dismissed across reloads. */
 	dismissedInstallNote: z.boolean().default(false),
 	/** Newest release whose update notice the user has dismissed. */

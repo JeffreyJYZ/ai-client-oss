@@ -69,6 +69,8 @@ name = "app"
 version = "0.1.2"
 dependencies = [
  "log",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",

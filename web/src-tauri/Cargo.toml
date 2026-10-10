@@ -28,3 +28,10 @@ tauri-plugin-log = "2"
 tauri-plugin-updater = "=2.13.2"
 # `relaunch` for the JS side after an update installs.
 tauri-plugin-process = "=2.4.0"
+# Rust-side page fetch for the model's `fetch_url` tool. Reuses the
+# reqwest/rustls stack the updater already locks; `rustls-no-provider`
+# keeps a second TLS backend (aws-lc-rs) out of the tree.
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
+# Process-wide crypto provider for that no-provider reqwest build; the
+# ring crates are already in the tree via tauri-plugin-updater.
+rustls = { version = "0.23", default-features = false, features = ["ring"] }

@@ -83,6 +83,10 @@ export default function Settings() {
 		});
 	};
 
+	const setFetchToolEnabled = (on: boolean): void => {
+		setSettings({ fetchToolEnabled: on });
+	};
+
 	const setMaxResults = (raw: string): void => {
 		const value = Number.parseInt(raw, 10);
 		if (!Number.isFinite(value)) return;
@@ -713,6 +717,20 @@ export default function Settings() {
 							/>
 						</label>
 					) : null}
+					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
+						Page fetch
+						<input
+							type="checkbox"
+							checked={settings.fetchToolEnabled}
+							onChange={(event) => setFetchToolEnabled(event.target.checked)}
+							className="h-4 w-4 accent-neutral-300"
+						/>
+					</label>
+					<p className="text-xs text-neutral-500">
+						The built-in fetch_url tool is declared on every request, so the
+						model can read a page you link. The desktop app fetches it directly;
+						the browser build is bound by cross-origin rules.
+					</p>
 				</div>
 				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
 					<div className="flex flex-wrap items-center justify-between gap-3">
