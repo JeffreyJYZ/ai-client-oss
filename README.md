@@ -4,6 +4,15 @@ Desktop and web client for OpenAI-compatible endpoints. Tauri shell, Vite + Reac
 
 ![Chat](docs/screenshots/chat.png)
 
+## Highlights
+
+- **Open source and copyleft**: GPL-3.0-only, so a distributed derivative must ship its source.
+- **Tauri, not Electron**: the shell is Rust over the OS webview, with no bundled browser engine.
+- **No bundled assets**: system fonts and inline SVG icons, so nothing but code to download.
+- **One codebase, two targets**: the same app ships as a desktop binary and as a website.
+- **Any OpenAI-compatible endpoint**: no vendor lock-in.
+- **Local by default**: conversations and API keys stay on your machine, and the app has no analytics.
+
 ## Download
 
 [Releases](https://github.com/JeffreyJYZ/ai-client-oss/releases/latest) publishes macOS (universal), Windows and Linux builds. The web build runs at [aiclient.jyz.land](https://aiclient.jyz.land).
