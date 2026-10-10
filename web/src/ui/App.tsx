@@ -10,6 +10,7 @@ import ProfilePicker from "@/ui/ProfilePicker";
 import ProviderPicker from "@/ui/ProviderPicker";
 import Settings from "@/ui/Settings";
 import SystemPrompt from "@/ui/SystemPrompt";
+import UpdateNotice from "@/ui/UpdateNotice";
 
 export default function App() {
 	const { messages, status } = useChat();
@@ -82,6 +83,7 @@ export default function App() {
 						</button>
 					</div>
 				)}
+				<UpdateNotice />
 				{showSettings ? (
 					<Settings />
 				) : (
