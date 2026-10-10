@@ -29,6 +29,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - **Effect language service:** `@effect/language-service` in `web/tsconfig.app.json` `compilerOptions.plugins`. Headless: `bunx effect-language-service diagnostics --project tsconfig.app.json --format text` (catches `floatingEffect`, `missingEffectContext`, `missingReturnYieldStar`; exits 1 on findings). Wired into `web` `lint` — `biome check . && effect-language-service diagnostics --project tsconfig.app.json` — so `build` runs it too. For CI/`tsc`: `effect-language-service patch`. Add rules: `effect-language-service config`.
 - **Gotcha:** Biome `correctness/useYield` errors on a trivial `Effect.gen(function* () { return x })` with no `yield*` — use `Effect.succeed`/`Effect.sync` for no-yield effects.
 - **Gotcha:** callback-based Web APIs (`FileReader`, `IDBRequest`) with `Effect.tryPromise` need a raw `new Promise`, which `no-new-promise.grit` bans — use `Effect.callback` (see `lib/db/web.ts`, `ui/Composer.tsx`). A typed `new Promise<T>()` slips past the plugin's pattern (evades rather than fixes — don't).
+- **Gotcha:** Biome lints files **Vercel generates**. The `static-build` step writes `.vercel/static-build/package-manifest.json` into the build root, `biome check .` flags it, and `bun run build` fails → **every deployment Errors** (visible only in the Vercel build log, never locally). `biome.jsonc` `files.includes` excludes `**/.vercel`, and `web/.gitignore` lists `.vercel`.
 
 ## Release & CI
 
