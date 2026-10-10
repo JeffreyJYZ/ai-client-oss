@@ -31,6 +31,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - **Gotcha:** Biome `correctness/useYield` errors on a trivial `Effect.gen(function* () { return x })` with no `yield*` — use `Effect.succeed`/`Effect.sync` for no-yield effects.
 - **Gotcha:** callback-based Web APIs (`FileReader`, `IDBRequest`) with `Effect.tryPromise` need a raw `new Promise`, which `no-new-promise.grit` bans — use `Effect.callback` (see `lib/db/web.ts`, `ui/Composer.tsx`). A typed `new Promise<T>()` slips past the plugin's pattern (evades rather than fixes — don't).
 - **Gotcha:** Biome lints files **Vercel generates**. The `static-build` step writes `.vercel/static-build/package-manifest.json` into the build root, `biome check .` flags it, and `bun run build` fails → **every deployment Errors** (visible only in the Vercel build log, never locally). `biome.jsonc` `files.includes` excludes `**/.vercel`, and `web/.gitignore` lists `.vercel`.
+- **Gotcha:** a throwaway script that imports `@lib/*` (or `@/*`) fails `Cannot find module '@lib/…'` under plain `bun`, because `web/tsconfig.json` is solution-style so bun never reads the `paths` in `tsconfig.app.json` — and a `--tsconfig` override does not help. Fix: `ln -sfn ../src/lib web/node_modules/@lib` (node_modules is gitignored), then run the script from `web/`.
 
 ## Web search
 
