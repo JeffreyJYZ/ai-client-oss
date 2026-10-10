@@ -31,6 +31,11 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - **Gotcha:** callback-based Web APIs (`FileReader`, `IDBRequest`) with `Effect.tryPromise` need a raw `new Promise`, which `no-new-promise.grit` bans — use `Effect.callback` (see `lib/db/web.ts`, `ui/Composer.tsx`). A typed `new Promise<T>()` slips past the plugin's pattern (evades rather than fixes — don't).
 - **Gotcha:** Biome lints files **Vercel generates**. The `static-build` step writes `.vercel/static-build/package-manifest.json` into the build root, `biome check .` flags it, and `bun run build` fails → **every deployment Errors** (visible only in the Vercel build log, never locally). `biome.jsonc` `files.includes` excludes `**/.vercel`, and `web/.gitignore` lists `.vercel`.
 
+## Web search
+
+- **OpenRouter search = the `openrouter:web_search` server tool, never the `web` plugin.** OpenRouter **deprecated** the plugin (`plugins:[{id:"web"}]`, or a `model:…:online` suffix) because it **searches once per request** — every single message, so a bare "nice" became a query for the city of Nice. The server tool lives in `tools` (`{type:"openrouter:web_search",parameters:{max_results}}`), lets the **model** decide whether to search (0–N times), and works on `/responses` as well as `/chat/completions`.
+- `searchTools(search, tools)` in `web/src/lib/providers/presets.ts` maps a `SearchSpec` to the endpoint's declaration (OpenAI → `web_search_preview`; OpenRouter → the server tool); `searchKindFor(baseUrl)` decides which endpoints have a mechanism at all. The persisted `ProviderConfig.tools` array is only the on/off + result-count carrier. An endpoint with no mechanism gets **neither** key — never a phantom tool the model cannot execute.
+
 ## Release & CI
 
 - **Version home = `web/src-tauri/tauri.conf.json` `version`** (Tauri reads it for the bundle name/version). `bun scripts/bump-version.ts <patch|minor|major|X.Y.Z>` rewrites it plus `web/src-tauri/Cargo.toml`, `web/src-tauri/Cargo.lock` (`[[package]] name = "app"`) and `web/package.json`, by targeted text replacement (never re-serialize — the JSON files are tab-indented). Runs from the repo root; `--root <dir>` overrides for tests.
