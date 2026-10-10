@@ -4,6 +4,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { Effect } from "effect";
 import { useEffect, useState } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
+import { setSettings, useSettings } from "@/state/settings";
 
 /**
  * Dismissible "new release available" strip. Desktop only — the
@@ -12,7 +13,7 @@ import { LATEST_RELEASE_URL } from "@/constants/links";
  */
 export default function UpdateNotice() {
 	const [latest, setLatest] = useState<string | null>(null);
-	const [dismissed, setDismissed] = useState(false);
+	const { dismissedUpdateVersion } = useSettings();
 
 	useEffect(() => {
 		if (!isDesktop) return;
@@ -34,7 +35,8 @@ export default function UpdateNotice() {
 		);
 	}, []);
 
-	if (!isDesktop || dismissed || latest === null) return null;
+	if (!isDesktop || latest === null || latest === dismissedUpdateVersion)
+		return null;
 
 	return (
 		<div className="flex shrink-0 items-start gap-3 border-b border-neutral-800 bg-neutral-900/60 px-4 py-1.5 text-[11px] break-words text-neutral-400">
@@ -52,7 +54,7 @@ export default function UpdateNotice() {
 			</p>
 			<button
 				type="button"
-				onClick={() => setDismissed(true)}
+				onClick={() => setSettings({ dismissedUpdateVersion: latest ?? "" })}
 				aria-label="Dismiss the update notice"
 				className="shrink-0 rounded text-neutral-500 hover:text-neutral-200"
 			>

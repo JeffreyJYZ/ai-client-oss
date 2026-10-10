@@ -3,6 +3,7 @@ import "@/App.css";
 import { isDesktop, isMacOS } from "@lib/platform";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import { useChat } from "@/state/chat";
+import { setSettings, useSettings } from "@/state/settings";
 import ChatPane from "@/ui/ChatPane";
 import Composer from "@/ui/Composer";
 import ConversationList from "@/ui/ConversationList";
@@ -14,8 +15,8 @@ import UpdateNotice from "@/ui/UpdateNotice";
 
 export default function App() {
 	const { messages, status } = useChat();
+	const { dismissedInstallNote } = useSettings();
 	const [showSettings, setShowSettings] = useState(false);
-	const [showInstallNote, setShowInstallNote] = useState(true);
 
 	return (
 		<div className="flex h-full w-full text-left">
@@ -51,7 +52,7 @@ export default function App() {
 						</button>
 					</div>
 				</header>
-				{isDesktop || !isMacOS || !showInstallNote ? null : (
+				{isDesktop || !isMacOS || dismissedInstallNote ? null : (
 					<div className="flex shrink-0 items-start gap-3 border-b border-neutral-800 bg-neutral-900/60 px-4 py-1.5 text-[11px] break-words text-neutral-400">
 						<p className="min-w-0 flex-1">
 							The desktop build is unsigned — after installing, run{" "}
@@ -64,7 +65,7 @@ export default function App() {
 						</p>
 						<button
 							type="button"
-							onClick={() => setShowInstallNote(false)}
+							onClick={() => setSettings({ dismissedInstallNote: true })}
 							aria-label="Dismiss the install note"
 							className="shrink-0 rounded text-neutral-500 hover:text-neutral-200"
 						>

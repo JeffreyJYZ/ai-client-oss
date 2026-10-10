@@ -73,6 +73,10 @@ export const Settings = z.object({
 	activeProviderId: z.string().default(DEFAULT_PROVIDER_ID),
 	/** Saved provider+model+system-prompt bundles; empty until the user adds one. */
 	profiles: z.array(profileSchema).default([]),
+	/** A dismissed notice stays dismissed across reloads. */
+	dismissedInstallNote: z.boolean().default(false),
+	/** Newest release whose update notice the user has dismissed. */
+	dismissedUpdateVersion: z.string().default(""),
 });
 
 export type Settings = z.infer<typeof Settings>;
