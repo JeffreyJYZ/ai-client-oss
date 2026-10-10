@@ -33,6 +33,8 @@ On Windows, SmartScreen warns: pick **More info → Run anyway**.
 - Per-conversation system prompts, and profiles bundling provider, model and prompt.
 - File and image attachments.
 - Export/Import moves settings and conversations between the desktop and web builds.
+- Long-term memory: notes the model writes as it works, plus your own, sent with every request.
+- In-app updates: the desktop build checks for a newer release, downloads it and relaunches.
 
 ![Settings](docs/screenshots/settings.png)
 
