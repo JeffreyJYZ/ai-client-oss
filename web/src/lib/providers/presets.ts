@@ -1,5 +1,5 @@
 import type { ProtocolName } from "@lib/providers";
-import type { SearchKind, ToolSpec } from "@lib/providers/types";
+import type { SearchKind, SearchSpec, ToolSpec } from "@lib/providers/types";
 
 export interface ProviderPreset {
 	readonly id: string;
@@ -17,6 +17,30 @@ export interface ProviderPreset {
 const OPENAI_TOOLS: readonly ToolSpec[] = [
 	{ type: "web_search_preview", max_num_results: 5 },
 ];
+
+/**
+ * The web-search tool an endpoint needs on the wire, or `undefined` when it has
+ * no server-side mechanism. OpenAI executes its built-in `web_search_preview`;
+ * OpenRouter takes the `openrouter:web_search` **server tool**, which lets the
+ * model decide whether to search at all. Never use OpenRouter's deprecated
+ * `web` plugin (`plugins:[{id:"web"}]`): it searches **once per request**, so a
+ * bare "nice" becomes a query for the city.
+ */
+export const searchTools = (
+	search: SearchSpec | undefined,
+	tools: readonly ToolSpec[] | undefined,
+): readonly unknown[] | undefined => {
+	if (search?.kind === "openai") return tools;
+	if (search?.kind === "openrouter") {
+		return [
+			{
+				type: "openrouter:web_search",
+				parameters: { max_results: search.maxResults },
+			},
+		];
+	}
+	return undefined;
+};
 
 /**
  * How an endpoint serves web search, read from its base URL. `null` means

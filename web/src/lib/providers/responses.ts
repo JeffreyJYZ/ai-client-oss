@@ -1,4 +1,5 @@
 import { parseResponsesSend } from "@lib/core/parse";
+import { searchTools } from "@lib/providers/presets";
 import { sendStream } from "@lib/providers/send";
 import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
 import { ResponsesSend } from "@lib/types/protocols";
@@ -44,9 +45,7 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 		// Explicit key (not a conditional spread): an empty/absent list must
 		// overwrite any `tools` replayed from the previous turn's body, or a
 		// provider switch would resend the old endpoint's declaration.
-		// Only an OpenAI endpoint executes the built-in web-search tool;
-		// elsewhere `search` rides a different mechanism (`plugins`).
-		tools: ctx.search?.kind === "openai" ? ctx.tools : undefined,
+		tools: searchTools(ctx.search, ctx.tools),
 	};
 };
 

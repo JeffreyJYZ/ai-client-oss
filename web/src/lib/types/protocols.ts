@@ -16,10 +16,18 @@ export const ResponsesSend = z.object({
 	instructions: z.string().optional(),
 	tools: z
 		.array(
-			z.object({
-				type: z.string(),
-				max_num_results: z.number(),
-			}),
+			z.union([
+				z.object({
+					type: z.string(),
+					max_num_results: z.number(),
+				}),
+				// The server-tool declaration OpenRouter uses
+				// (`openrouter:web_search`), which carries `parameters`.
+				z.object({
+					type: z.string(),
+					parameters: z.object({ max_results: z.number() }),
+				}),
+			]),
 		)
 		.optional(),
 	input: z.union([
