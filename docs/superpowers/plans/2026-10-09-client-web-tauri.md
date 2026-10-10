@@ -532,6 +532,42 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 33: Markdown rendering for answers
+
+**Files:**
+- Modify: `web/package.json`, `web/bun.lock` (add `marked` + `dompurify`)
+- Create: `web/src/ui/Markdown.tsx`
+- Modify: `web/src/ui/Message.tsx` (answer body only; reasoning stays plain)
+- Modify: `web/src/App.css` (`.md` styles)
+
+**Why:** answers render as `whitespace-pre-wrap` plain text, so `## headings`, tables and code fences show literally.
+
+- [ ] **Step 1:** add `marked` + `dompurify` (registry latest, pinned deliberately); `@types/dompurify` only if the installed version lacks its own types.
+- [ ] **Step 2:** `Markdown.tsx` — `marked` (GFM, `breaks: true`) → `DOMPurify.sanitize` → `dangerouslySetInnerHTML` in a `.md` div; a fenced code block gets a **copy** button (injected after sanitizing; the click handler reads the sibling `<code>`'s text and copies it).
+- [ ] **Step 3:** `Message.tsx` — the answer uses `<Markdown text={message.text} />`; the reasoning `<details>` stays plain.
+- [ ] **Step 4:** `App.css` — dark-first styles for headings, lists, links, inline/`pre` code, tables, blockquotes, `hr`.
+- [ ] **Step 5:** Verify — gates + a browser render of a markdown answer **including an XSS attempt** (`<img src=x onerror=…>`, `<script>`): the structure renders, the copy button works, and no handler/script survives sanitizing.
+- [ ] **Step 6:** Commit — `feat(ui): render answers as markdown`.
+
+---
+
+### Task 34: Local models work without an API key
+
+**Files:**
+- Modify: `web/src/lib/providers/presets.ts` (Ollama + LM Studio presets)
+- Modify: `web/src/lib/providers/send.ts` (no empty `Bearer`)
+- Modify: `web/src/state/chat.ts`, `web/src/ui/Composer.tsx`, `web/src/ui/Settings.tsx` (key not required for a localhost endpoint)
+
+**Why:** the composer and Settings both refuse to send without a non-empty API key, so a local server (Ollama `:11434/v1`, LM Studio `:1234/v1`) is unusable; an empty key also emits `Authorization: Bearer `.
+
+- [ ] **Step 1:** `presets.ts` — `ollama` (`http://localhost:11434/v1`, chatcompletions, no tools) and `lmstudio` (`http://localhost:1234/v1`); a localhost helper for "needs no key".
+- [ ] **Step 2:** `send.ts` — send the `Authorization` header only for a non-empty key.
+- [ ] **Step 3:** `Composer.tsx` / `Settings.tsx` — a localhost endpoint does not count as a missing key; hint that the desktop build (or `OLLAMA_ORIGINS`) is needed for local models from a browser.
+- [ ] **Step 4:** Verify — gates + a browser smoke: a localhost provider with an empty key can send, and the request carries no `Authorization` header.
+- [ ] **Step 5:** Commit — `feat(providers): local endpoints need no API key`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).

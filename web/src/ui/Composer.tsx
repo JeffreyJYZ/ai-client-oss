@@ -1,3 +1,4 @@
+import { isLocalEndpoint } from "@lib/providers/presets";
 import type { AttachmentPart } from "@lib/providers/types";
 import { Effect } from "effect";
 import { type ChangeEvent, type KeyboardEvent, useRef, useState } from "react";
@@ -44,7 +45,9 @@ export default function Composer() {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const streaming = status === "streaming";
-	const missingKey = (active?.apiKey ?? "").trim() === "";
+	const missingKey =
+		!isLocalEndpoint(active?.baseUrl ?? "") &&
+		(active?.apiKey ?? "").trim() === "";
 	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
 	// Gated until hydration settles (empty list can otherwise hide a load in
 	// flight), without a key or base URL, while streaming, and on an empty draft

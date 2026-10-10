@@ -113,7 +113,9 @@ export const sendStream = (
 		const headers: Record<string, string> = {
 			"content-type": "application/json",
 		};
-		if (apiKey !== undefined) headers.authorization = `Bearer ${apiKey}`;
+		// A local server needs no key, and an empty value would send "Bearer ".
+		if (apiKey !== undefined && apiKey !== "")
+			headers.authorization = `Bearer ${apiKey}`;
 
 		const response = yield* Effect.tryPromise({
 			try: () =>

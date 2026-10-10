@@ -2,7 +2,11 @@ import { type Backup, exportBackup, importBackup } from "@lib/backup";
 import type { Profile, ProviderConfig } from "@lib/db";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
-import { PROVIDER_PRESETS, searchKindFor } from "@lib/providers/presets";
+import {
+	isLocalEndpoint,
+	PROVIDER_PRESETS,
+	searchKindFor,
+} from "@lib/providers/presets";
 import { Effect } from "effect";
 import { type ChangeEvent, useRef, useState } from "react";
 import {
@@ -51,7 +55,9 @@ export default function Settings() {
 	} | null>(null);
 	const importInputRef = useRef<HTMLInputElement>(null);
 
-	const missingKey = (active?.apiKey ?? "").trim() === "";
+	const missingKey =
+		!isLocalEndpoint(active?.baseUrl ?? "") &&
+		(active?.apiKey ?? "").trim() === "";
 	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
 
 	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
@@ -317,6 +323,13 @@ export default function Settings() {
 					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
 						No base URL set — sending is disabled until you add one below.
 					</div>
+				) : null}
+				{active !== undefined && isLocalEndpoint(active.baseUrl) ? (
+					<p className="text-xs text-neutral-500">
+						Local endpoint: no API key needed. A browser page still needs the
+						server to allow this origin (e.g. OLLAMA_ORIGINS) — the desktop
+						build has no such limit.
+					</p>
 				) : null}
 
 				<div className="flex flex-col gap-3">

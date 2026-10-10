@@ -19,6 +19,16 @@ const OPENAI_TOOLS: readonly ToolSpec[] = [
 ];
 
 /**
+ * True when the endpoint is a server on this machine, which needs no API key.
+ * A browser page still needs the server to allow this origin (e.g.
+ * `OLLAMA_ORIGINS`); the desktop build has no same-origin limit.
+ */
+export const isLocalEndpoint = (baseUrl: string): boolean =>
+	/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?(\/|$)/i.test(
+		baseUrl.trim(),
+	);
+
+/**
  * The web-search tool an endpoint needs on the wire, or `undefined` when it has
  * no server-side mechanism. OpenAI executes its built-in `web_search_preview`;
  * OpenRouter takes the `openrouter:web_search` **server tool**, which lets the
@@ -99,6 +109,20 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 		id: "commandcode",
 		label: "Command Code",
 		baseUrl: "https://api.commandcode.ai/provider/v1",
+		protocol: "chatcompletions",
+		tools: [],
+	},
+	{
+		id: "ollama",
+		label: "Ollama (local)",
+		baseUrl: "http://localhost:11434/v1",
+		protocol: "chatcompletions",
+		tools: [],
+	},
+	{
+		id: "lmstudio",
+		label: "LM Studio (local)",
+		baseUrl: "http://localhost:1234/v1",
 		protocol: "chatcompletions",
 		tools: [],
 	},
