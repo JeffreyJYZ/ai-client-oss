@@ -32,7 +32,7 @@ On Windows, SmartScreen warns: pick **More info → Run anyway**.
 
 - Providers: OpenAI (Responses or Chat Completions), OpenRouter, OpenCode Zen, OpenCode Go, Command Code, Ollama, LM Studio, or any OpenAI-compatible base URL.
 - Streaming, and a collapsible block for reasoning models' thinking.
-- Web search where the endpoint provides it (OpenAI's built-in tool, or OpenRouter's `openrouter:web_search`).
+- Web search: the endpoint's own tool where it has one (OpenAI, OpenRouter, Anthropic), or TinyFish with your own key where it has none. That is how a local model gets search at all.
 - Per-conversation system prompts, and profiles bundling provider, model and prompt.
 - File and image attachments.
 - Export/Import moves settings and conversations between the desktop and web builds.
