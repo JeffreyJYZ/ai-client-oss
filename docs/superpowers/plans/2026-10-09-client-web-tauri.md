@@ -568,6 +568,53 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 35: New-version notice (desktop only)
+
+**Files:** create `web/src/lib/updates.ts`, `web/src/ui/UpdateNotice.tsx`; modify `web/src/ui/App.tsx`.
+
+**Why:** nothing tells a desktop user that a newer release exists; every update means noticing by chance and re-downloading.
+
+- [ ] **Step 1:** `updates.ts` — `latestVersion()` (GET `releases/latest` via `GITHUB_REPOSITORY` from `@/constants/links`, strip the `desktop-v` prefix) and a pure `isNewer(latest, current)` semver compare.
+- [ ] **Step 2:** `UpdateNotice.tsx` — desktop only: read the running version with `getVersion()`, compare, and render a dismissible strip linking to `LATEST_RELEASE_URL`. A failed check is silent; it never blocks the app.
+- [ ] **Step 3:** `App.tsx` — render it beside the existing install note.
+- [ ] **Step 4:** Verify — gates + `isNewer` truth table + the web build showing nothing.
+- [ ] **Step 5:** Commit — `feat(ui): tell desktop users when a newer version exists`.
+
+---
+
+### Task 36: Tauri auto-updater
+
+**Files:** `web/src-tauri/Cargo.toml`, `web/src-tauri/src/lib.rs`, `web/src-tauri/capabilities/*`, `web/src-tauri/tauri.conf.json`, `.github/workflows/release-tauri.yml`, plus the Task 35 UI.
+
+**Why:** real in-app updates once the builds are signed; the updater's own signature is independent of Apple/Windows code signing.
+
+- [ ] **Step 1:** `tauri-plugin-updater` (Rust) + `@tauri-apps/plugin-updater` (JS); register the plugin and add the capability.
+- [ ] **Step 2:** `tauri.conf.json` — `bundle.createUpdaterArtifacts: true` and `plugins.updater` (endpoints + the **public** key). The private key never enters the repo.
+- [ ] **Step 3:** `release-tauri.yml` — pass `TAURI_SIGNING_PRIVATE_KEY` / `_PASSWORD` from secrets so tauri-action publishes the `.sig` files and `latest.json`.
+- [ ] **Step 4:** UI — when a newer version exists, offer Download & install, then relaunch.
+- [ ] **Step 5:** Verify — `cargo check` + gates; the signed flow needs the secret, so it is proven on the first release after the key is set.
+- [ ] **Step 6:** Commit — `feat: in-app updates via the Tauri updater`.
+
+**Human step (cannot be automated):** generate the keypair and add the secrets — `bunx tauri signer generate -w ~/.tauri/ai-client.key`, then `gh secret set TAURI_SIGNING_PRIVATE_KEY < ~/.tauri/ai-client.key` (plus the password secret). Keep the private key out of the repo.
+
+---
+
+### Task 37: Anthropic-compatible Messages protocol
+
+**Files:** create `web/src/lib/providers/anthropicMessages.ts`; modify `providers/index.ts`, `providers/send.ts`, `providers/presets.ts`, `lib/types/protocols.ts`, `lib/core/parse.ts`, `ui/Settings.tsx` (protocol label).
+
+**Why:** only the two OpenAI wire formats exist, so Anthropic's Messages API (and the many gateways that proxy it) cannot be used at all.
+
+- [ ] **Step 1:** `anthropicMessages.ts` — a `Provider` implementing the Messages API. **Verify every wire detail against the current Anthropic docs (fetch them) before coding** — this is a new format and a local mock can only prove the code matches whatever you assumed.
+- [ ] **Step 2:** auth differs: `x-api-key` (not `Bearer`) plus `anthropic-version`, and the header that lets a browser call it. `sendStream` must take per-provider headers.
+- [ ] **Step 3:** `max_tokens` is required by the API and the app has no such setting, so ship a named default constant. The system prompt is a top-level `system` field, not a message.
+- [ ] **Step 4:** SSE — the events are Anthropic's, not OpenAI's: text and thinking arrive as different delta types, and tool/server-tool use announces itself on a content-block start. Map them onto the existing `Chunk` kinds.
+- [ ] **Step 5:** register the protocol, add a preset (`Anthropic-compatible (Messages)`), and teach `searchKindFor`/`searchTools` the provider's server-side web-search tool.
+- [ ] **Step 6:** Verify — gates + a mock server replaying the **documented** event sequence, asserting the chunk stream, plus the built request body.
+- [ ] **Step 7:** Commit — `feat(providers): Anthropic-compatible Messages protocol`.
+
+---
+
 ## Out of scope (this plan)
 
 - The Rust implementation of the Tauri storage adapter (stubbed in Task 4).

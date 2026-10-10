@@ -1,4 +1,5 @@
 import type { ChatMessage } from "@lib/db";
+import Markdown from "@ui/Markdown";
 
 interface MessageProps {
 	readonly message: ChatMessage;
@@ -36,7 +37,11 @@ export default function Message({ message }: MessageProps) {
 						</p>
 					</details>
 				) : null}
-				{message.text === "" ? null : (
+				{message.text === "" ? null : message.role === "assistant" ? (
+					<Markdown text={message.text} />
+				) : (
+					// Only the model's answer is markdown; user input and error
+					// strings stay literal, so `#` in pasted config is not a heading.
 					<p className="whitespace-pre-wrap break-words text-sm">
 						{message.text}
 					</p>
