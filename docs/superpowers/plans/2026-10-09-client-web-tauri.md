@@ -708,10 +708,10 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 **Why:** Settings is one long scroll of sections, so someone who came to change one thing sees all of it at once. Folding each section makes the page scannable, and it is the same disclosure the transcript already uses for a model's thinking.
 
-- [ ] **Step 1:** One small collapsible wrapper inside the file: a `<details>` whose `<summary>` carries the section's existing `<h3>` styling, plus the `cursor-pointer select-none` the thinking block uses, with the section's content as its children. **Open by default** — a fold that starts closed hides content the user never chose to hide.
-- [ ] **Step 2:** Wrap every section (the ones headed by the `text-xs uppercase tracking-widest` `<h3>`s), leaving the page's own heading alone.
-- [ ] **Step 3:** Verify — gates, then a browser check that every section shows its content on load and collapses and reopens on click (the thinking block is the reference for the interaction).
-- [ ] **Step 4:** Commit — `feat(ui): foldable Settings sections`.
+- [x] **Step 1:** One small collapsible wrapper inside the file: a `<details>` whose `<summary>` carries the section's existing `<h3>` styling, plus the `cursor-pointer select-none` the thinking block uses, with the section's content as its children. **Open by default** — a fold that starts closed hides content the user never chose to hide.
+- [x] **Step 2:** Wrap every section (the ones headed by the `text-xs uppercase tracking-widest` `<h3>`s), leaving the page's own heading alone. A control that lives in a heading row (a checkbox, a button) must act without also folding the section: cancel the summary's own toggle when the click was aimed at a control.
+- [x] **Step 3:** Verify — gates, then a browser check that every section shows its content on load and collapses and reopens on click (the thinking block is the reference for the interaction).
+- [x] **Step 4:** Commit — `feat(ui): foldable Settings sections`.
 
 ---
 

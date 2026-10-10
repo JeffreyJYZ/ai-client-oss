@@ -10,7 +10,7 @@ import {
 } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { Effect } from "effect";
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
 import {
 	addProfile,
 	addProvider,
@@ -38,6 +38,50 @@ const WEB_SEARCH = "web_search_preview";
 const DEFAULT_MAX_RESULTS = 5;
 /** Sentinel for the preset select when no preset matches the provider. */
 const CUSTOM_PRESET = "custom";
+
+/**
+ * A foldable settings section: the summary carries the section's
+ * heading row (its `<h3>` and controls), the children its content.
+ * Open by default — a fold that starts closed would hide content
+ * the user never chose to hide.
+ */
+function Section({
+	className,
+	summaryClassName,
+	heading,
+	children,
+}: {
+	readonly className: string;
+	readonly summaryClassName: string;
+	readonly heading: ReactNode;
+	readonly children: ReactNode;
+}) {
+	return (
+		<details className={className} open>
+			{/* biome-ignore lint/a11y/noStaticElementInteractions: summary is natively interactive; this handler only cancels the toggle when the click was aimed at a control inside the row */}
+			<summary
+				className={summaryClassName}
+				// The heading row carries controls (a checkbox, a button). A
+				// click on one must do its job without also folding the
+				// section, so it reaches the control first and the summary's
+				// own default action is cancelled. Clicks anywhere else in the
+				// row still toggle, as does the keyboard on the summary itself.
+				onClick={(event) => {
+					const target = event.target;
+					if (
+						target instanceof Element &&
+						target.closest("button, input, select, textarea, a") !== null
+					) {
+						event.preventDefault();
+					}
+				}}
+			>
+				{heading}
+			</summary>
+			{children}
+		</details>
+	);
+}
 
 export default function Settings() {
 	const settings = useSettings();
@@ -376,15 +420,20 @@ export default function Settings() {
 					</p>
 				) : null}
 
-				<div className="flex flex-col gap-3">
-					<div className="flex items-center justify-between gap-3">
-						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-							Providers
-						</h3>
-						<button type="button" onClick={add} className={BUTTON}>
-							Add provider
-						</button>
-					</div>
+				<Section
+					className="flex flex-col gap-3"
+					summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+					heading={
+						<>
+							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+								Providers
+							</h3>
+							<button type="button" onClick={add} className={BUTTON}>
+								Add provider
+							</button>
+						</>
+					}
+				>
 					{settings.providers.length === 0 ? (
 						<p className="text-sm text-neutral-500">
 							No providers yet — add one to start.
@@ -441,7 +490,7 @@ export default function Settings() {
 							})}
 						</ul>
 					)}
-				</div>
+				</Section>
 
 				{showEditor && active !== undefined ? (
 					<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
@@ -562,15 +611,24 @@ export default function Settings() {
 					</div>
 				) : null}
 
-				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
-					<div className="flex items-center justify-between gap-3">
-						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-							Profiles
-						</h3>
-						<button type="button" onClick={addProfileEntry} className={BUTTON}>
-							Add profile
-						</button>
-					</div>
+				<Section
+					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+					summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+					heading={
+						<>
+							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+								Profiles
+							</h3>
+							<button
+								type="button"
+								onClick={addProfileEntry}
+								className={BUTTON}
+							>
+								Add profile
+							</button>
+						</>
+					}
+				>
 					{settings.profiles.length === 0 ? (
 						<p className="text-sm text-neutral-500">
 							No profiles yet — add one to bundle a provider, model and system
@@ -610,7 +668,7 @@ export default function Settings() {
 							))}
 						</ul>
 					)}
-				</div>
+				</Section>
 
 				{editingProfile !== undefined ? (
 					<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
@@ -771,21 +829,26 @@ export default function Settings() {
 						.
 					</p>
 				</div>
-				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
-					<div className="flex flex-wrap items-center justify-between gap-3">
-						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-							Memory
-						</h3>
-						<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
-							Enabled
-							<input
-								type="checkbox"
-								checked={settings.memoriesEnabled}
-								onChange={(event) => setMemoriesEnabled(event.target.checked)}
-								className="h-4 w-4 accent-neutral-300"
-							/>
-						</label>
-					</div>
+				<Section
+					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+					summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+					heading={
+						<>
+							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+								Memory
+							</h3>
+							<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
+								Enabled
+								<input
+									type="checkbox"
+									checked={settings.memoriesEnabled}
+									onChange={(event) => setMemoriesEnabled(event.target.checked)}
+									className="h-4 w-4 accent-neutral-300"
+								/>
+							</label>
+						</>
+					}
+				>
 					<p className="text-xs text-neutral-500">
 						One list of durable facts for every chat, sent with each request.
 						The model can save notes in its replies; you can add or remove them
@@ -842,32 +905,41 @@ export default function Settings() {
 							Add
 						</button>
 					</form>
-				</div>
-				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
-					<div className="flex flex-wrap items-center justify-between gap-3">
-						<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-							Backup
-						</h3>
-						<div className="flex gap-2">
-							<button
-								type="button"
-								onClick={exportBackupFile}
-								className={BUTTON}
-							>
-								Export
-							</button>
-							<button type="button" onClick={copyBackupJson} className={BUTTON}>
-								Copy
-							</button>
-							<button
-								type="button"
-								onClick={() => importInputRef.current?.click()}
-								className={BUTTON}
-							>
-								Import
-							</button>
-						</div>
-					</div>
+				</Section>
+				<Section
+					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+					summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+					heading={
+						<>
+							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+								Backup
+							</h3>
+							<div className="flex gap-2">
+								<button
+									type="button"
+									onClick={exportBackupFile}
+									className={BUTTON}
+								>
+									Export
+								</button>
+								<button
+									type="button"
+									onClick={copyBackupJson}
+									className={BUTTON}
+								>
+									Copy
+								</button>
+								<button
+									type="button"
+									onClick={() => importInputRef.current?.click()}
+									className={BUTTON}
+								>
+									Import
+								</button>
+							</div>
+						</>
+					}
+				>
 					<input
 						ref={importInputRef}
 						type="file"
@@ -889,7 +961,7 @@ export default function Settings() {
 							{backupStatus.text}
 						</span>
 					) : null}
-				</div>
+				</Section>
 			</div>
 		</div>
 	);
