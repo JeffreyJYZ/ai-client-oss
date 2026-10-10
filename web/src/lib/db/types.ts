@@ -96,6 +96,14 @@ export const Settings = z.object({
 	 * sends no declaration, so the model cannot call it.
 	 */
 	fetchToolEnabled: z.boolean().default(true),
+	/**
+	 * TinyFish API key (agent.tinyfish.ai/api-keys). With a
+	 * key set, search and page fetch run through TinyFish's
+	 * free daily allowance; blank sends no `web_search`
+	 * declaration and fetches with the app's own transport
+	 * only.
+	 */
+	tinyfishApiKey: z.string().default(""),
 	/** A dismissed notice stays dismissed across reloads. */
 	dismissedInstallNote: z.boolean().default(false),
 	/** Newest release whose update notice the user has dismissed. */

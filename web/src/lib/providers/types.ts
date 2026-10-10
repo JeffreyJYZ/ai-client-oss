@@ -108,6 +108,14 @@ export interface SendCtx {
 	 * Settings toggle.
 	 */
 	readonly fetchTool?: boolean;
+	/**
+	 * TinyFish API key, when the user has one set. Declares
+	 * the client-side `web_search` tool (where the endpoint
+	 * has no search of its own) and routes `fetch_url`
+	 * through the TinyFish Fetch API first. Absent or blank:
+	 * no search declaration and the app's own fetch only.
+	 */
+	readonly tinyfishApiKey?: string;
 	/** Per-conversation system prompt; absent/blank sends none. */
 	readonly systemPrompt?: string;
 	/**

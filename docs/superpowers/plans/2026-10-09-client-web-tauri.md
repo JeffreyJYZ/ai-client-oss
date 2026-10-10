@@ -113,7 +113,7 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 3:** `ConversationList` — the multi-conversation sidebar (new/select/rename/delete) bound to Task 6.
 - [ ] **Step 4:** `Settings` — inputs bound to `useSettings`; warn + disable send when `apiKey` is empty (Review Focus #2).
 - [ ] **Step 5:** `App` composes them; `main.tsx` imports the new path; delete the old `web/src/App.tsx`.
-- [ ] **Step 6:** Verify — tsc/biome/LS + `agent-browser`: renders, composer disabled with no key, sidebar lists conversations.
+- [x] **Step 6:** Verify — tsc/biome/LS + `agent-browser`: renders, composer disabled with no key, sidebar lists conversations.
 - [ ] **Step 7:** Commit — `feat(ui): chat shell + conversation sidebar`.
 
 ---
@@ -190,7 +190,7 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 3:** `web/src/lib/db/types.ts` — `ChatMessage` schema + type gain `reasoning?: string`.
 - [ ] **Step 4:** `web/src/state/chat.ts` — route streamed chunks: `kind === "reasoning"` appends to the assistant message's `reasoning`, `kind === "text"` to its `text`.
 - [ ] **Step 5:** `web/src/ui/Message.tsx` — when `reasoning` is present, render a dimmed/collapsible "Thinking…" block above the answer text.
-- [ ] **Step 6:** Verify — tsc/biome/LS + a browser smoke against a **local mock SSE** that emits a reasoning event then an output event (throwaway `bun` server, not committed): the thinking appears in its own block, the answer separate, no squish.
+- [x] **Step 6:** Verify — tsc/biome/LS + a browser smoke against a **local mock SSE** that emits a reasoning event then an output event (throwaway `bun` server, not committed): the thinking appears in its own block, the answer separate, no squish.
 - [ ] **Step 7:** Commit — `fix(providers): parse SSE envelopes + separate reasoning from the answer`.
 
 ---
@@ -370,7 +370,7 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 3:** `chat.ts` — the send passes `activeProvider.tools`.
 - [ ] **Step 4:** `Settings.tsx` — the Web search toggle + `max_num_results` edit the ACTIVE provider's `tools` (per-provider), with a hint that it's endpoint-specific.
 - [ ] **Step 5:** Rename the two OpenAI preset labels to `"OpenAI-compatible (Responses)"` / `"OpenAI-compatible (Chat Completions)"` (`presets.ts`), and the provider-label placeholder in `Settings.tsx` from `"OpenAI"` to `"OpenAI-compatible"` — the protocol is a *format*, not the vendor.
-- [ ] **Step 6:** Verify — tsc/biome/LS + a browser smoke: a Command Code provider with the toggle OFF sends no `tools` (no 400); an OpenAI provider with it ON sends the built-in.
+- [x] **Step 6:** Verify — tsc/biome/LS + a browser smoke: a Command Code provider with the toggle OFF sends no `tools` (no 400); an OpenAI provider with it ON sends the built-in.
 - [ ] **Step 7:** Commit — `fix(ui): per-provider tools + OpenAI-compatible labels`.
 
 ---
@@ -508,7 +508,7 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 3:** `responses.ts` / `chatCompletions.ts` — send `tools: ctx.tools` **only** when `ctx.search?.kind === "openai"`; for `"openrouter"` send `plugins: [{ id: "web", max_results }]` instead. Explicit keys, so nothing replayed from `prev` leaks.
 - [ ] **Step 4:** `chat.ts` — `search` present only when the endpoint has a mechanism and the provider's `tools` is non-empty.
 - [ ] **Step 5:** `Settings.tsx` — toggle `disabled` + a hint when `searchKindFor(baseUrl)` is `null`; an OpenRouter hint that search is billed by OpenRouter.
-- [ ] **Step 6:** Verify — tsc/biome/LS + a mock-SSE smoke asserting the request body per endpoint.
+- [x] **Step 6:** Verify — tsc/biome/LS + a mock-SSE smoke asserting the request body per endpoint.
 - [ ] **Step 7:** Commit — `fix(providers): per-endpoint web search (OpenRouter plugin; no phantom tool)`.
 
 ---
@@ -677,15 +677,15 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 **Why:** search exists only where the endpoint provides it — local models and Command Code have none at all — and a page fetch is a blind HTTP GET that runs no scripts. TinyFish (search and fetch are free; the key comes from `agent.tinyfish.ai/api-keys`) fills both, client-side, for every endpoint.
 
-**Wire — verify against the docs before coding** (`docs.tinyfish.ai`, the Search and Fetch overview pages; `llms-full.txt` is the single-file reference): auth is the `X-API-Key` header; `GET https://api.search.tinyfish.ai?query=…`; `POST https://api.fetch.tinyfish.ai`. Search takes 1-3s, fetch 1-20s, with a 110s per-URL backend timeout — the docs tell clients to allow 150s, so this command needs its own generous timeout rather than the page fetch's 30s.
+**Wire (docs-verified):** auth is the `X-API-Key` header. Search is `GET https://api.search.tinyfish.ai?query=…`, answering `{results:[{position,site_name,title,snippet,url}],…}`. Fetch is `POST https://api.fetch.tinyfish.ai` with `{urls:[…], format?: "markdown", ttl?}`, answering `{results:[{url,…,text,format}],errors:[{url,error,status?}]}`. **A per-URL failure rides inside a 200 in `errors[]`** — reading only `results` turns a failed fetch into an empty success, which is the exact bug the plain fetch just had fixed, so `errors[]` must reach the tool result as a sentence. Search takes 1-3s, fetch 1-20s, with a 110s per-URL backend timeout and a 120s CDN ceiling; the docs tell clients to allow 150s, which is why the Rust command carries its own timeout rather than the page fetch's 30s. Free allowance: 12k searches/day, 1k fetches/day (automation is the metered part).
 
-- [ ] **Step 1:** Rust: one generic `http_request(method, url, headers, body)` command — reusing the existing client, with its own longer timeout and the same size cap and string-error style — so the desktop reaches TinyFish with no CORS limit. `fetch_url` stays exactly as it is.
-- [ ] **Step 2:** `lib/tinyfish.ts` — `searchWeb(query)` and `fetchPage(url)`, returning compact text (search: title/url/snippet per result; fetch: the extracted content, capped), each mapping every failure to a sentence. Desktop through the new command, web through `fetch` with the same best-effort CORS wording as `lib/fetch.ts`.
-- [ ] **Step 3:** `Settings.tinyfishApiKey` — zod-defaulted so a stored settings file still parses, masked in the UI, with a link to the key page and a line noting search and fetch are free. It rides export/import like the provider keys.
-- [ ] **Step 4:** Declare `web_search` (a required `query`) beside `fetch_url`, in each wire shape as Task 39 established. TinyFish search is declared **only** where the endpoint has no native mechanism — the endpoint's own search wins, TinyFish fills the gap — and only while the per-provider search toggle is on. The fetch tool's routing changes: with a key, TinyFish first, the app's own fetch as the fallback.
-- [ ] **Step 5:** `state/chat.ts` — dispatch by tool name in the loop (`fetch_url`, `web_search`), validating each call's arguments the way the URL is validated today, marking each outcome in the transcript, and keeping the round bounds.
-- [ ] **Step 6:** Verify — gates; a mock TinyFish API (a page-level `fetch` override, as Task 40's live run used, since the base URL is a constant) proving search results reach the second request, that fetch prefers TinyFish and falls back when it errors, and that no key means no search declaration; plus `cargo check --all-targets`.
-- [ ] **Step 7:** Commit — `feat: TinyFish search and fetch`.
+- [x] **Step 1:** Rust: one generic `http_request(method, url, headers, body)` command — reusing the existing client, with its own longer timeout and the same size cap and string-error style — so the desktop reaches TinyFish with no CORS limit. `fetch_url` stays exactly as it is.
+- [x] **Step 2:** `lib/tinyfish.ts` — `searchWeb(query)` and `fetchPage(url)`, returning compact text (search: title/url/snippet per result; fetch: the extracted content, capped), each mapping every failure to a sentence. Desktop through the new command, web through `fetch` with the same best-effort CORS wording as `lib/fetch.ts`.
+- [x] **Step 3:** `Settings.tinyfishApiKey` — zod-defaulted so a stored settings file still parses, masked in the UI, with a link to the key page and a line noting search and fetch are free. It rides export/import like the provider keys.
+- [x] **Step 4:** Declare `web_search` (a required `query`) beside `fetch_url`, in each wire shape as Task 39 established. TinyFish search is declared **only** where the endpoint has no native mechanism — the endpoint's own search wins, TinyFish fills the gap — and only while the per-provider search toggle is on. **Trap: that toggle is currently disabled for endpoints with no mechanism, which is exactly where TinyFish is the only source of search, so the declaration could never fire there — make the control live wherever TinyFish can serve the request (a key is set).** The fetch tool's routing changes: with a key, TinyFish first, the app's own fetch as the fallback.
+- [x] **Step 5:** `state/chat.ts` — dispatch by tool name in the loop (`fetch_url`, `web_search`), validating each call's arguments the way the URL is validated today, marking each outcome in the transcript, and keeping the round bounds.
+- [x] **Step 6:** Verify — gates; a mock TinyFish API (a page-level `fetch` override, as Task 40's live run used, since the base URL is a constant) proving search results reach the second request, that fetch prefers TinyFish and falls back when it errors, and that no key means no search declaration; plus `cargo check --all-targets`.
+- [x] **Step 7:** Commit — `feat: TinyFish search and fetch`.
 
 ---
 
@@ -699,6 +699,19 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 - [ ] **Step 2:** Rebuild the wire history from the conversation's messages when the in-memory body is absent — one per-protocol builder, the inverse of `appendAssistant`, faithful (text **and** attachments, since the API is stateless). Do not try to reconstruct tool rounds: they live inside the turn that made them.
 - [ ] **Step 3:** Verify — a throwaway script that rebuilds each protocol's body from a conversation and asserts the wire shape; then the live proof: send a turn, reload the page, send a follow-up, and assert from a mock's request log that the second turn's body carries the first turn's user message and answer.
 - [ ] **Step 4:** Commit — `fix: rebuild conversation history after a reload`.
+
+---
+
+### Task 43: Foldable Settings sections
+
+**Files:** modify `ui/Settings.tsx`.
+
+**Why:** Settings is one long scroll of sections, so someone who came to change one thing sees all of it at once. Folding each section makes the page scannable, and it is the same disclosure the transcript already uses for a model's thinking.
+
+- [ ] **Step 1:** One small collapsible wrapper inside the file: a `<details>` whose `<summary>` carries the section's existing `<h3>` styling, plus the `cursor-pointer select-none` the thinking block uses, with the section's content as its children. **Open by default** — a fold that starts closed hides content the user never chose to hide.
+- [ ] **Step 2:** Wrap every section (the ones headed by the `text-xs uppercase tracking-widest` `<h3>`s), leaving the page's own heading alone.
+- [ ] **Step 3:** Verify — gates, then a browser check that every section shows its content on load and collapses and reopens on click (the thinking block is the reference for the interaction).
+- [ ] **Step 4:** Commit — `feat(ui): foldable Settings sections`.
 
 ---
 

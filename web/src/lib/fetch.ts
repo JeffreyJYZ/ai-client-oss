@@ -1,20 +1,11 @@
 import { isDesktop } from "@lib/platform";
+import { capText, MAX_CHARS } from "@lib/text";
+import { fetchPage } from "@lib/tinyfish";
 import { invoke } from "@tauri-apps/api/core";
 import { Effect } from "effect";
 
-/**
- * Upper bound on the text handed to the model for one page: a
- * long article still fits whole, while one enormous page cannot
- * eat the conversation's context.
- */
-export const MAX_CHARS: number = 50_000;
-
 /** Appended after a capped page so the model can tell it saw a slice. */
 const TRUNCATED_NOTE = `\n[page text truncated at ${MAX_CHARS} characters]`;
-
-/** Apply the character cap, noting the truncation so the model can tell. */
-const capped = (text: string): string =>
-	text.length <= MAX_CHARS ? text : text.slice(0, MAX_CHARS) + TRUNCATED_NOTE;
 
 /**
  * Render HTML as the plain text a page is trying to say. The
@@ -54,13 +45,14 @@ export const htmlToText = (html: string): string => {
 		node = walker.nextNode();
 	}
 	const text = parts.join("").replace(/\s+/g, " ").trim();
-	if (text !== "") return capped(text);
+	if (text !== "") return capText(text, TRUNCATED_NOTE);
 	const metadata = [title, description]
 		.filter((part) => part !== "")
 		.join("\n");
 	if (metadata === "") return "";
-	return capped(
+	return capText(
 		`Only this page's metadata was readable (its content is rendered by scripts):\n${metadata}`,
+		TRUNCATED_NOTE,
 	);
 };
 
@@ -105,18 +97,16 @@ const fetchWeb = (url: string): Effect.Effect<string, string> =>
 	});
 
 /**
- * Read a URL as plain text for the model: the desktop transport
- * inside the Tauri shell, the browser's own fetch elsewhere. The
- * result is the page run through `htmlToText` and capped at
- * `MAX_CHARS`; every failure is a sentence a user can read in a
- * chat bubble.
+ * The app's own read of a URL: the desktop transport
+ * inside the Tauri shell, or the browser's own fetch
+ * elsewhere, then the platform parser.
  *
  * Nothing readable is a failure, never an empty success: an empty
  * tool result left the model to invent the reason for it — it
  * blamed the deployment and the user agent — so the app says what
  * happened instead.
  */
-export const fetchUrlText = (url: string): Effect.Effect<string, string> =>
+const readPage = (url: string): Effect.Effect<string, string> =>
 	Effect.flatMap(isDesktop ? fetchDesktop(url) : fetchWeb(url), (html) => {
 		const text = htmlToText(html);
 		return text === ""
@@ -125,3 +115,24 @@ export const fetchUrlText = (url: string): Effect.Effect<string, string> =>
 				)
 			: Effect.succeed(text);
 	});
+
+/**
+ * Read a URL as plain text for the model. With a TinyFish
+ * key set, the TinyFish Fetch API reads the page first —
+ * it renders scripts server-side and reads the page
+ * outside the browser, so no cross-origin wall applies —
+ * and the app's own read above is the fallback for any
+ * TinyFish failure; without a key the app's own read
+ * runs alone, exactly as before. The TinyFish result is
+ * already extracted text, so it is only capped; the
+ * app's own result is HTML run through `htmlToText`
+ * and capped.
+ */
+export const fetchUrlText = (
+	url: string,
+	apiKey?: string,
+): Effect.Effect<string, string> => {
+	const key = apiKey?.trim() ?? "";
+	if (key === "") return readPage(url);
+	return Effect.catch(fetchPage(url, key), () => readPage(url));
+};

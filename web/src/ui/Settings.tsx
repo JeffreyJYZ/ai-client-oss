@@ -8,6 +8,7 @@ import {
 	PROVIDER_PRESETS,
 	searchKindFor,
 } from "@lib/providers/presets";
+import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { Effect } from "effect";
 import { type ChangeEvent, useRef, useState } from "react";
 import {
@@ -68,11 +69,15 @@ export default function Settings() {
 	};
 
 	// Tools are per-provider: the toggle edits the ACTIVE provider's
-	// `tools`. Enabled = a non-empty tools array, but only an endpoint
-	// with a real search mechanism executes it.
+	// `tools`. Enabled = a non-empty tools array; the endpoint's own
+	// search executes it where one exists, and TinyFish's client-side
+	// web_search does so where none does (a key is required).
 	const activeTools = active?.tools ?? [];
 	const searchKind = searchKindFor(active?.baseUrl ?? "");
-	const webSearch = searchKind !== null && activeTools.length > 0;
+	const webSearch = activeTools.length > 0;
+	// A TinyFish key serves search where the endpoint has none, so
+	// it keeps the toggle live on such an endpoint.
+	const tinyfishKey = settings.tinyfishApiKey.trim();
 	const maxNumResults =
 		activeTools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
 		DEFAULT_MAX_RESULTS;
@@ -680,14 +685,20 @@ export default function Settings() {
 						<input
 							type="checkbox"
 							checked={webSearch}
-							disabled={active === undefined || searchKind === null}
+							disabled={
+								active === undefined ||
+								(searchKind === null && tinyfishKey === "")
+							}
 							onChange={(event) => setWebSearch(event.target.checked)}
 							className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
 						/>
 					</label>
 					{searchKind === null ? (
 						<p className="text-xs text-neutral-500">
-							This endpoint has no server-side web search.
+							This endpoint has no server-side web search
+							{tinyfishKey === ""
+								? "."
+								: " — with a TinyFish key set, search runs through TinyFish (free within its daily allowance)."}
 						</p>
 					) : searchKind === "openrouter" ? (
 						<p className="text-xs text-neutral-500">
@@ -705,7 +716,7 @@ export default function Settings() {
 							search tool on its own API.
 						</p>
 					)}
-					{webSearch ? (
+					{webSearch && searchKind !== null ? (
 						<label className={LABEL}>
 							Max results
 							<input
@@ -727,9 +738,37 @@ export default function Settings() {
 						/>
 					</label>
 					<p className="text-xs text-neutral-500">
-						The built-in fetch_url tool is declared on every request, so the
-						model can read a page you link. The desktop app fetches it directly;
-						the browser build is bound by cross-origin rules.
+						With this on, every request declares the built-in fetch_url tool, so
+						the model can read a page you link. The desktop app fetches it
+						directly; the browser build is bound by cross-origin rules.
+					</p>
+					<label className={LABEL}>
+						TinyFish API key
+						<input
+							type="password"
+							autoComplete="off"
+							value={settings.tinyfishApiKey}
+							onChange={(event) =>
+								setSettings({ tinyfishApiKey: event.target.value })
+							}
+							placeholder="TinyFish key"
+							className={INPUT}
+						/>
+					</label>
+					<p className="text-xs text-neutral-500">
+						Search and page fetch run through TinyFish while a key is set — free
+						within a daily allowance. The client-side web_search tool is
+						declared where the endpoint has no search of its own, and fetch_url
+						reads through TinyFish first. Get a key at{" "}
+						<a
+							href={TINYFISH_API_KEYS_URL}
+							target="_blank"
+							rel="noreferrer noopener"
+							className="text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
+						>
+							agent.tinyfish.ai/api-keys
+						</a>
+						.
 					</p>
 				</div>
 				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">

@@ -3,13 +3,14 @@ import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { fetchUrlText } from "@lib/fetch";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
 import { type ProtocolName, protocolNames, providers } from "@lib/providers";
-import { searchKindFor } from "@lib/providers/presets";
+import { searchKindFor, WEB_SEARCH_NAME } from "@lib/providers/presets";
 import type {
 	AttachmentPart,
 	Chunk,
 	SendCtx,
 	ToolCallData,
 } from "@lib/providers/types";
+import { searchResultCount, searchWeb } from "@lib/tinyfish";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
 import { getActiveProvider, getSettings, setSettings } from "./settings";
@@ -36,8 +37,8 @@ const TITLE_MAX = 48;
 
 /**
  * Tool-loop bounds: a model must not be able to spin. At most
- * this many `fetch_url` calls execute in one turn, spread over
- * at most this many request rounds.
+ * this many tool calls execute in one turn, spread over at most
+ * this many request rounds.
  */
 const MAX_TOOL_CALLS_PER_TURN = 8;
 const MAX_TOOL_ROUNDS = 4;
@@ -348,11 +349,12 @@ const finalize = (
 };
 
 /**
- * One `fetch_url` execution: the text returned to the model (the
- * page, or a failure sentence) and the marker line the transcript
- * shows for it.
+ * One executed tool call: the text returned to the
+ * model (the page, the search results, or a failure
+ * sentence) and the marker line the transcript shows
+ * for it.
  */
-interface FetchOutcome {
+interface ToolOutcome {
 	readonly result: string;
 	readonly marker: string;
 	readonly failed: boolean;
@@ -364,6 +366,25 @@ interface FetchOutcome {
 const fetchFailedMarker = (sentence: string): string =>
 	`🔗 fetch failed: ${sentence}`;
 
+/** The transcript marker for a failed search. */
+const searchFailedMarker = (sentence: string): string =>
+	`🔍 search failed: ${sentence}`;
+
+/**
+ * The call's arguments parsed to a value, or `null` when
+ * they are not JSON at all — a parse failure is `null`
+ * here, not a failed effect: the call still runs, and
+ * fails, as a missing argument.
+ */
+const parseArguments = (call: ToolCallData): Effect.Effect<unknown> =>
+	Effect.orElseSucceed(
+		Effect.try({
+			try: () => JSON.parse(call.args) as unknown,
+			catch: () => "arguments were not JSON",
+		}),
+		() => null,
+	);
+
 /**
  * Execute one `fetch_url` call: parse its arguments, fetch the
  * URL's page as text, and render both outcomes as strings — a
@@ -372,18 +393,12 @@ const fetchFailedMarker = (sentence: string): string =>
  * runs inside the calling fiber, so `stop` interrupts a fetch in
  * flight.
  */
-const runFetch = (call: ToolCallData): Effect.Effect<FetchOutcome> =>
+const runFetch = (
+	call: ToolCallData,
+	tinyfishApiKey: string,
+): Effect.Effect<ToolOutcome> =>
 	Effect.gen(function* () {
-		// The arguments may not be JSON at all; a parse failure is
-		// `null` here, not a failed effect — the call still runs,
-		// and fails, as a missing URL.
-		const parsed = yield* Effect.orElseSucceed(
-			Effect.try({
-				try: () => JSON.parse(call.args) as unknown,
-				catch: () => "arguments were not JSON",
-			}),
-			() => null,
-		);
+		const parsed = yield* parseArguments(call);
 		const url = isRecord(parsed) ? parsed.url : undefined;
 		if (typeof url !== "string" || url.trim() === "") {
 			const sentence = `${call.name} was called without a URL.`;
@@ -397,7 +412,7 @@ const runFetch = (call: ToolCallData): Effect.Effect<FetchOutcome> =>
 		// The fetch's failure channel is the sentence the transcript
 		// shows; either way the outcome is a string for the model.
 		const outcome = yield* Effect.catch(
-			Effect.map(fetchUrlText(url), (page) => ({
+			Effect.map(fetchUrlText(url, tinyfishApiKey), (page) => ({
 				ok: true as const,
 				page,
 			})),
@@ -425,6 +440,79 @@ const runFetch = (call: ToolCallData): Effect.Effect<FetchOutcome> =>
 			input: parsed,
 		};
 	});
+
+/**
+ * Execute one `web_search` call: parse its arguments, search
+ * through TinyFish, and render both outcomes as strings — a
+ * missing or non-string `query` is a failed result (a sentence,
+ * no search attempted), never an exception out of the loop. The
+ * search runs inside the calling fiber, so `stop` interrupts it.
+ */
+const runSearch = (
+	call: ToolCallData,
+	tinyfishApiKey: string,
+): Effect.Effect<ToolOutcome> =>
+	Effect.gen(function* () {
+		const parsed = yield* parseArguments(call);
+		const query = isRecord(parsed) ? parsed.query : undefined;
+		if (typeof query !== "string" || query.trim() === "") {
+			const sentence = `${call.name} was called without a query.`;
+			return {
+				result: sentence,
+				marker: searchFailedMarker(sentence),
+				failed: true,
+				input: parsed,
+			};
+		}
+		// The search's failure channel is the sentence the
+		// transcript shows; either way the outcome is a string
+		// for the model.
+		const outcome = yield* Effect.catch(
+			Effect.map(searchWeb(query.trim(), tinyfishApiKey), (text) => ({
+				ok: true as const,
+				text,
+			})),
+			(sentence) => Effect.succeed({ ok: false as const, sentence }),
+		);
+		if (!outcome.ok) {
+			return {
+				result: outcome.sentence,
+				marker: searchFailedMarker(outcome.sentence),
+				failed: true,
+				input: parsed,
+			};
+		}
+		// The count is structural — the compact text is
+		// one blank-line-separated block per hit — so the
+		// marker can say how many results came back.
+		const count = searchResultCount(outcome.text);
+		return {
+			result: outcome.text,
+			marker: `🔍 searched the web: ${count.toLocaleString()} result${
+				count === 1 ? "" : "s"
+			}`,
+			failed: false,
+			input: parsed,
+		};
+	});
+
+/**
+ * Execute one tool call, dispatched by the tool's name:
+ * `web_search` searches the web through TinyFish;
+ * `fetch_url` reads a page. The loop declares only these
+ * two tools, so a name the model hallucinates falls
+ * through to the fetch — it fails there as a missing URL
+ * (a sentence), never an exception out of the loop,
+ * exactly as an undeclared name behaved before the
+ * search tool existed.
+ */
+const runTool = (
+	call: ToolCallData,
+	tinyfishApiKey: string,
+): Effect.Effect<ToolOutcome> =>
+	call.name === WEB_SEARCH_NAME
+		? runSearch(call, tinyfishApiKey)
+		: runFetch(call, tinyfishApiKey);
 
 export const getChat = (): ChatSnapshot => state;
 
@@ -476,6 +564,12 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		? memoryPrompt(settings.memories)
 		: "";
 
+	// The TinyFish key rides the request's ctx (it decides
+	// the `web_search` declaration) and every tool
+	// execution (it backs the search and the fetch-first
+	// route).
+	const tinyfishApiKey = settings.tinyfishApiKey;
+
 	const ctx: SendCtx = {
 		msg,
 		prev,
@@ -491,6 +585,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		// can turn off; off sends no declaration, so the model
 		// cannot call it.
 		fetchTool: settings.fetchToolEnabled,
+		// A TinyFish key declares the client-side `web_search`
+		// tool (where the endpoint has no search of its own)
+		// and routes `fetch_url` through TinyFish first.
+		tinyfishApiKey,
 		systemPrompt: [conversation.systemPrompt ?? "", memory]
 			.filter((part) => part !== "")
 			.join("\n\n"),
@@ -552,7 +650,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	/** Where the final round's text starts in `raw`: its slice is
 	 * the reply that seeds the next turn. */
 	let finalTextStart = 0;
-	/** `fetch_url` calls executed so far this turn (the spin bound). */
+	/** Tool calls executed so far this turn (the spin bound). */
 	let executed = 0;
 	const run = Effect.gen(function* () {
 		for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
@@ -589,7 +687,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			if (room <= 0) return;
 			for (const call of roundCalls.slice(0, room)) {
 				executed += 1;
-				const outcome = yield* runFetch(call);
+				const outcome = yield* runTool(call, tinyfishApiKey);
 				appendMarker(conversationId, assistantId, outcome.marker, raw);
 				wire = appendToolResult(
 					wire,

@@ -78,8 +78,8 @@ export const searchTools = (
 
 /**
  * How an endpoint serves web search, read from its base URL. `null`
- * means the endpoint has no server-side search — the toggle must
- * stay inert there.
+ * means the endpoint has no server-side search of its own: the per-provider toggle
+ * then serves TinyFish's client-side search instead, when a key is set.
  */
 export const searchKindFor = (baseUrl: string): SearchKind | null => {
 	const url = baseUrl.toLowerCase();
@@ -99,7 +99,10 @@ export const searchKindFor = (baseUrl: string): SearchKind | null => {
 type WireProtocol = "anthropic" | "responses" | "chatcompletions";
 
 /** The built-in URL-fetch tool's name on the wire. */
-const FETCH_URL_NAME = "fetch_url";
+export const FETCH_URL_NAME = "fetch_url";
+
+/** The client-side web-search tool's name on the wire. */
+export const WEB_SEARCH_NAME = "web_search";
 
 /**
  * What makes the model use the tool at the right moment: it
@@ -155,10 +158,83 @@ export const fetchUrlTool = (protocol: WireProtocol): unknown => {
 };
 
 /**
+ * What makes the model use the search tool: it returns
+ * ranked web results — titles, URLs and snippets — for a
+ * query, so anything needing current information is a
+ * call, not a guess.
+ */
+const WEB_SEARCH_DESCRIPTION =
+	"Searches the web and returns ranked results with titles, URLs and snippets. Use it for recent events or anything you need current information for.";
+
+/** The `web_search` parameter schema, shared by every envelope. */
+const webSearchParameters = {
+	type: "object",
+	properties: {
+		query: {
+			type: "string",
+			description: "The search query.",
+		},
+	},
+	required: ["query"],
+} as const;
+
+/**
+ * The client-side `web_search` tool in the envelope the
+ * protocol wants: chat/completions nests it under
+ * `function`, the Responses API takes the flat function
+ * shape, and Anthropic declares it with `input_schema`.
+ */
+export const webSearchTool = (protocol: WireProtocol): unknown => {
+	if (protocol === "anthropic") {
+		return {
+			name: WEB_SEARCH_NAME,
+			description: WEB_SEARCH_DESCRIPTION,
+			input_schema: webSearchParameters,
+		};
+	}
+	if (protocol === "responses") {
+		return {
+			type: "function",
+			name: WEB_SEARCH_NAME,
+			description: WEB_SEARCH_DESCRIPTION,
+			parameters: webSearchParameters,
+		};
+	}
+	return {
+		type: "function",
+		function: {
+			name: WEB_SEARCH_NAME,
+			description: WEB_SEARCH_DESCRIPTION,
+			parameters: webSearchParameters,
+		},
+	};
+};
+
+/**
+ * True when the request should declare TinyFish's
+ * client-side `web_search` tool: a TinyFish key is
+ * set, the per-provider search toggle is on (a
+ * non-empty `ctx.tools` array), and the endpoint has
+ * no search mechanism of its own — `searchKindFor`
+ * is the same read `send` uses to build `ctx.search`,
+ * so the endpoint's own search always wins and
+ * TinyFish fills the gap.
+ */
+const hasTinyFishSearch = (ctx: SendCtx): boolean => {
+	const key = ctx.tinyfishApiKey?.trim() ?? "";
+	return (
+		key !== "" &&
+		(ctx.tools ?? []).length > 0 &&
+		searchKindFor(ctx.apiUrl) === null
+	);
+};
+
+/**
  * The tools one request carries: the endpoint's web-search
  * declaration plus the built-in `fetch_url` tool when the
- * request asks for it (`ctx.fetchTool`). `undefined` when
- * neither applies, so a request with no mechanism sends no
+ * request asks for it (`ctx.fetchTool`), plus TinyFish's
+ * client-side `web_search` where it applies. `undefined` when
+ * nothing applies, so a request with no mechanism sends no
  * `tools` key at all.
  */
 export const requestTools = (
@@ -168,9 +244,15 @@ export const requestTools = (
 	const search = searchTools(ctx.search, ctx.tools);
 	const fetchTool =
 		ctx.fetchTool === true ? [fetchUrlTool(protocol)] : undefined;
-	if (search === undefined) return fetchTool;
-	if (fetchTool === undefined) return search;
-	return [...search, ...fetchTool];
+	const tinyfishSearch = hasTinyFishSearch(ctx)
+		? [webSearchTool(protocol)]
+		: undefined;
+	const tools = [
+		...(search ?? []),
+		...(fetchTool ?? []),
+		...(tinyfishSearch ?? []),
+	];
+	return tools.length === 0 ? undefined : tools;
 };
 
 /**
