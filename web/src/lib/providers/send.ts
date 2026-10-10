@@ -37,6 +37,13 @@ const toolCallName = (delta: Record<string, unknown>): string | null => {
  * - **chat/completions** — `choices[0].delta.reasoning_content` (or
  *   `.reasoning`) is thinking; `choices[0].delta.content` or `choices[0].text`
  *   is the answer; `choices[0].delta.tool_calls` opens a tool call.
+ * - **Anthropic Messages** — a `content_block_start` opens a content
+ *   block; `tool_use` (a client tool) and `server_tool_use` (the
+ *   built-in web search) announce the tool by name. A
+ *   `content_block_delta` carries the answer (`text_delta`) and
+ *   thinking (`thinking_delta`) in its `delta`; the other delta
+ *   types (`input_json_delta` tool arguments, `signature_delta`)
+ *   carry no answer text.
  */
 const parseLine = (line: string): Chunk | null => {
 	const trimmed = line.trim();
@@ -48,6 +55,7 @@ const parseLine = (line: string): Chunk | null => {
 		delta?: unknown;
 		choices?: unknown;
 		item?: unknown;
+		content_block?: unknown;
 	};
 
 	if (typeof event.delta === "string") {
@@ -73,6 +81,36 @@ const parseLine = (line: string): Chunk | null => {
 		if (!type.includes("output_item.added")) return null;
 		const name = asString(event.item.name);
 		return name === null ? null : { kind: "tool", text: name };
+	}
+
+	// Anthropic Messages stream. A `content_block_start` opens a
+	// content block: `tool_use` (a client tool) and `server_tool_use`
+	// (the built-in web search) announce the tool by name, then the
+	// call's arguments stream as `input_json_delta` — raw JSON, not
+	// the reply. A `content_block_delta` carries the answer
+	// (`text_delta`) and thinking (`thinking_delta`); its other
+	// delta types carry no answer text. These event types are
+	// disjoint from the OpenAI envelopes above.
+	if (type === "content_block_start" && isRecord(event.content_block)) {
+		const block = event.content_block;
+		if (block.type === "tool_use" || block.type === "server_tool_use") {
+			const name = asString(block.name);
+			return name === null ? null : { kind: "tool", text: name };
+		}
+		return null;
+	}
+	if (type === "content_block_delta") {
+		const delta = isRecord(event.delta) ? event.delta : undefined;
+		const deltaType = delta === undefined ? null : asString(delta.type);
+		if (deltaType === "text_delta") {
+			const text = asString(delta?.text);
+			return text === null ? null : { kind: "text", text };
+		}
+		if (deltaType === "thinking_delta") {
+			const thinking = asString(delta?.thinking);
+			return thinking === null ? null : { kind: "reasoning", text: thinking };
+		}
+		return null;
 	}
 
 	const choices = Array.isArray(event.choices) ? event.choices : [];
@@ -104,19 +142,30 @@ const parseLineSafe = (line: string): Effect.Effect<Chunk | null> =>
 		catch: () => null,
 	}).pipe(Effect.orElseSucceed((): Chunk | null => null));
 
+/**
+ * Headers for OpenAI-shaped endpoints: a JSON body plus a Bearer
+ * key when one is set. A local server needs no key, and an empty
+ * value would send "Bearer ". Endpoints that authenticate
+ * differently (Anthropic sends `x-api-key`) pass their own header
+ * set to `sendStream`.
+ */
+export const bearerHeaders = (
+	apiKey: string | undefined,
+): Record<string, string> => {
+	const headers: Record<string, string> = {
+		"content-type": "application/json",
+	};
+	if (apiKey !== undefined && apiKey !== "")
+		headers.authorization = `Bearer ${apiKey}`;
+	return headers;
+};
+
 export const sendStream = (
 	url: string,
-	apiKey: string | undefined,
 	body: unknown,
+	headers: Record<string, string>,
 ): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 	Effect.gen(function* () {
-		const headers: Record<string, string> = {
-			"content-type": "application/json",
-		};
-		// A local server needs no key, and an empty value would send "Bearer ".
-		if (apiKey !== undefined && apiKey !== "")
-			headers.authorization = `Bearer ${apiKey}`;
-
 		const response = yield* Effect.tryPromise({
 			try: () =>
 				fetch(url, {

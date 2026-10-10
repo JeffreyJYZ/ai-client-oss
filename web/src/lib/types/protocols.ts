@@ -58,7 +58,48 @@ export const ChatCompletionsSend = z.object({
 });
 export type ChatCompletionsSend = z.infer<typeof ChatCompletionsSend>;
 
+export const AnthropicRole = z.enum(["user", "assistant"]);
+export type AnthropicRole = z.infer<typeof AnthropicRole>;
+
+/**
+ * The Anthropic Messages API request body. `model`, `max_tokens` and
+ * `messages` are required by the API; the system prompt is the
+ * top-level `system` parameter (the API has no "system" message
+ * role). `tools` carries the built-in `web_search` server tool or a
+ * client tool declaration.
+ */
+export const AnthropicSend = z.object({
+	model: z.string(),
+	max_tokens: z.number(),
+	system: z.string().optional(),
+	messages: z.array(
+		z.object({
+			role: AnthropicRole,
+			content: z.union([
+				z.string(),
+				z.array(
+					z.object({
+						type: z.string(),
+						text: z.string().optional(),
+						source: z
+							.object({
+								type: z.string(),
+								media_type: z.string(),
+								data: z.string(),
+							})
+							.optional(),
+					}),
+				),
+			]),
+		}),
+	),
+	tools: z.array(z.unknown()).optional(),
+	stream: z.boolean(),
+});
+export type AnthropicSend = z.infer<typeof AnthropicSend>;
+
 export const protocolsURL = {
+	anthropic: "/messages",
 	chatcompletions: "/chat/completions",
 	responses: "/responses",
 };

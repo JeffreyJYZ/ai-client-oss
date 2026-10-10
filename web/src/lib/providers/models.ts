@@ -7,19 +7,21 @@ interface ModelsPayload {
 
 /**
  * `GET ${baseUrl}/models` — the OpenAI list endpoint (`baseUrl` carries the
- * version, so no `/v1` here). The bearer header is sent only when a key is
- * configured; a non-2xx response or a transport failure becomes the `string`
- * error channel.
+ * version, so no `/v1` here). Auth comes from the endpoint itself, so an
+ * Anthropic provider sends `x-api-key` rather than a Bearer token. A
+ * non-2xx response or a transport failure becomes the `string` error
+ * channel.
  */
 export const listModels = (
+	protocol: ProtocolName,
 	baseUrl: string,
 	apiKey: string | undefined,
 ): Effect.Effect<string[], string> =>
 	Effect.gen(function* () {
-		const headers: Record<string, string> = { accept: "application/json" };
-		if (apiKey !== undefined && apiKey.trim() !== "") {
-			headers.authorization = `Bearer ${apiKey}`;
-		}
+		const headers: Record<string, string> = {
+			accept: "application/json",
+			...providers[protocol].headers(apiKey),
+		};
 
 		const response = yield* Effect.tryPromise({
 			try: () => fetch(`${baseUrl}/models`, { headers }),
@@ -58,12 +60,7 @@ export const testModel = (
 	model: string,
 ): Effect.Effect<void, string> =>
 	Effect.gen(function* () {
-		const headers: Record<string, string> = {
-			"content-type": "application/json",
-		};
-		if (apiKey !== undefined && apiKey.trim() !== "") {
-			headers.authorization = `Bearer ${apiKey}`;
-		}
+		const headers: Record<string, string> = providers[protocol].headers(apiKey);
 
 		const body =
 			protocol === "responses"

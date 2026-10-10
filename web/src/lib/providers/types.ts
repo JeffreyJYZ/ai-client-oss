@@ -22,7 +22,7 @@ export interface ToolSpec {
 }
 
 /** How an endpoint serves web search on the wire. */
-export type SearchKind = "openai" | "openrouter";
+export type SearchKind = "openai" | "openrouter" | "anthropic";
 
 /** An enabled web-search request: the endpoint's mechanism plus the result cap. */
 export interface SearchSpec {
@@ -56,5 +56,11 @@ export interface Provider<Send> {
 	 * multi-turn context includes what the model previously said. Pure.
 	 */
 	appendAssistant(send: Send, text: string): unknown;
+	/**
+	 * Auth and version headers for this endpoint (Bearer for the OpenAI
+	 * shapes, `x-api-key` for Anthropic). `send` uses it, and so do the
+	 * models/connection helpers — the endpoint owns its own auth.
+	 */
+	headers(apiKey: string | undefined): Record<string, string>;
 	send(ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string>;
 }

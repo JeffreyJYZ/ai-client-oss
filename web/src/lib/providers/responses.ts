@@ -1,6 +1,6 @@
 import { parseResponsesSend } from "@lib/core/parse";
 import { searchTools } from "@lib/providers/presets";
-import { sendStream } from "@lib/providers/send";
+import { bearerHeaders, sendStream } from "@lib/providers/send";
 import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
 import { ResponsesSend } from "@lib/types/protocols";
 import { responsesSendMinTemplate } from "@lib/util/templates";
@@ -78,15 +78,16 @@ export const responses = {
 	parse: parseResponsesSend,
 	buildRequest,
 	appendAssistant,
+	headers: bearerHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(
 			`${ctx.apiUrl}${endpoint}`,
-			ctx.apiKey,
 			buildRequest(
 				ctx.prev === undefined
 					? responsesSendMinTemplate
 					: (ctx.prev as ResponsesSend),
 				ctx,
 			),
+			bearerHeaders(ctx.apiKey),
 		),
 } satisfies Provider<ResponsesSend>;

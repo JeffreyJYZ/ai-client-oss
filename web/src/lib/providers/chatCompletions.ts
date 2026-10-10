@@ -1,6 +1,6 @@
 import { parseChatCompletionsSend } from "@lib/core/parse";
 import { searchTools } from "@lib/providers/presets";
-import { sendStream } from "@lib/providers/send";
+import { bearerHeaders, sendStream } from "@lib/providers/send";
 import type { Chunk, Provider, SendCtx } from "@lib/providers/types";
 import { ChatCompletionsSend } from "@lib/types/protocols";
 import type { Effect, Stream } from "effect";
@@ -73,13 +73,14 @@ export const chatcompletions = {
 	parse: parseChatCompletionsSend,
 	buildRequest,
 	appendAssistant,
+	headers: bearerHeaders,
 	send: (ctx: SendCtx): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 		sendStream(
 			`${ctx.apiUrl}${endpoint}`,
-			ctx.apiKey,
 			buildRequest(
 				ctx.prev === undefined ? template : (ctx.prev as ChatCompletionsSend),
 				ctx,
 			),
+			bearerHeaders(ctx.apiKey),
 		),
 } satisfies Provider<ChatCompletionsSend>;

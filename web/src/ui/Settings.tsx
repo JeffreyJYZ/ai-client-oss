@@ -170,7 +170,7 @@ export default function Settings() {
 		setMessage(null);
 		setModelsPending(true);
 		Effect.runFork(
-			listModels(active.baseUrl, active.apiKey).pipe(
+			listModels(active.protocol, active.baseUrl, active.apiKey).pipe(
 				Effect.tap((ids) =>
 					Effect.sync(() => updateProvider(id, { models: ids })),
 				),
@@ -654,6 +654,11 @@ export default function Settings() {
 						<p className="text-xs text-neutral-500">
 							OpenRouter&apos;s search server tool lets the model decide when to
 							search (billed by OpenRouter).
+						</p>
+					) : searchKind === "anthropic" ? (
+						<p className="text-xs text-neutral-500">
+							Anthropic executes its built-in web_search server tool on its own
+							API (billed by Anthropic).
 						</p>
 					) : (
 						<p className="text-xs text-neutral-500">

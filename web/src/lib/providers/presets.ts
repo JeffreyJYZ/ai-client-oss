@@ -29,11 +29,21 @@ export const isLocalEndpoint = (baseUrl: string): boolean =>
 	);
 
 /**
- * The web-search tool an endpoint needs on the wire, or `undefined` when it has
- * no server-side mechanism. OpenAI executes its built-in `web_search_preview`;
- * OpenRouter takes the `openrouter:web_search` **server tool**, which lets the
- * model decide whether to search at all. Never use OpenRouter's deprecated
- * `web` plugin (`plugins:[{id:"web"}]`): it searches **once per request**, so a
+ * Anthropic's server-side web search tool declaration: `type`
+ * selects the tool version, the required `name` identifies it,
+ * and `max_uses` caps the searches performed per request.
+ */
+const ANTHROPIC_WEB_SEARCH_TYPE = "web_search_20250305";
+const ANTHROPIC_WEB_SEARCH_NAME = "web_search";
+
+/**
+ * The web-search tool an endpoint needs on the wire, or `undefined`
+ * when it has no server-side mechanism. OpenAI executes its built-in
+ * `web_search_preview`; OpenRouter takes the `openrouter:web_search`
+ * **server tool**, which lets the model decide whether to search at
+ * all; Anthropic declares its built-in `web_search` server tool.
+ * Never use OpenRouter's deprecated `web` plugin
+ * (`plugins:[{id:"web"}]`): it searches **once per request**, so a
  * bare "nice" becomes a query for the city.
  */
 export const searchTools = (
@@ -49,24 +59,37 @@ export const searchTools = (
 			},
 		];
 	}
+	if (search?.kind === "anthropic") {
+		return [
+			{
+				type: ANTHROPIC_WEB_SEARCH_TYPE,
+				name: ANTHROPIC_WEB_SEARCH_NAME,
+				max_uses: search.maxResults,
+			},
+		];
+	}
 	return undefined;
 };
 
 /**
- * How an endpoint serves web search, read from its base URL. `null` means
- * the endpoint has no server-side search — the toggle must stay inert there.
+ * How an endpoint serves web search, read from its base URL. `null`
+ * means the endpoint has no server-side search — the toggle must
+ * stay inert there.
  */
 export const searchKindFor = (baseUrl: string): SearchKind | null => {
 	const url = baseUrl.toLowerCase();
 	if (url.includes("openrouter.ai")) return "openrouter";
 	if (url.includes("api.openai.com")) return "openai";
+	// Anthropic runs its built-in `web_search` server tool itself.
+	if (url.includes("api.anthropic.com")) return "anthropic";
 	return null;
 };
 
 /**
- * Known OpenAI-compatible providers. The base URL carries the API version, so
- * request paths stay bare (`${baseUrl}/chat/completions`, `${baseUrl}/models`).
- * `opencode-go` covers the Go and Go Plus tiers — they share an endpoint and
+ * Known providers. The base URL carries the API version, so
+ * request paths stay bare (`${baseUrl}/chat/completions`,
+ * `${baseUrl}/models`, `${baseUrl}/messages`). `opencode-go`
+ * covers the Go and Go Plus tiers — they share an endpoint and
  * differ only by subscription limits, so one row serves both.
  */
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
@@ -83,6 +106,13 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 		baseUrl: "https://api.openai.com/v1",
 		protocol: "chatcompletions",
 		tools: OPENAI_TOOLS,
+	},
+	{
+		id: "anthropic",
+		label: "Anthropic-compatible (Messages)",
+		baseUrl: "https://api.anthropic.com/v1",
+		protocol: "anthropic",
+		tools: [],
 	},
 	{
 		id: "openrouter",
