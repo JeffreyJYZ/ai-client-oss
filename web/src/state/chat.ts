@@ -1,11 +1,12 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
+import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
 import { type ProtocolName, protocolNames, providers } from "@lib/providers";
 import { searchKindFor } from "@lib/providers/presets";
 import type { AttachmentPart, Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
-import { getActiveProvider } from "./settings";
+import { getActiveProvider, getSettings, setSettings } from "./settings";
 
 export type ChatStatus = "idle" | "streaming";
 
@@ -157,6 +158,17 @@ const toolMarker = (name: string): string =>
 	/search/i.test(name) ? "🔍 searched the web" : `🔧 ${name}`;
 
 /**
+ * Raw text accumulation shared with `appendChunk`. Memory tags are stripped
+ * from the visible text, so the raw accumulation is the single source both
+ * the visible text and the next-turn seed derive from: re-extracting over
+ * the whole accumulation is idempotent, and a tag split across chunks still
+ * never reaches the UI or the store.
+ */
+interface RawText {
+	value: string;
+}
+
+/**
  * Append one streamed chunk to the assistant message, routed by `kind`:
  * `reasoning` (thinking) lands in `reasoning`, `text` (the answer) in `text`,
  * so the two never concatenate into one squished bubble. A `tool` chunk breaks
@@ -167,6 +179,7 @@ const appendChunk = (
 	conversationId: string,
 	messageId: string,
 	chunk: Chunk,
+	raw: RawText,
 ): void => {
 	updateConversation(conversationId, (conversation) => ({
 		...conversation,
@@ -176,17 +189,33 @@ const appendChunk = (
 				return { ...m, reasoning: (m.reasoning ?? "") + chunk.text };
 			}
 			if (chunk.kind === "tool") {
-				// The marker is display-only: `assistantText` (the next-turn seed)
-				// accumulates `text` chunks only, so it never reaches the wire.
-				// Trim trailing blank lines first so two adjacent calls don't stack.
+				// The marker is display-only: the visible text (the next-turn
+				// seed) accumulates `text` chunks only, so it never reaches the
+				// wire. Trim trailing blank lines first so two adjacent calls
+				// don't stack.
 				const base = m.text.replace(/\n+$/, "");
 				const sep = base === "" ? "" : "\n\n";
 				return { ...m, text: `${base}${sep}${toolMarker(chunk.text)}\n\n` };
 			}
-			return { ...m, text: m.text + chunk.text };
+			raw.value += chunk.text;
+			return { ...m, text: extractMemories(raw.value).text };
 		}),
 	}));
 	refresh();
+};
+
+/**
+ * Persist memory notes the model ended its reply with. Pure merge through
+ * `mergeMemories`, then the settings store; a no-op when the reply carried
+ * none or the feature is off.
+ */
+const commitMemories = (additions: readonly string[]): void => {
+	if (additions.length === 0) return;
+	const settings = getSettings();
+	if (!settings.memoriesEnabled) return;
+	setSettings({
+		memories: [...mergeMemories(settings.memories, additions, Date.now())],
+	});
 };
 
 const finalize = (
@@ -195,6 +224,7 @@ const finalize = (
 	protocol: ProtocolName,
 	exit: Exit.Exit<void, string>,
 	next: unknown,
+	memories: readonly string[],
 ): void => {
 	// A newer send (or a `stop`) invalidated this run; its finalizer must not
 	// touch shared state, or it would clobber the new stream's status/`prev`.
@@ -203,6 +233,7 @@ const finalize = (
 	streamConversationId = undefined;
 	if (Exit.isSuccess(exit)) {
 		prevByConversationProtocol.set(prevKey(conversationId, protocol), next);
+		commitMemories(memories);
 	} else if (!Cause.hasInterruptsOnly(exit.cause)) {
 		const text = Option.getOrElse(
 			Cause.findErrorOption(exit.cause),
@@ -267,6 +298,14 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 				}
 			: undefined;
 
+	const settings = getSettings();
+	// The memory section is composed for the wire only: the conversation's own
+	// `systemPrompt` never changes, and with no notes (or the feature off)
+	// `memoryPrompt` is "" so the request is byte-identical to before.
+	const memory = settings.memoriesEnabled
+		? memoryPrompt(settings.memories)
+		: "";
+
 	const ctx: SendCtx = {
 		msg,
 		prev,
@@ -278,7 +317,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		// endpoint-specific (OpenAI's built-in is rejected elsewhere).
 		tools: active.tools,
 		search,
-		systemPrompt: conversation.systemPrompt,
+		systemPrompt: [conversation.systemPrompt ?? "", memory]
+			.filter((part) => part !== "")
+			.join("\n\n"),
 	};
 
 	// Body that would be sent *this* turn. The provider's own `send` builds the
@@ -307,14 +348,15 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	status = "streaming";
 	refresh();
 
-	let assistantText = "";
+	// Raw accumulation of every `text` chunk. `appendChunk` derives the
+	// visible text from it (extraction is idempotent), and the finalizer
+	// harvests completed memory blocks once the stream settles.
+	const raw: RawText = { value: "" };
 	const run = Effect.gen(function* () {
 		const stream = yield* SendMsg(protocol, ctx);
 		yield* Stream.runForEach(stream, (chunk) =>
 			Effect.sync(() => {
-				// Only the answer seeds the next turn; reasoning is display-only.
-				if (chunk.kind === "text") assistantText += chunk.text;
-				appendChunk(conversationId, assistantId, chunk);
+				appendChunk(conversationId, assistantId, chunk, raw);
 			}),
 		);
 	});
@@ -325,15 +367,17 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		Effect.exit(
 			run.pipe(
 				Effect.onExit((exit) =>
-					Effect.sync(() =>
+					Effect.sync(() => {
+						const extracted = extractMemories(raw.value);
 						finalize(
 							myRun,
 							conversationId,
 							protocol,
 							exit,
-							appendAssistant(nextBody, assistantText),
-						),
-					),
+							appendAssistant(nextBody, extracted.text),
+							extracted.memories,
+						);
+					}),
 				),
 			),
 		),

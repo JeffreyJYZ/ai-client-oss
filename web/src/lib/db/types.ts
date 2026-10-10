@@ -62,6 +62,20 @@ export const emptyProfile = (id: string): Profile =>
 	profileSchema.parse({ id });
 
 /**
+ * One durable memory note: a fact the model wrote into its reply (stripped
+ * from the displayed text before storage, see `lib/memory.ts`) or the user
+ * added in Settings. `source` labels who wrote it.
+ */
+export const memoryNoteSchema = z.object({
+	id: z.string(),
+	text: z.string(),
+	createdAt: z.number(),
+	source: z.enum(["model", "user"]),
+});
+
+export type MemoryNote = z.infer<typeof memoryNoteSchema>;
+
+/**
  * Canonical persisted settings shape. `src/lib/db` owns this so `lib` never has
  * to depend on `state`; the settings store imports it from `@lib/db`. Defaults
  * seed one empty provider and point `activeProviderId` at it.
@@ -73,6 +87,10 @@ export const Settings = z.object({
 	activeProviderId: z.string().default(DEFAULT_PROVIDER_ID),
 	/** Saved provider+model+system-prompt bundles; empty until the user adds one. */
 	profiles: z.array(profileSchema).default([]),
+	/** Durable notes for the whole app, one list sent with every request. */
+	memories: z.array(memoryNoteSchema).default([]),
+	/** Off = no notes injected into requests and none recorded from replies. */
+	memoriesEnabled: z.boolean().default(true),
 	/** A dismissed notice stays dismissed across reloads. */
 	dismissedInstallNote: z.boolean().default(false),
 	/** Newest release whose update notice the user has dismissed. */
