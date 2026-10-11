@@ -12,7 +12,7 @@ Desktop and web client for OpenAI-compatible and Anthropic endpoints. Tauri shel
 - **Small and fast**: Rust over the OS webview with no bundled browser engine, fonts or icons. ~21MB on disk.
 - **Secure and private**: conversations and API keys stay on your machine, and the app has no analytics.
 - **Remembers you**: durable notes the model writes as it works, plus your own, sent with every chat.
-- **Updates itself**: the desktop build finds a newer release, downloads it and relaunches.
+- **Updates itself**: the desktop build finds a newer release, downloads it and relaunches, and a Settings section checks on demand.
 - **One codebase, two targets**: the same app ships as a desktop binary and as the website.
 - **Completely open source**: GPL-3.0-only, you are free to make copies as long as they are open source.
 
