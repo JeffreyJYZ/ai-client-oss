@@ -143,6 +143,10 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
+            **New in 0.2.3**
+
+            - Settings folds the Memory section by default, so its list no longer pushes everything else down the page.
+
             **New in 0.2.2**
 
             - Settings has an **Updates** section. Check for a new version whenever you like and install it there, so dismissing the notice no longer hides the only way to update.
