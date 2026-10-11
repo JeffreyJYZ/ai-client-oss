@@ -20,7 +20,14 @@ Desktop and web client for OpenAI-compatible and Anthropic endpoints. Tauri shel
 
 [Releases](https://github.com/JeffreyJYZ/ai-client-oss/releases/latest) publishes macOS (universal), Windows and Linux builds. The web build runs at [aiclient.jyz.land](https://aiclient.jyz.land).
 
-Builds are unsigned. On macOS, clear the download quarantine flag after installing, or the app will not open:
+macOS installs with Homebrew, and updates itself from then on:
+
+```sh
+brew trust jeffreyjyz/tap
+brew install --cask --no-quarantine jeffreyjyz/tap/oss-ai-client
+```
+
+Installing the `.dmg` by hand instead? Builds are unsigned, so clear the download quarantine flag after installing, or the app will not open:
 
 ```sh
 xattr -dr com.apple.quarantine "/Applications/oss-ai-client.app"
