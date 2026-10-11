@@ -143,6 +143,11 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
+            **New in 0.2.2**
+
+            - Settings has an **Updates** section. Check for a new version whenever you like and install it there, so dismissing the notice no longer hides the only way to update.
+            - macOS installs with Homebrew: `brew trust jeffreyjyz/tap` once, then `brew install --cask --no-quarantine jeffreyjyz/tap/oss-ai-client`.
+
             **Fixed in 0.2.1**
 
             - Settings heading controls work again. The memory toggle and the web search switch could not be clicked in 0.2.0.
