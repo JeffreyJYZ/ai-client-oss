@@ -755,6 +755,19 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 
 ---
 
+### Task 47: Homebrew cask for the desktop app
+
+**Files:** `Casks/oss-ai-client.rb`, `README.md` and `.github/workflows/bump-cask.yml` in `JeffreyJYZ/homebrew-tap`; `README.md` and `AGENTS.md` here.
+
+**Why:** the only install path was a dmg plus an `xattr` command, which is the very thing the self-updater exists to remove.
+
+- [x] **Step 1:** A cask pinning the universal dmg by version and sha256, `auto_updates true` so Homebrew never fights the updater, and a `zap` covering the app's data directories.
+- [x] **Step 2:** The tap repins itself: a scheduled workflow **in that repo** reads this repo's newest `desktop-v*` release, digests the dmg, and commits the bump. No cross-repo token, because it only writes to its own repo.
+- [x] **Step 3:** Verify — `brew style` 0 offenses, `brew audit --cask` clean, `brew livecheck` resolving the real tag, `brew fetch --cask` proving the pinned digest against the actual download, then a live dispatch of the repin workflow (which found the pin current and committed nothing).
+- [x] **Step 4:** Document what a user meets: `brew trust jeffreyjyz/tap` once per machine, and that the cask clears the quarantine attribute itself, because Homebrew 7 has no `--no-quarantine` for an unsigned build (verified: with the attribute present macOS refuses the app, and the flag does not exist).
+
+---
+
 ## Out of scope (this plan)
 
 - General tool execution beyond the two client tools this plan ships (`fetch_url`, `web_search`).

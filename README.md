@@ -24,7 +24,7 @@ macOS installs with Homebrew, and updates itself from then on:
 
 ```sh
 brew trust jeffreyjyz/tap
-brew install --cask --no-quarantine jeffreyjyz/tap/oss-ai-client
+brew install --cask jeffreyjyz/tap/oss-ai-client
 ```
 
 Installing the `.dmg` by hand instead? Builds are unsigned, so clear the download quarantine flag after installing, or the app will not open:
