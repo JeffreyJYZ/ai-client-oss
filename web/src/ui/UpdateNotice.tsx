@@ -1,73 +1,52 @@
 import { isDesktop } from "@lib/platform";
-import {
-	discardUpdate,
-	findUpdate,
-	installUpdate,
-	type UpdateOffer,
-} from "@lib/updates";
-import { Effect } from "effect";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import { setSettings, useSettings } from "@/state/settings";
-
-/** What the in-app installer is doing, if it was ever started. */
-type InstallState =
-	| { readonly phase: "idle" }
-	| { readonly phase: "downloading"; readonly percent: number | null }
-	| { readonly phase: "failed"; readonly message: string };
+import {
+	checkForUpdates,
+	installNow,
+	releaseOffer,
+	useUpdates,
+} from "@/state/updates";
 
 /**
  * Dismissible "new release available" strip. Desktop only — the
  * website is continuously deployed, so a version notice is
  * meaningless there.
  *
- * When the Tauri updater is registered the strip becomes the install
- * flow: download (with progress) then relaunch. Builds without it get
- * the old link-only notice, and a failed install falls back to the
- * same release link.
+ * The check/install flow lives in `state/updates` — the same store
+ * the Settings Updates section reads — so this component only
+ * renders it. When the Tauri updater is registered the strip
+ * becomes the install flow: download (with progress) then relaunch.
+ * Builds without it get the link-only notice, and a failed install
+ * falls back to the same release link.
  */
 export default function UpdateNotice() {
-	const [offer, setOffer] = useState<UpdateOffer | null>(null);
-	const [install, setInstall] = useState<InstallState>({ phase: "idle" });
+	const { phase, offer, percent, message } = useUpdates();
 	const { dismissedUpdateVersion } = useSettings();
 
 	useEffect(() => {
 		if (!isDesktop) return;
-		// A failed check (offline, rate limit, no releases, an endpoint that
-		// predates the updater) is silent: the error channel is discarded, so
-		// there is no error UI and the app is unaffected.
-		Effect.runPromise(
-			Effect.catch(findUpdate(), () => Effect.succeed(null)),
-		).then((found) => {
-			setOffer(found);
-		});
+		// A failed check (offline, rate limit, no releases, an endpoint
+		// that predates the updater) is silent: the store folds the
+		// error into `message`, and with no offer the strip stays
+		// absent and the app is unaffected.
+		checkForUpdates();
 	}, []);
 
 	if (!isDesktop || offer === null || offer.version === dismissedUpdateVersion)
 		return null;
 
+	const busy = phase === "downloading";
+
 	const dismiss = () => {
 		setSettings({ dismissedUpdateVersion: offer.version });
-		// The updater handle is only useful while it is on screen; releasing it
-		// keeps one Rust-side resource from living on after the dismissal.
-		if (offer.kind === "updater") Effect.runFork(discardUpdate(offer.update));
+		// Dismissing closes the updater handle, and a closed handle
+		// cannot be installed from later — so release the offer and
+		// leave the store "idle": reopening Settings then runs a fresh
+		// check and gets a live handle to install from.
+		releaseOffer();
 	};
-
-	const startInstall = () => {
-		if (offer.kind !== "updater" || install.phase === "downloading") return;
-		setInstall({ phase: "downloading", percent: null });
-		Effect.runPromise(
-			Effect.catch(
-				installUpdate(offer.update, (percent) =>
-					setInstall({ phase: "downloading", percent }),
-				),
-				(message) =>
-					Effect.sync(() => setInstall({ phase: "failed", message })),
-			),
-		);
-	};
-
-	const busy = install.phase === "downloading";
 
 	return (
 		<div className="flex shrink-0 items-start gap-3 border-b border-neutral-800 bg-neutral-900/60 px-4 py-1.5 text-[11px] break-words text-neutral-400">
@@ -82,21 +61,21 @@ export default function UpdateNotice() {
 					{offer.version}
 				</a>{" "}
 				is available.
-				{install.phase === "failed"
-					? ` Updating failed (${install.message}) — install it from the release page instead.`
+				{phase === "failed" && message !== null
+					? ` Updating failed (${message}) — install it from the release page instead.`
 					: null}
 			</p>
-			{offer.kind === "updater" && install.phase !== "failed" ? (
+			{offer.kind === "updater" && phase !== "failed" ? (
 				<button
 					type="button"
-					onClick={startInstall}
+					onClick={installNow}
 					disabled={busy}
 					className="shrink-0 rounded px-1 text-neutral-300 hover:text-neutral-100 disabled:text-neutral-500"
 				>
 					{busy
-						? install.percent === null
+						? percent === null
 							? "Updating…"
-							: `Updating ${install.percent}%`
+							: `Updating ${percent}%`
 						: "Update now"}
 				</button>
 			) : null}

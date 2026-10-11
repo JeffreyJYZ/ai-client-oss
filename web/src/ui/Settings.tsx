@@ -1,6 +1,7 @@
 import { type Backup, exportBackup, importBackup } from "@lib/backup";
 import type { MemoryNote, Profile, ProviderConfig } from "@lib/db";
 import { MAX_MEMORY_NOTE_LENGTH, mergeMemories } from "@lib/memory";
+import { isDesktop } from "@lib/platform";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import { listModels, testModel } from "@lib/providers/models";
 import {
@@ -10,7 +11,14 @@ import {
 } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { Effect } from "effect";
-import { type ChangeEvent, type ReactNode, useRef, useState } from "react";
+import {
+	type ChangeEvent,
+	type ReactNode,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
+import { LATEST_RELEASE_URL } from "@/constants/links";
 import {
 	addProfile,
 	addProvider,
@@ -22,6 +30,7 @@ import {
 	updateProvider,
 	useSettings,
 } from "@/state/settings";
+import { checkForUpdates, installNow, useUpdates } from "@/state/updates";
 import ConfirmButton from "@/ui/ConfirmButton";
 
 const INPUT =
@@ -73,6 +82,7 @@ function Section({
 
 export default function Settings() {
 	const settings = useSettings();
+	const updates = useUpdates();
 	const active = settings.providers.find(
 		(provider) => provider.id === settings.activeProviderId,
 	);
@@ -89,6 +99,14 @@ export default function Settings() {
 		readonly text: string;
 	} | null>(null);
 	const importInputRef = useRef<HTMLInputElement>(null);
+
+	// This view owns the Updates section: run a fresh check when
+	// it mounts, so the section never shows a stale answer (the
+	// strip's own check may predate it, or have been dismissed).
+	useEffect(() => {
+		if (!isDesktop) return;
+		checkForUpdates();
+	}, []);
 
 	const missingKey =
 		!isLocalEndpoint(active?.baseUrl ?? "") &&
@@ -955,6 +973,103 @@ export default function Settings() {
 						</span>
 					) : null}
 				</Section>
+				{isDesktop ? (
+					<Section
+						className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+						summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+						heading={
+							<>
+								<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+									Updates
+								</h3>
+								<button
+									type="button"
+									onClick={checkForUpdates}
+									disabled={
+										updates.phase === "checking" ||
+										updates.phase === "downloading"
+									}
+									className={BUTTON}
+								>
+									Check for updates
+								</button>
+							</>
+						}
+					>
+						{updates.running !== null ? (
+							<p className="text-xs text-neutral-500">
+								Running version {updates.running}
+							</p>
+						) : null}
+						{updates.phase === "checking" ? (
+							<p className="text-xs text-neutral-500">Checking for updates…</p>
+						) : null}
+						{updates.phase === "current" ? (
+							<p className="text-sm text-neutral-500">
+								You are on the latest version.
+							</p>
+						) : null}
+						{(updates.phase === "available" ||
+							updates.phase === "downloading") &&
+						updates.offer !== null ? (
+							<div className="flex flex-col gap-3">
+								<p className="text-sm text-neutral-500">
+									Version {updates.offer.version} is available.
+								</p>
+								{updates.offer.kind === "updater" ? (
+									<button
+										type="button"
+										onClick={installNow}
+										disabled={updates.phase === "downloading"}
+										className={BUTTON}
+									>
+										Update now
+									</button>
+								) : (
+									<a
+										href={LATEST_RELEASE_URL}
+										target="_blank"
+										rel="noreferrer noopener"
+										className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
+									>
+										Open the release page
+									</a>
+								)}
+								{updates.phase === "downloading" ? (
+									<p className="text-xs text-neutral-500">
+										{updates.percent === null
+											? "Downloading… (size unknown)"
+											: `Downloading… ${updates.percent}%`}
+									</p>
+								) : null}
+							</div>
+						) : null}
+						{updates.phase === "failed" ? (
+							<div className="flex flex-col gap-3">
+								<span className="text-sm text-red-400">
+									{updates.message ?? "Update check failed."}
+								</span>
+								<div className="flex items-center gap-3">
+									<a
+										href={LATEST_RELEASE_URL}
+										target="_blank"
+										rel="noreferrer noopener"
+										className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
+									>
+										Open the release page
+									</a>
+									<button
+										type="button"
+										onClick={checkForUpdates}
+										className={BUTTON}
+									>
+										Retry
+									</button>
+								</div>
+							</div>
+						) : null}
+					</Section>
+				) : null}
 			</div>
 		</div>
 	);

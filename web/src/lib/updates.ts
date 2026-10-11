@@ -79,7 +79,7 @@ export type UpdateOffer =
 	| { readonly kind: "github"; readonly version: string };
 
 /** Version of the running build, read from the desktop shell. */
-const runningVersion = (): Effect.Effect<string, string> =>
+export const runningVersion = (): Effect.Effect<string, string> =>
 	Effect.tryPromise({
 		try: () => getVersion(),
 		catch: () => "version read failed",

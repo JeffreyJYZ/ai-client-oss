@@ -709,9 +709,49 @@ Commit `b678fb9`; review found two Important issues (dead `model`; `stop()`→`s
 **Why:** Settings is one long scroll of sections, so someone who came to change one thing sees all of it at once. Folding each section makes the page scannable, and it is the same disclosure the transcript already uses for a model's thinking.
 
 - [x] **Step 1:** One small collapsible wrapper inside the file: a `<details>` whose `<summary>` carries the section's existing `<h3>` styling, plus the `cursor-pointer select-none` the thinking block uses, with the section's content as its children. **Open by default** — a fold that starts closed hides content the user never chose to hide.
-- [x] **Step 2:** Wrap every section (the ones headed by the `text-xs uppercase tracking-widest` `<h3>`s), leaving the page's own heading alone. A control that lives in a heading row (a checkbox, a button) must act without also folding the section: cancel the summary's own toggle when the click was aimed at a control.
+- [x] **Step 2:** Wrap every section (the ones headed by the `text-xs uppercase tracking-widest` `<h3>`s), leaving the page's own heading alone. A control that lives in a heading row (a checkbox, a button) already acts without folding the section: a click on one makes it the event's activation target, so the summary's toggle never runs. Do **not** add an `onClick` on the summary that calls `preventDefault` — it cancels the control's own activation as well, which made every heading checkbox untickable (browser-verified, fixed in `01cc136`).
 - [x] **Step 3:** Verify — gates, then a browser check that every section shows its content on load and collapses and reopens on click (the thinking block is the reference for the interaction).
 - [x] **Step 4:** Commit — `feat(ui): foldable Settings sections`.
+
+---
+
+### Task 44: Replay attachments in the rebuilt history
+
+**Files:** modify `lib/providers/{types,chatCompletions,responses,anthropicMessages}.ts`, `state/chat.ts`.
+
+**Why:** the rebuild replayed text only, so after a reload a turn that carried just a file or image vanished from what the model saw.
+
+- [x] **Step 1:** `HistoryTurn` gains `parts`, and each protocol's `seedHistory` reproduces its own attachment blocks using the same shapes `buildRequest` already writes.
+- [x] **Step 2:** The seed passes each turn's parts through and skips a row only when it has neither words nor attachments.
+- [x] **Step 3:** Verify — gates plus the replay suite: an attachment-only turn survives with its blocks on all three protocols, text-only rows are unchanged, and no seeded body leaks a marker.
+- [x] **Step 4:** Commit — `fix(settings): keep heading controls usable and replay attachments after a reload`.
+
+---
+
+### Task 45: Fold the tools block
+
+**Files:** modify `ui/Settings.tsx`.
+
+**Why:** four sections folded, but the block holding web search, page fetch and the TinyFish key was headed by a label, so it never did.
+
+- [x] **Step 1:** Wrap it in the same `Section`, passing its existing heading row as the heading.
+- [x] **Step 2:** Remove the summary `onClick` guard (see Task 43, Step 2) once it turned out to be what made heading checkboxes untickable.
+- [x] **Step 3:** Verify — gates, a browser check that all five sections fold, and a heading checkbox toggling from both the box and its label.
+- [x] **Step 4:** Commit — same commit as Task 44.
+
+---
+
+### Task 46: A dedicated Updates section in Settings
+
+**Files:** add `state/updates.ts`; modify `ui/Settings.tsx`, `ui/UpdateNotice.tsx`, `lib/updates.ts`.
+
+**Why:** the strip is the only place an update appears, so dismissing it stranded anyone on an old build until a newer release showed up.
+
+- [x] **Step 1:** One store, `idle → checking → current | available | downloading | failed`, read by both the strip and the section, mirroring `state/settings.ts`'s pattern so neither owns the flow.
+- [x] **Step 2:** The section renders desktop-only and last, after Backup: the running version, a Check button, install with progress, the release link. It never reads `dismissedUpdateVersion`.
+- [x] **Step 3:** Dismissing the strip releases the updater handle and returns the store to idle, so reopening Settings re-checks and gets a handle it can actually install from.
+- [x] **Step 4:** Verify — gates, the store's transitions against a mocked `lib/updates`, and a browser run with `__TAURI_INTERNALS__` stubbed before module evaluation so the real GitHub path answers.
+- [x] **Step 5:** Commit — `feat(updates): check and install from Settings`.
 
 ---
 
