@@ -143,6 +143,12 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
+            **Fixed in 0.2.1**
+
+            - Settings heading controls work again. The memory toggle and the web search switch could not be clicked in 0.2.0.
+            - A reloaded conversation keeps a turn's files and images, so a turn that was only an attachment no longer drops out of what the model sees.
+            - The tools block folds like the other settings sections.
+
             **New in 0.2.0**
 
             - The model can read a page you link, and with a TinyFish key it reads script-rendered pages too.
