@@ -143,7 +143,18 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **macOS** — open the `.dmg`, drag the app into Applications, then clear the download quarantine flag. These builds are unsigned and not notarized, and **right-click → Open no longer bypasses Gatekeeper** on current macOS:
+            **New in 0.2.0**
+
+            - The model can read a page you link, and with a TinyFish key it reads script-rendered pages too.
+            - Web search on endpoints that have none of their own, through TinyFish with your own API key. Local models included.
+            - Thinking streams properly from OpenRouter's newer reasoning shape, with a live count while it thinks.
+            - The model no longer forgets the conversation after a page reload or a failed request.
+            - Settings sections fold, and controls in a heading row still do their job.
+            - The app icon is inset on Apple's grid, so it no longer reads oversized in the Dock.
+
+            **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
+
+            **macOS**: open the `.dmg`, drag the app into Applications, then clear the download quarantine flag. These builds are unsigned and not notarized, and **right-click → Open no longer bypasses Gatekeeper** on current macOS:
 
             ```sh
             xattr -dr com.apple.quarantine "/Applications/oss-ai-client.app"
@@ -151,8 +162,8 @@ jobs:
 
             Add `sudo` if it reports a permission error, and change the path if the app is installed elsewhere.
 
-            **Windows** — run the `-setup.exe` (or the `.msi`). These builds are unsigned, so SmartScreen may warn: choose **More info → Run anyway**.
-            **Linux** — install the `.deb` / `.rpm`, or `chmod +x` the `.AppImage` and run it.
+            **Windows**: run the `-setup.exe` (or the `.msi`). These builds are unsigned, so SmartScreen may warn: choose **More info → Run anyway**.
+            **Linux**: install the `.deb` / `.rpm`, or `chmod +x` the `.AppImage` and run it.
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
