@@ -59,14 +59,16 @@ function Section({
 	summaryClassName,
 	heading,
 	children,
+	open = true,
 }: {
 	readonly className: string;
 	readonly summaryClassName: string;
 	readonly heading: ReactNode;
 	readonly children: ReactNode;
+	readonly open?: boolean;
 }) {
 	return (
-		<details className={className} open>
+		<details className={className} open={open}>
 			{/* A control in the heading row (a checkbox, a button) keeps its
 			    own activation and does not fold the section: a click on one
 			    makes it the event's activation target, so the summary's toggle
@@ -843,6 +845,7 @@ export default function Settings() {
 				<Section
 					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
 					summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+					open={false}
 					heading={
 						<>
 							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
