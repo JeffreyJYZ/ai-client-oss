@@ -541,11 +541,24 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		stored ??
 		provider.seedHistory(
 			conversation.messages.flatMap((message) => {
-				// The app's own rows are not turns the model said anything in,
-				// and a failed turn leaves an empty assistant placeholder
-				// behind; a row with no words carries nothing to replay.
-				if (message.role === "error" || message.text === "") return [];
-				return [{ role: message.role, text: message.text }];
+				const parts = message.parts ?? [];
+				// The app's own rows are not turns the model said anything
+				// in, and a failed turn leaves an empty assistant placeholder
+				// behind; a row with neither words nor attachments carries
+				// nothing to replay. A turn that carried only a file must
+				// survive the rebuild, so attachments count as content.
+				if (
+					message.role === "error" ||
+					(message.text === "" && parts.length === 0)
+				)
+					return [];
+				return [
+					{
+						role: message.role,
+						text: message.text,
+						...(parts.length > 0 ? { parts } : {}),
+					},
+				];
 			}),
 		);
 

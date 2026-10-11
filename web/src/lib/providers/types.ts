@@ -130,16 +130,23 @@ export interface SendCtx {
 }
 
 /**
- * One text turn of a conversation, the minimal shape a
- * history seed needs: the stored message's role and its
- * marker-free `text`, with display markers and attachments
- * left behind. `error` rows never reach a seed — the caller
- * skips them, since they are the app's own words and no
- * wire role matches them.
+ * One turn of a conversation, the minimal shape a
+ * history seed needs: the stored message's role, its
+ * marker-free `text`, and the attachments it carried.
+ * Display markers are left behind. `error` rows never
+ * reach a seed — the caller skips them, since they are
+ * the app's own words and no wire role matches them.
  */
 export interface HistoryTurn {
 	readonly role: "user" | "assistant";
 	readonly text: string;
+	/**
+	 * Attachments the turn carried, replayed as the
+	 * protocol's own attachment blocks. Absent or empty
+	 * for a text-only turn, whose wire shape is the
+	 * plain string (or single text item) as before.
+	 */
+	readonly parts?: readonly AttachmentPart[];
 }
 
 export interface Provider<Send> {
@@ -155,16 +162,17 @@ export interface Provider<Send> {
 	 */
 	appendAssistant(send: Send, text: string): unknown;
 	/**
-	 * Rebuild a request body from the conversation's text
+	 * Rebuild a request body from the conversation's
 	 * turns — the inverse of `appendAssistant`: the seed
 	 * `buildRequest` then extends exactly as it extends a
 	 * body replayed from a previous turn, and a turn list
 	 * ending in an assistant turn seeds to the same body
 	 * `appendAssistant` produces over the seed of the turns
 	 * before it. Pure; takes bare `HistoryTurn`s so no
-	 * provider depends on `lib/db`, and carries no
-	 * attachments — only the text turns, which is all the
-	 * transcript records. Callers skip `error` rows.
+	 * provider depends on `lib/db`. A turn's attachments
+	 * ride as the protocol's own attachment blocks, so a
+	 * turn that carried only a file survives the rebuild.
+	 * Callers skip `error` rows.
 	 */
 	seedHistory(turns: readonly HistoryTurn[]): Send;
 	/**

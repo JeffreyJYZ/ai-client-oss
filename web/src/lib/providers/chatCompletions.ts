@@ -82,17 +82,40 @@ const appendAssistant = (send: ChatCompletionsSend, text: string) => {
 
 /**
  * Rebuild a chat/completions body from the conversation's
- * text turns: every turn rides as a `messages` entry — the
- * wire shape `appendAssistant` writes assistant turns in —
- * so the seed of a stored conversation equals the body its
- * successful turns left behind. Pure.
+ * turns: every turn rides as a `messages` entry — the
+ * wire shape `appendAssistant` writes assistant turns in.
+ * A turn with attachments carries the content-block array
+ * `buildRequest` writes (a text block followed by one
+ * `image_url`/`file` block per attachment); a text-only
+ * turn stays a plain string. So the seed of a stored
+ * conversation equals the body its successful turns left
+ * behind. Pure.
  */
 const seedHistory = (turns: readonly HistoryTurn[]) => ({
 	...template,
-	messages: turns.map((turn) => ({
-		role: turn.role,
-		content: turn.text,
-	})),
+	messages: turns.map((turn) => {
+		const parts = turn.parts ?? [];
+		return {
+			role: turn.role,
+			content:
+				parts.length === 0
+					? turn.text
+					: [
+							{ type: "text" as const, text: turn.text },
+							...parts.map((part) =>
+								part.kind === "image"
+									? {
+											type: "image_url" as const,
+											image_url: { url: part.dataUrl },
+										}
+									: {
+											type: "file" as const,
+											file: { filename: part.name, file_data: part.dataUrl },
+										},
+							),
+						],
+		};
+	}),
 });
 
 /**

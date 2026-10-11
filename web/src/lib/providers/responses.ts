@@ -2,6 +2,7 @@ import { parseResponsesSend } from "@lib/core/parse";
 import { requestTools } from "@lib/providers/presets";
 import { bearerHeaders, sendStream } from "@lib/providers/send";
 import type {
+	AttachmentPart,
 	Chunk,
 	HistoryTurn,
 	Provider,
@@ -86,12 +87,26 @@ const appendAssistant = (send: ResponsesSend, text: string) => {
 };
 
 /**
+ * One attachment as the Responses input item
+ * `buildRequest` writes: images and files share the
+ * `file_url` shape, differing only in item type.
+ */
+const partsBlocks = (parts: readonly AttachmentPart[]) =>
+	parts.map((part) =>
+		part.kind === "image"
+			? { type: "input_image" as const, file_url: part.dataUrl }
+			: { type: "input_file" as const, file_url: part.dataUrl },
+	);
+
+/**
  * Rebuild a Responses body from the conversation's text
  * turns: every turn rides as an `input` item — user turns
  * as `input_text`, assistant turns as `output_text`, the
- * shapes `buildRequest` and `appendAssistant` write — so
- * the seed of a stored conversation equals the body its
- * successful turns left behind. Pure.
+ * shapes `buildRequest` and `appendAssistant` write. A turn
+ * with attachments carries them as the `input_image`/
+ * `input_file` items `buildRequest` writes, after the text
+ * item — so the seed of a stored conversation equals the
+ * body its successful turns left behind. Pure.
  */
 const seedHistory = (turns: readonly HistoryTurn[]): ResponsesSend => ({
 	...responsesSendMinTemplate,
@@ -102,6 +117,7 @@ const seedHistory = (turns: readonly HistoryTurn[]): ResponsesSend => ({
 				type: turn.role === "assistant" ? "output_text" : "input_text",
 				text: turn.text,
 			},
+			...partsBlocks(turn.parts ?? []),
 		],
 	})),
 });

@@ -2,6 +2,7 @@ import { parseAnthropicSend } from "@lib/core/parse";
 import { requestTools } from "@lib/providers/presets";
 import { sendStream } from "@lib/providers/send";
 import type {
+	AttachmentPart,
 	Chunk,
 	HistoryTurn,
 	Provider,
@@ -123,18 +124,52 @@ const appendAssistant = (send: AnthropicSend, text: string) => ({
 });
 
 /**
- * Rebuild a Messages body from the conversation's text
- * turns: every turn rides as a `messages` entry with its
- * text as string content — the shape `appendAssistant`
- * writes assistant turns in — so the seed of a stored
- * conversation equals the body its successful turns left
- * behind. Pure.
+ * One attachment as the base64 content block `buildRequest`
+ * writes: images and documents share the source shape,
+ * differing only in block type. Returns nothing when the
+ * attachment is not a base64 data URL — there is no
+ * payload to map, and the text still replays.
+ */
+const partsBlocks = (parts: readonly AttachmentPart[]) =>
+	parts.flatMap((part) => {
+		const decoded = decodeDataUrl(part.dataUrl);
+		if (decoded === null) return [];
+		return [
+			{
+				type: part.kind === "image" ? "image" : "document",
+				source: {
+					type: "base64" as const,
+					media_type: decoded.mediaType,
+					data: decoded.data,
+				},
+			},
+		];
+	});
+
+/**
+ * Rebuild a Messages body from the conversation's
+ * turns: every turn rides as a `messages` entry with
+ * its text as string content — the shape `appendAssistant`
+ * writes assistant turns in. A turn with attachments
+ * carries the block array `buildRequest` writes (a text
+ * block followed by one base64-sourced `image`/`document`
+ * block per attachment, decoded the same way; an
+ * attachment that is not a base64 data URL has nothing
+ * to map, and the text still replays). So the seed of a
+ * stored conversation equals the body its successful
+ * turns left behind. Pure.
  */
 const seedHistory = (turns: readonly HistoryTurn[]): AnthropicSend => ({
 	...template,
 	messages: turns.map((turn) => ({
 		role: turn.role,
-		content: turn.text,
+		content:
+			(turn.parts ?? []).length === 0
+				? turn.text
+				: [
+						{ type: "text" as const, text: turn.text },
+						...partsBlocks(turn.parts ?? []),
+					],
 	})),
 });
 

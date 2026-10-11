@@ -58,26 +58,14 @@ function Section({
 }) {
 	return (
 		<details className={className} open>
-			{/* biome-ignore lint/a11y/noStaticElementInteractions: summary is natively interactive; this handler only cancels the toggle when the click was aimed at a control inside the row */}
-			<summary
-				className={summaryClassName}
-				// The heading row carries controls (a checkbox, a button). A
-				// click on one must do its job without also folding the
-				// section, so it reaches the control first and the summary's
-				// own default action is cancelled. Clicks anywhere else in the
-				// row still toggle, as does the keyboard on the summary itself.
-				onClick={(event) => {
-					const target = event.target;
-					if (
-						target instanceof Element &&
-						target.closest("button, input, select, textarea, a") !== null
-					) {
-						event.preventDefault();
-					}
-				}}
-			>
-				{heading}
-			</summary>
+			{/* A control in the heading row (a checkbox, a button) keeps its
+			    own activation and does not fold the section: a click on one
+			    makes it the event's activation target, so the summary's toggle
+			    never runs. Do not add an onClick that calls preventDefault to
+			    "protect" the control: that cancels the control's own action
+			    too and leaves a heading checkbox untickable (browser-verified
+			    in both cases). */}
+			<summary className={summaryClassName}>{heading}</summary>
 			{children}
 		</details>
 	);
@@ -737,20 +725,25 @@ export default function Settings() {
 					</div>
 				) : null}
 
-				<div className="flex flex-col gap-3 border-t border-neutral-800 pt-5">
-					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
-						Web search
-						<input
-							type="checkbox"
-							checked={webSearch}
-							disabled={
-								active === undefined ||
-								(searchKind === null && tinyfishKey === "")
-							}
-							onChange={(event) => setWebSearch(event.target.checked)}
-							className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
-						/>
-					</label>
+				<Section
+					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+					summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+					heading={
+						<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
+							Web search
+							<input
+								type="checkbox"
+								checked={webSearch}
+								disabled={
+									active === undefined ||
+									(searchKind === null && tinyfishKey === "")
+								}
+								onChange={(event) => setWebSearch(event.target.checked)}
+								className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
+							/>
+						</label>
+					}
+				>
 					{searchKind === null ? (
 						<p className="text-xs text-neutral-500">
 							This endpoint has no server-side web search
@@ -828,7 +821,7 @@ export default function Settings() {
 						</a>
 						.
 					</p>
-				</div>
+				</Section>
 				<Section
 					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
 					summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
