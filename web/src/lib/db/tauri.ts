@@ -1,4 +1,4 @@
-import { migrateSettings, migrations } from "@lib/db/migrate";
+import { readSettings } from "@lib/db/read";
 import {
 	type Conversation,
 	conversationSchema,
@@ -8,7 +8,7 @@ import {
 	settingsDefaults,
 } from "@lib/db/types";
 import { invoke } from "@tauri-apps/api/core";
-import { Effect, Option, Result } from "effect";
+import { Effect, Option } from "effect";
 
 /**
  * Raw text of the last stored blob that failed to parse, or `none` when the
@@ -77,28 +77,16 @@ const getSettings = (): Effect.Effect<Settings> =>
 	Effect.orElseSucceed(
 		Effect.gen(function* () {
 			const raw = yield* call<string | null>("db_get_settings");
-			if (raw === null) {
-				rejected = Option.none();
+			const read = yield* readSettings(raw);
+			if (read.kind === "rejected") {
+				// Unreadable or unmigratable: keep the raw text so a write can
+				// refuse, and run on in-memory defaults meanwhile. The stored
+				// file is left untouched (spec §13).
+				rejected = Option.some(read.raw);
 				return settingsDefaults();
 			}
-			const data = yield* parseJson(raw);
-			// Carry an older blob up to the current schema before parsing. A
-			// migration that faults is a rejection, not a wipe: keep the stored
-			// text, refuse writes and run on in-memory defaults.
-			const migration = yield* Effect.result(migrateSettings(data, migrations));
-			if (Result.isFailure(migration)) {
-				rejected = Option.some(raw);
-				return settingsDefaults();
-			}
-			const parsed = Settings.safeParse(migration.success);
-			if (parsed.success) {
-				rejected = Option.none();
-				return parsed.data;
-			}
-			// Unreadable: keep the raw text so a write can refuse, and run on
-			// in-memory defaults meanwhile. The stored file is left untouched.
-			rejected = Option.some(raw);
-			return settingsDefaults();
+			rejected = Option.none();
+			return read.settings;
 		}),
 		() => settingsDefaults(),
 	);

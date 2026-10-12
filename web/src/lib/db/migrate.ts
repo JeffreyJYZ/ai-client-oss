@@ -55,22 +55,6 @@ export const pendingMigrations = (
 		.sort((a, b) => a.to - b.to);
 
 /**
- * A pre-migration snapshot hook, given the raw pre-migration blob. Its failure
- * is logged and never blocks the migration. Installed by the composition root
- * ({@link setBeforeMigrate}) because `backup` imports `db`, which imports the
- * adapters, which import this module — importing `backup` here would close a
- * cycle and re-enter the read it is meant to snapshot.
- */
-export type BeforeMigrate = (raw: unknown) => Effect.Effect<void, string>;
-
-let beforeMigrate: BeforeMigrate | undefined;
-
-/** Install (or clear) the pre-migration backup hook. Composition-root wiring. */
-export const setBeforeMigrate = (hook: BeforeMigrate | undefined): void => {
-	beforeMigrate = hook;
-};
-
-/**
  * Apply every pending migration to a raw blob, each exactly once, ascending.
  * `dataVersion` is stamped with each migration's `to`, so re-running over an
  * already-current blob applies nothing (idempotent); a blob at
@@ -78,22 +62,18 @@ export const setBeforeMigrate = (hook: BeforeMigrate | undefined): void => {
  *
  * A migration that faults fails with {@link MIGRATION_FAILED_MESSAGE}: the
  * caller preserves the stored blob and raises the rejection rather than
- * defaulting. `before` (defaulting to the installed hook) runs once before the
- * first migration so the caller can snapshot the pre-migration blob.
+ * defaulting. The pre-migration capture is deliberately not this module's job
+ * — `db/read.ts` takes it (via the composition root) where the raw stored
+ * bytes are in hand, which keeps this engine pure: no `db`, no `backup`, no
+ * import cycle.
  */
 export const migrateSettings = (
 	raw: unknown,
 	registry: readonly Migration[] = migrations,
-	before: BeforeMigrate | undefined = beforeMigrate,
 ): Effect.Effect<unknown, string> =>
 	Effect.gen(function* () {
 		const pending = pendingMigrations(raw, registry);
 		if (pending.length === 0) return raw;
-		if (before !== undefined) {
-			yield* Effect.catch(before(raw), (cause) =>
-				Effect.logWarning(`pre-migration backup failed: ${cause}`),
-			);
-		}
 		let current = raw;
 		for (const migration of pending) {
 			const input = current;

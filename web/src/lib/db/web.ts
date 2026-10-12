@@ -1,4 +1,4 @@
-import { migrateSettings, migrations } from "@lib/db/migrate";
+import { readSettings } from "@lib/db/read";
 import {
 	type Conversation,
 	conversationSchema,
@@ -7,7 +7,7 @@ import {
 	Settings,
 	settingsDefaults,
 } from "@lib/db/types";
-import { Effect, Option, Result } from "effect";
+import { Effect, Option } from "effect";
 
 const DB_NAME = "ai-client";
 const DB_VERSION = 1;
@@ -24,16 +24,6 @@ export const SETTINGS_KEY = "ai-client.settings";
  * refuses, so the stored value is never overwritten with defaults.
  */
 let rejected: Option.Option<string> = Option.none();
-
-/** Parse a stored string, degrading malformed JSON to `undefined`. */
-const parseJson = (raw: string): Effect.Effect<unknown> =>
-	Effect.orElseSucceed(
-		Effect.try({
-			try: () => JSON.parse(raw) as unknown,
-			catch: () => "invalid json",
-		}),
-		() => undefined,
-	);
 
 /**
  * Open (creating on first run) the IndexedDB database. `Effect.callback` keeps
@@ -128,28 +118,16 @@ const getSettings = (): Effect.Effect<Settings> =>
 				try: () => localStorage.getItem(SETTINGS_KEY),
 				catch: (cause) => String(cause),
 			});
-			if (raw === null) {
-				rejected = Option.none();
+			const read = yield* readSettings(raw);
+			if (read.kind === "rejected") {
+				// Unreadable or unmigratable: keep the raw text so a write can
+				// refuse, and run on in-memory defaults meanwhile. The stored
+				// value is left untouched (spec §13).
+				rejected = Option.some(read.raw);
 				return settingsDefaults();
 			}
-			const data = yield* parseJson(raw);
-			// Carry an older blob up to the current schema before parsing. A
-			// migration that faults is a rejection, not a wipe: keep the stored
-			// text, refuse writes and run on in-memory defaults.
-			const migration = yield* Effect.result(migrateSettings(data, migrations));
-			if (Result.isFailure(migration)) {
-				rejected = Option.some(raw);
-				return settingsDefaults();
-			}
-			const parsed = Settings.safeParse(migration.success);
-			if (parsed.success) {
-				rejected = Option.none();
-				return parsed.data;
-			}
-			// Unreadable: keep the raw text so a write can refuse, and run on
-			// in-memory defaults meanwhile. The stored value is left untouched.
-			rejected = Option.some(raw);
-			return settingsDefaults();
+			rejected = Option.none();
+			return read.settings;
 		}),
 		() => settingsDefaults(),
 	);

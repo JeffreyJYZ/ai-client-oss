@@ -1,6 +1,8 @@
 import { type Backup, exportBackup, importBackup } from "@lib/backup";
 import {
+	clearPreMigrationCapture,
 	db,
+	getPreMigrationCapture,
 	type MemoryNote,
 	type Profile,
 	type ProviderConfig,
@@ -113,6 +115,12 @@ export default function Settings() {
 	const [unreadableSettings, setUnreadableSettings] = useState<string | null>(
 		null,
 	);
+	/**
+	 * Raw pre-migration settings blob the composition root captured, or `null`.
+	 * Non-null shows the download control in the Backup section, so the
+	 * pre-upgrade values stay reachable (spec §13).
+	 */
+	const [preMigration, setPreMigration] = useState<string | null>(null);
 	const importInputRef = useRef<HTMLInputElement>(null);
 
 	// This view owns the Updates section: run a fresh check when
@@ -123,15 +131,16 @@ export default function Settings() {
 		checkForUpdates();
 	}, []);
 
-	// Re-read the rejection on every render: the settings store records it
-	// during its own (async) hydration, which may settle after this view
-	// mounts. The value stabilises, so setting it here does not loop.
+	// Re-read the rejection and the pre-migration capture on every render: the
+	// settings store records both during its own (async) hydration, which may
+	// settle after this view mounts. The values stabilise, so this does not loop.
 	useEffect(() => {
 		Effect.runFork(
 			Effect.map(db.rejectedSettings(), (raw) =>
 				setUnreadableSettings(Option.getOrNull(raw)),
 			),
 		);
+		setPreMigration(getPreMigrationCapture());
 	});
 
 	const missingKey =
@@ -257,6 +266,9 @@ export default function Settings() {
 		setMessage(null);
 		setModelsPending(true);
 		Effect.runFork(
+			// `protocol` is a plain string on the schema (a plugin may register
+			// one); only built-ins resolve here yet. Task 11's provider registry
+			// replaces this narrowing with a registry lookup.
 			listModels(
 				active.protocol as ProtocolName,
 				active.baseUrl,
@@ -277,6 +289,7 @@ export default function Settings() {
 		setMessage(null);
 		setTestPending(true);
 		Effect.runFork(
+			// Same as `fetchModels`: Task 11's registry replaces the cast.
 			testModel(
 				active.protocol as ProtocolName,
 				active.baseUrl,
@@ -346,6 +359,23 @@ export default function Settings() {
 				),
 			),
 		);
+	};
+
+	/**
+	 * Download the pre-migration settings snapshot the composition root took,
+	 * then drop it — the user asked for the copy, so it is no longer needed.
+	 */
+	const downloadPreMigration = (): void => {
+		if (preMigration === null) return;
+		const blob = new Blob([preMigration], { type: "application/json" });
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = "ai-client-settings-pre-migration.json";
+		anchor.click();
+		URL.revokeObjectURL(url);
+		clearPreMigrationCapture();
+		setPreMigration(null);
 	};
 
 	/** Download the raw, unreadable settings text so nothing is lost. */
@@ -1048,6 +1078,21 @@ export default function Settings() {
 									onConfirm={resetUnreadableSettings}
 								/>
 							</div>
+						</div>
+					) : null}
+					{preMigration !== null ? (
+						<div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+							<p className="text-sm text-amber-300">
+								Your settings were upgraded, and a copy of the values from
+								before the upgrade was kept. Download it if you want a copy.
+							</p>
+							<button
+								type="button"
+								onClick={downloadPreMigration}
+								className={BUTTON}
+							>
+								Download pre-upgrade settings
+							</button>
 						</div>
 					) : null}
 					<p className="text-xs text-neutral-500">

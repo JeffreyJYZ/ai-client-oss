@@ -1,6 +1,6 @@
-import { describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
+import { clearPreMigrationCapture, getPreMigrationCapture } from "@lib/db";
 import type { Migration } from "@lib/db/migrate";
-import * as migrationsModule from "@lib/db/migrate";
 import {
 	DATA_VERSION,
 	dataVersionOf,
@@ -9,15 +9,23 @@ import {
 	migrations,
 	pendingMigrations,
 } from "@lib/db/migrate";
+import { readSettings, setPreMigrationCapture } from "@lib/db/read";
 import { emptyProviderConfig, Settings, settingsDefaults } from "@lib/db/types";
 import {
 	PLUGIN_DATA_MAX_BYTES,
 	pluginDataWithinCap,
 } from "@lib/plugins/manifest";
-import { Effect, Option, Result } from "effect";
+import { Effect, Logger, Result } from "effect";
+
+/** The registry the app actually ships, snapshotted once. */
+const shippedMigrations = [...migrations];
 
 const run = <A>(effect: Effect.Effect<A, string>): Promise<A> =>
 	Effect.runPromise(effect);
+
+/** Run an effect with logging muted, for the deliberate capture failure. */
+const runSilently = <A>(effect: Effect.Effect<A, string>): Promise<A> =>
+	Effect.runPromise(Effect.provide(effect, Logger.layer([])));
 
 describe("migrateSettings — pure engine", () => {
 	test("a blob with no dataVersion and one at 0 both reach DATA_VERSION", async () => {
@@ -38,6 +46,13 @@ describe("migrateSettings — pure engine", () => {
 		const out = await run(migrateSettings(raw, shippedMigrations));
 		expect(out).toBe(raw);
 		expect(Settings.parse(out).dataVersion).toBe(DATA_VERSION);
+	});
+
+	test("a blob ahead of the current version passes through untouched", async () => {
+		const raw = { providers: [], dataVersion: 99 };
+		const out = await run(migrateSettings(raw, shippedMigrations));
+		expect(out).toBe(raw);
+		expect(Settings.parse(out).dataVersion).toBe(99);
 	});
 
 	test("runs each pending migration exactly once, in ascending order", async () => {
@@ -111,32 +126,104 @@ describe("migrateSettings — pure engine", () => {
 		// Purity: the caller's blob object is never mutated.
 		expect(raw).toEqual({ providers: [{ id: "kept" }] });
 	});
+});
 
-	test("the pre-migration backup runs once, before the first migration", async () => {
-		const order: string[] = [];
-		const only: Migration = {
+describe("readSettings — the shared read-then-migrate step", () => {
+	const rawBlob = JSON.stringify({ providers: [{ id: "kept" }] });
+
+	test("a faulting migration is a rejection carrying the untouched raw text", async () => {
+		const faulting: Migration = {
 			to: 1,
-			run: (input) => {
-				order.push("migrate");
-				return input;
+			run: () => {
+				throw new Error("boom");
 			},
 		};
-		await run(
-			migrateSettings({}, [only], () =>
-				Effect.sync(() => {
-					order.push("backup");
-				}),
-			),
-		);
-		expect(order).toEqual(["backup", "migrate"]);
+		const read = await run(readSettings(rawBlob, [faulting]));
+		// If the registry were ignored the blob would parse and this would be
+		// `ok` — that is the discriminator.
+		expect(read.kind).toBe("rejected");
+		if (read.kind === "rejected") expect(read.raw).toBe(rawBlob);
 	});
 
-	test("a failing backup is logged and does not block the migration", async () => {
-		const only: Migration = { to: 1, run: () => ({ providers: [] }) };
-		const out = await run(
-			migrateSettings({}, [only], () => Effect.fail("no disk space")),
-		);
-		expect(Settings.parse(out).dataVersion).toBe(1);
+	test("a blob the current schema cannot parse is a rejection too", async () => {
+		const blob = JSON.stringify({ providers: [{ id: 1 }] });
+		const read = await run(readSettings(blob, shippedMigrations));
+		expect(read.kind).toBe("rejected");
+		if (read.kind === "rejected") expect(read.raw).toBe(blob);
+	});
+
+	test("nothing stored reads as defaults", async () => {
+		const read = await run(readSettings(null));
+		expect(read.kind).toBe("ok");
+		if (read.kind === "ok") expect(read.settings).toEqual(settingsDefaults());
+	});
+
+	test("a current blob parses through the shipped (empty) registry", async () => {
+		const blob = JSON.stringify({
+			...settingsDefaults(),
+			memoriesEnabled: false,
+		});
+		const read = await run(readSettings(blob, shippedMigrations));
+		expect(read.kind).toBe("ok");
+		if (read.kind === "ok") expect(read.settings.memoriesEnabled).toBe(false);
+	});
+});
+
+describe("pre-migration capture (spec §13)", () => {
+	const toCurrent: Migration = { to: DATA_VERSION, run: (input) => input };
+	const blob = JSON.stringify({ providers: [{ id: "kept" }] });
+
+	test("a pending migration hands the raw pre-migration blob to the Backup surface", async () => {
+		clearPreMigrationCapture();
+
+		const read = await run(readSettings(blob, [toCurrent]));
+		expect(read.kind).toBe("ok");
+
+		// Produced and reachable: the exact stored bytes, not a re-serialised or
+		// post-migration shape. An implementation that captured nothing (or the
+		// migrated result) fails here.
+		expect(getPreMigrationCapture()).toBe(blob);
+	});
+
+	test("the capture is the pre-migration bytes, not the migrated result", async () => {
+		clearPreMigrationCapture();
+		const rewriting: Migration = {
+			to: DATA_VERSION,
+			run: (input) => ({ ...(input as object), migrated: true }),
+		};
+
+		const read = await run(readSettings(blob, [rewriting]));
+		expect(read.kind).toBe("ok");
+		if (read.kind === "ok") expect(read.settings).toMatchObject({});
+
+		const captured = getPreMigrationCapture();
+		expect(captured).toBe(blob);
+		expect(captured?.includes("migrated")).toBe(false);
+	});
+
+	test("no pending migration captures nothing", async () => {
+		clearPreMigrationCapture();
+		const current = JSON.stringify({
+			providers: [],
+			dataVersion: DATA_VERSION,
+		});
+
+		await run(readSettings(current, [toCurrent]));
+
+		expect(getPreMigrationCapture()).toBeNull();
+	});
+
+	test("a failing capture is logged and does not block the migration", async () => {
+		const previous = setPreMigrationCapture(() => Effect.fail("no disk space"));
+		try {
+			const read = await runSilently(readSettings(blob, [toCurrent]));
+			expect(read.kind).toBe("ok");
+			if (read.kind === "ok") {
+				expect(read.settings.dataVersion).toBe(DATA_VERSION);
+			}
+		} finally {
+			setPreMigrationCapture(previous);
+		}
 	});
 });
 
@@ -179,76 +266,5 @@ describe("plugin data cap (spec §13, 'Plugin-owned data')", () => {
 
 	test("a value that serialises to nothing is out of bounds", () => {
 		expect(pluginDataWithinCap(undefined)).toBe(false);
-	});
-});
-
-// Captured before the mock below swaps the module's exports: the live binding
-// the mock installs would otherwise hide what actually ships.
-const shippedMigrations = [...migrations];
-
-// The adapters read the registry from `@lib/db/migrate`; inject a faulting one
-// so the real engine runs and the adapter's failure mapping is proven. This
-// must run before the adapter is imported, so the mock installs it here.
-const faulting: Migration = {
-	to: 1,
-	run: () => {
-		throw new Error("boom");
-	},
-};
-mock.module("@lib/db/migrate", () => ({
-	...migrationsModule,
-	migrations: [faulting],
-}));
-const { web, SETTINGS_KEY } = await import("@lib/db/web");
-
-const seed = (
-	value: string,
-): { raw: () => string | null; writes: () => number } => {
-	const map = new Map<string, string>([[SETTINGS_KEY, value]]);
-	let writes = 0;
-	(globalThis as { localStorage?: Storage }).localStorage = {
-		getItem: (key: string) => map.get(key) ?? null,
-		setItem: (key: string, next: string) => {
-			writes += 1;
-			map.set(key, next);
-		},
-		removeItem: (key: string) => map.delete(key),
-		clear: () => map.clear(),
-		key: () => null,
-		get length() {
-			return map.size;
-		},
-	} as unknown as Storage;
-	return {
-		raw: () => map.get(SETTINGS_KEY) ?? null,
-		writes: () => writes,
-	};
-};
-
-describe("adapters — a faulting migration is a rejection, not a wipe", () => {
-	test("getSettings reports defaults, keeps the blob and raises the rejection", async () => {
-		const blob = JSON.stringify({ providers: [{ id: "kept" }] });
-		const store = seed(blob);
-
-		expect(await run(web.getSettings())).toEqual(settingsDefaults());
-		expect(store.raw()).toBe(blob);
-		expect(store.writes()).toBe(0);
-		const rejected = await run(web.rejectedSettings());
-		expect(Option.isSome(rejected)).toBe(true);
-	});
-
-	test("setSettings then refuses, leaving the blob byte-identical", async () => {
-		const blob = JSON.stringify({ providers: [{ id: "kept" }] });
-		const store = seed(blob);
-		await run(web.getSettings());
-
-		const result = await Effect.runPromise(
-			Effect.result(web.setSettings({ memoriesEnabled: false })),
-		);
-		expect(Result.isFailure(result)).toBe(true);
-		expect(store.raw()).toBe(blob);
-		expect(store.writes()).toBe(0);
-
-		await run(web.resetRejectedSettings());
 	});
 });
