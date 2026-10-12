@@ -523,7 +523,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// API: refuse rather than stream a request with no protocol to build from.
 	if (active === undefined) return;
 
-	const protocol: ProtocolName = active.protocol;
+	// `protocol` is a plain string on the wire-facing schema (a plugin may
+	// register one). Built-ins are all that resolve here yet; Task 11's
+	// provider registry replaces this narrowing with a registry lookup.
+	const protocol: ProtocolName = active.protocol as ProtocolName;
 	const provider = providers[protocol];
 	const stored = prevByConversationProtocol.get(
 		prevKey(conversationId, protocol),

@@ -1,3 +1,4 @@
+import { migrateSettings, migrations } from "@lib/db/migrate";
 import {
 	type Conversation,
 	conversationSchema,
@@ -6,7 +7,7 @@ import {
 	Settings,
 	settingsDefaults,
 } from "@lib/db/types";
-import { Effect, Option } from "effect";
+import { Effect, Option, Result } from "effect";
 
 const DB_NAME = "ai-client";
 const DB_VERSION = 1;
@@ -132,7 +133,15 @@ const getSettings = (): Effect.Effect<Settings> =>
 				return settingsDefaults();
 			}
 			const data = yield* parseJson(raw);
-			const parsed = Settings.safeParse(data);
+			// Carry an older blob up to the current schema before parsing. A
+			// migration that faults is a rejection, not a wipe: keep the stored
+			// text, refuse writes and run on in-memory defaults.
+			const migration = yield* Effect.result(migrateSettings(data, migrations));
+			if (Result.isFailure(migration)) {
+				rejected = Option.some(raw);
+				return settingsDefaults();
+			}
+			const parsed = Settings.safeParse(migration.success);
 			if (parsed.success) {
 				rejected = Option.none();
 				return parsed.data;

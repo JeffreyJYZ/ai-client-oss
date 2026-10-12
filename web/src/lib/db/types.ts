@@ -1,5 +1,6 @@
+import { DATA_VERSION } from "@lib/db/migrate";
 import { pluginStateSchema } from "@lib/plugins/manifest";
-import { type ProtocolName, protocolNames } from "@lib/providers";
+import type { ProtocolName } from "@lib/providers";
 import type { AttachmentPart } from "@lib/providers/types";
 import type { Effect, Option } from "effect";
 import { z } from "zod";
@@ -16,7 +17,15 @@ export const DEFAULT_PROVIDER_ID = "provider-default";
 export const providerConfigSchema = z.object({
 	id: z.string(),
 	label: z.string().default(""),
-	protocol: z.enum(protocolNames).default(defaultProtocol),
+	/**
+	 * Wire protocol name. A string, not an enum: protocols a plugin registers
+	 * cannot be enumerated when this schema is defined. Defaulted and then
+	 * caught so a missing value takes the default and a wrong-typed one
+	 * degrades to it for *this provider only* (`.catch`) instead of failing the
+	 * whole `Settings` object — a whole-object failure is what triggers the
+	 * defaults path (spec §13).
+	 */
+	protocol: z.string().default(defaultProtocol).catch(defaultProtocol),
 	baseUrl: z.string().default(""),
 	apiKey: z.string().default(""),
 	model: z.string().default(""),
@@ -82,6 +91,12 @@ export type MemoryNote = z.infer<typeof memoryNoteSchema>;
  * seed one empty provider and point `activeProviderId` at it.
  */
 export const Settings = z.object({
+	/**
+	 * Persisted schema version. A blob written before the field existed reads
+	 * as {@link DATA_VERSION}; `migrateSettings` carries any older value up
+	 * before this schema sees it.
+	 */
+	dataVersion: z.number().default(DATA_VERSION),
 	providers: z
 		.array(providerConfigSchema)
 		.default(() => [emptyProviderConfig(DEFAULT_PROVIDER_ID)]),

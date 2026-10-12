@@ -1,3 +1,4 @@
+import { migrateSettings, migrations } from "@lib/db/migrate";
 import {
 	type Conversation,
 	conversationSchema,
@@ -7,7 +8,7 @@ import {
 	settingsDefaults,
 } from "@lib/db/types";
 import { invoke } from "@tauri-apps/api/core";
-import { Effect, Option } from "effect";
+import { Effect, Option, Result } from "effect";
 
 /**
  * Raw text of the last stored blob that failed to parse, or `none` when the
@@ -81,7 +82,15 @@ const getSettings = (): Effect.Effect<Settings> =>
 				return settingsDefaults();
 			}
 			const data = yield* parseJson(raw);
-			const parsed = Settings.safeParse(data);
+			// Carry an older blob up to the current schema before parsing. A
+			// migration that faults is a rejection, not a wipe: keep the stored
+			// text, refuse writes and run on in-memory defaults.
+			const migration = yield* Effect.result(migrateSettings(data, migrations));
+			if (Result.isFailure(migration)) {
+				rejected = Option.some(raw);
+				return settingsDefaults();
+			}
+			const parsed = Settings.safeParse(migration.success);
 			if (parsed.success) {
 				rejected = Option.none();
 				return parsed.data;

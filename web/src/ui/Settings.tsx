@@ -257,7 +257,11 @@ export default function Settings() {
 		setMessage(null);
 		setModelsPending(true);
 		Effect.runFork(
-			listModels(active.protocol, active.baseUrl, active.apiKey).pipe(
+			listModels(
+				active.protocol as ProtocolName,
+				active.baseUrl,
+				active.apiKey,
+			).pipe(
 				Effect.tap((ids) =>
 					Effect.sync(() => updateProvider(id, { models: ids })),
 				),
@@ -273,7 +277,12 @@ export default function Settings() {
 		setMessage(null);
 		setTestPending(true);
 		Effect.runFork(
-			testModel(active.protocol, active.baseUrl, active.apiKey, model).pipe(
+			testModel(
+				active.protocol as ProtocolName,
+				active.baseUrl,
+				active.apiKey,
+				model,
+			).pipe(
 				Effect.tap(() => Effect.sync(() => setMessage(`✓ ${model} responded`))),
 				Effect.catch((error) => Effect.sync(() => setMessage(error))),
 				Effect.ensuring(Effect.sync(() => setTestPending(false))),
