@@ -47,7 +47,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 - **Never `mock.module` a *project* module; third-party modules only, and never two competing fakes for one module.** `mock.module` replaces a namespace **entirely** and **process-wide** — bun 1.4.2 shares one module registry across test files and `mock.restore()` does not reset it (reproduced with probes), so `mock.module("@lib/db", () => ({ db }))` left every file loaded after it with `db` mocked and `Settings`/`web`/`SETTINGS_KEY` **undefined**, order-dependently (bun's discovery order is not sorted, so it passes locally and breaks in CI or when a file is added). Import the real module and drive it directly; inject the seam instead. One shared third-party stub (`web/src/lib/db/__test-support__/fake-invoke.ts`) is used by every db suite — a file there must not match `*.test.ts`.
 - **`cd web && bun run verify` is the single gate command** (`tsc -b && biome check . && effect-language-service diagnostics --project tsconfig.app.json && bun test`). Use it, not the pieces.
-- **Prove a leak fix with an order-run, not a green suite** — run the affected suites with the suspect file first *and* last, because accidental load order is what hides contamination.
+- **Prove a mock leak with a probe, not an order-run** — bun treats positional args as **filters** over its own discovery order, so `bun test a b` and `bun test b a` are *one* run and prove nothing; show the poison directly instead (a mock installed by one file makes a sibling's `import { Settings } from "@lib/db"` fail), and treat a green suite as evidence neither way.
 
 ## Web search
 
