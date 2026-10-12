@@ -926,8 +926,53 @@ export const reference: DocReference = {
 			"path": "src/lib/plugins/renderers.ts",
 			"label": "Renderers",
 			"summary": "Replacements for the message, markdown, marker and reasoning renderers.",
-			"status": "pending",
-			"symbols": []
+			"status": "documented",
+			"symbols": [
+				{
+					"name": "rendererKinds",
+					"kind": "const",
+					"signature": "export const rendererKinds = [ \"message\", \"markdown\", \"marker\", \"reasoning\", ] as const;",
+					"description": "The four renderers a plugin may override (spec §5).",
+					"members": []
+				},
+				{
+					"name": "rendererKindSchema",
+					"kind": "const",
+					"signature": "export const rendererKindSchema = z.enum(rendererKinds);",
+					"description": "The zod schema for a renderer kind — the union's single declaration (spec §1).",
+					"members": []
+				},
+				{
+					"name": "RendererKind",
+					"kind": "type",
+					"signature": "export type RendererKind = z.infer<typeof rendererKindSchema>;",
+					"description": "One overridable renderer kind.",
+					"members": []
+				},
+				{
+					"name": "registerRenderer",
+					"kind": "const",
+					"signature": "export const registerRenderer = (host: Host, kind: RendererKind, component: ComponentType<Record<string, unknown>>): Disposable => …",
+					"description": "Register `component` as the override for `kind` through `host` (spec §5). The entry lands in the `ui` registry at `chat.message` — the region the built-in renderers already declare — so `ui/Message.tsx`'s `useComponent(\"ui.markdown\")` resolves it on the next render, and disposing the returned handle restores the built-in.",
+					"members": []
+				},
+				{
+					"name": "RendererRegistry",
+					"kind": "interface",
+					"signature": "export interface RendererRegistry { register( kind: RendererKind, component: ComponentType<Record<string, unknown>>, ): Disposable; }",
+					"description": "What a plugin calls to override a renderer (spec §5's `renderers.register`).",
+					"members": [
+						"register"
+					]
+				},
+				{
+					"name": "makeRendererRegistry",
+					"kind": "const",
+					"signature": "export const makeRendererRegistry = (host: Host): RendererRegistry => …",
+					"description": "The renderer registry bound to one plugin's `host`, the shape `host.renderers` takes (spec §2). A thin typing of {@link registerRenderer}: registering through it is registering a contribution, so ownership and disposal are the registry's own.",
+					"members": []
+				}
+			]
 		},
 		{
 			"path": "src/lib/plugins/settings.ts",
@@ -1191,9 +1236,7 @@ export const reference: DocReference = {
 			"description": "A plugin was unloaded."
 		}
 	],
-	"pending": [
-		"src/lib/plugins/renderers.ts"
-	],
+	"pending": [],
 	"authorGuide": {
 		"available": false,
 		"url": "https://github.com/JeffreyJYZ/ai-client-oss/blob/main/web/plugins/README.md"
