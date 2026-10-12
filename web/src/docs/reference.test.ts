@@ -5,6 +5,7 @@ import {
 	authorGuidePath,
 	pendingModules,
 	referenceEntries,
+	surfaceModules,
 } from "@/docs/entries";
 import { reference } from "@/docs/reference.generated";
 import {
@@ -95,6 +96,37 @@ describe("generated plugin API reference", () => {
 			if (stale.length > 0) {
 				gaps.push(
 					`${entry.path}: documented but no longer exported: ${stale.join(", ")}`,
+				);
+			}
+		}
+		expect(gaps).toEqual([]);
+	});
+
+	/**
+	 * The entry list narrows to `[sdk.ts]` once the SDK exists, and the artifact
+	 * is generated from that same file — so the test above compares `sdk.ts`
+	 * against itself. Delete one `export *` from `sdk.ts`, re-run `bun run docs`,
+	 * and *both* sides shrink together: every gate stays green while the
+	 * published reference silently narrows to the subset. That narrowing is the
+	 * failure this work exists to prevent, so the whole curated surface is held
+	 * to the artifact here, not the one module the entry list happens to name.
+	 */
+	test("every surface module's exports are present in the documented set", () => {
+		const documented = new Set(
+			generated.modules
+				.filter((module) => module.status === "documented")
+				.flatMap((module) => module.symbols.map((symbol) => symbol.name)),
+		);
+		const gaps: string[] = [];
+		for (const entry of surfaceModules) {
+			const source = read(entry.path);
+			if (source === null) continue;
+			const missing = extractModuleSymbols(entry.path, source, read)
+				.map((symbol) => symbol.name)
+				.filter((name) => !documented.has(name));
+			if (missing.length > 0) {
+				gaps.push(
+					`${entry.path}: exports missing from the reference: ${missing.join(", ")}`,
 				);
 			}
 		}
