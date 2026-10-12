@@ -19,6 +19,7 @@
 - **With zero plugins enabled, rendering and behaviour are identical to today** — same components, same props, same children in the same order.
 - **Webview-only UI, dark-first**; desktop and web differ only behind source/bridge adapters (`isDesktop`), never inside the host.
 - **Gates stay green:** `bun test`, `biome check .`, `bunx effect-language-service diagnostics --project tsconfig.app.json`, `tsc -b`, `vite build`.
+- **Test files are typechecked — never excluded from a tsconfig project, never silenced.** With TypeScript 6+, `bun:test` types require the `@types/bun` devDependency **and** `"bun"` in `tsconfig.app.json`'s `types` array (bun's docs: "If you're using TypeScript 6.0 or later, you also need `\"types\": [\"bun\"]` in your `compilerOptions`"). An `exclude` of `**/*.test.ts` makes `tsc` green by checking no test at all, which is the one outcome this gate exists to prevent.
 - Where the installed Effect 4 API differs from the names used here (`Context.Tag`, `Data.TaggedError`, `SubscriptionRef`, `PubSub`, `Scope.close`), follow the installed API and keep the documented behaviour — **the tests are the contract.**
 - Every commit uses Conventional Commits, `git add` by explicit path, and **no measured number in a message** (test counts go stale; name the gate, not its total).
 
@@ -54,6 +55,10 @@ Five failure modes the spec implies that the happy paths do not cover. Each line
 - [ ] **Step 1: Wire the test runner**
 
 Add `"test": "bun test"` to `web/package.json` scripts; append `"!**/*.test.ts"` to the `includes` array of each of the five entries in `biome.jsonc` `plugins` (tests legitimately use `async`/`await`, which the Grit rules ban and which apply to `**/web/src/**`).
+
+- [ ] **Step 1b: Make test files typecheck — the `types` field, never an `exclude`**
+
+Run `bun add -d @types/bun` in `web/`, and add `"bun"` to `tsconfig.app.json`'s `types` array so it reads `["vite/client", "bun"]`. TypeScript 6+ no longer picks the bun types up implicitly, so without this every test file fails `tsc` on its `bun:test` import. **Do not add an `exclude` for `**/*.test.ts`** to any tsconfig project — that makes the build green by typechecking no test at all. `bunx tsc -b` must typecheck the test files.
 
 - [ ] **Step 2: Write the failing test** — `web/src/lib/plugins/manifest.test.ts`
 

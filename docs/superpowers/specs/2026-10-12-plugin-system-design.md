@@ -21,6 +21,7 @@ Secondary goal, and the reason this is worth the churn: the app's own features a
 - Gates stay green: biome + `@effect/language-service` + `tsc` + `vite build`, plus `bun test`.
 - **Data compatibility is a hard requirement** (§13): upgrading from 0.2.3 must lose nothing and need no manual step, a stored blob that fails to parse must be preserved rather than replaced, and every schema change ships a frozen-fixture test.
 - Two pieces of test wiring do not exist yet and are prerequisites: a `"test": "bun test"` script in `web/package.json`, and `"!**/*.test.ts"` appended to every Grit plugin's `includes` in `biome.jsonc` (tests legitimately use `async`/`await`).
+- **Test files are typechecked, never excluded.** TypeScript 6+ needs the `@types/bun` devDependency and `"bun"` in `tsconfig.app.json`'s `types` array for `bun:test` to resolve; excluding `**/*.test.ts` from a project makes the build green by checking no test at all.
 
 ## Vocabulary
 
