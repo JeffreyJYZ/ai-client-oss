@@ -1,6 +1,12 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
+import {
+	type PipelineMeta,
+	resolveToolCall,
+	run as runPipeline,
+	runSync as runPipelineSync,
+} from "@lib/plugins/pipeline";
 import { protocolNames, resolveProviderSync } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
 import { executeTool } from "@lib/plugins/tools";
@@ -34,6 +40,18 @@ export interface ChatSnapshot {
 
 const DEFAULT_TITLE = "New chat";
 const TITLE_MAX = 48;
+
+/** The error row a `beforeSend` stage's `Option.none()` leaves behind (spec §5). */
+const ABORTED_TURN = "The turn was aborted by a plugin.";
+
+/**
+ * A tool call a plugin vetoed still records a result: the wire must never
+ * carry a `tool_call` without its matching result (spec §5, and the reason a
+ * veto is not simply a skipped execution).
+ */
+const DECLINED_RESULT = "A plugin declined this tool call.";
+const declinedMarker = (name: string): string =>
+	`🔧 ${name} declined by a plugin`;
 
 /**
  * Tool-loop bounds: a model must not be able to spin. At most
@@ -375,6 +393,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 					markers: [],
 				},
 			],
+			// The failed turn still moved the conversation (Task 11 review):
+			// without this the row lands but `updatedAt` stays stale, unlike
+			// `finalize`'s failure path.
+			updatedAt: Date.now(),
 		}));
 		refresh();
 		persistConversationById(conversationId);
@@ -393,29 +415,36 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// twice, and `text` is the marker-free words that may go
 	// back on the wire. `error` rows are the app's own words —
 	// no wire role matches them — so the seed skips them.
+	const meta: PipelineMeta = { conversationId, protocol };
+	// `onHistory` transforms the transcript seed before it is rebuilt into a
+	// body (spec §5). Only a seed — no stored body — has a turn list to transform.
 	const prev =
 		stored ??
 		provider.seedHistory(
-			conversation.messages.flatMap((message) => {
-				const parts = message.parts ?? [];
-				// The app's own rows are not turns the model said anything
-				// in, and a failed turn leaves an empty assistant placeholder
-				// behind; a row with neither words nor attachments carries
-				// nothing to replay. A turn that carried only a file must
-				// survive the rebuild, so attachments count as content.
-				if (
-					message.role === "error" ||
-					(message.text === "" && parts.length === 0)
-				)
-					return [];
-				return [
-					{
-						role: message.role,
-						text: message.text,
-						...(parts.length > 0 ? { parts } : {}),
-					},
-				];
-			}),
+			runPipelineSync(
+				"onHistory",
+				conversation.messages.flatMap((message) => {
+					const parts = message.parts ?? [];
+					// The app's own rows are not turns the model said anything
+					// in, and a failed turn leaves an empty assistant placeholder
+					// behind; a row with neither words nor attachments carries
+					// nothing to replay. A turn that carried only a file must
+					// survive the rebuild, so attachments count as content.
+					if (
+						message.role === "error" ||
+						(message.text === "" && parts.length === 0)
+					)
+						return [];
+					return [
+						{
+							role: message.role,
+							text: message.text,
+							...(parts.length > 0 ? { parts } : {}),
+						},
+					];
+				}),
+				meta,
+			),
 		);
 
 	const searchKind = searchKindFor(active.baseUrl);
@@ -443,7 +472,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// route).
 	const tinyfishApiKey = settings.tinyfishApiKey;
 
-	const ctx: SendCtx = {
+	const baseCtx: SendCtx = {
 		msg,
 		prev,
 		apiUrl: active.baseUrl,
@@ -467,6 +496,27 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			.join("\n\n"),
 	};
 
+	// `beforeSend` augments or rewrites the turn's context, or aborts it
+	// (spec §5). Run before the optimistic rows are appended so an abort never
+	// leaves a half-wired turn; a faulting stage is fail-open inside `run`.
+	const outgoing = runPipelineSync("beforeSend", baseCtx, meta);
+	if (Option.isNone(outgoing)) {
+		updateConversation(conversationId, (conversation) => ({
+			...conversation,
+			title: deriveTitle(conversation, msg),
+			messages: [
+				...conversation.messages,
+				{ id: nextMessageId(), role: "user", text: msg, parts, markers: [] },
+				{ id: nextMessageId(), role: "error", text: ABORTED_TURN, markers: [] },
+			],
+			updatedAt: Date.now(),
+		}));
+		refresh();
+		persistConversationById(conversationId);
+		return;
+	}
+	const ctx = outgoing.value;
+
 	// Body that would be sent *this* turn. The provider's own `send` builds the
 	// identical request from the same ctx; we keep this — plus the streamed reply
 	// appended on success — to seed the next turn. The registry erases the wire
@@ -474,7 +524,11 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// the erased shape the caller drives them with.
 	const buildBody: (send: unknown, ctx: SendCtx) => unknown =
 		provider.buildRequest;
-	const nextBody = buildBody(prev ?? provider.template, ctx);
+	const nextBody = runPipelineSync(
+		"transformBody",
+		buildBody(prev ?? provider.template, ctx),
+		meta,
+	);
 	const appendAssistant: (send: unknown, text: string) => unknown =
 		provider.appendAssistant;
 	const appendToolResult: (
@@ -537,7 +591,15 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 				skipUserMessage: round > 0,
 			});
 			const roundCalls: ToolCallData[] = [];
-			yield* Stream.runForEach(stream, (chunk) =>
+			// `onChunk` rewrites or drops one streamed chunk (spec §5) before it
+			// reaches the accumulator; a dropped chunk is simply absent, and the
+			// stream still terminates. Piped here so providers stay untouched.
+			const processed = stream.pipe(
+				Stream.mapEffect((chunk) => runPipeline("onChunk", chunk, meta)),
+				Stream.filter(Option.isSome),
+				Stream.map((option) => option.value),
+			);
+			yield* Stream.runForEach(processed, (chunk) =>
 				Effect.sync(() => {
 					appendChunk(conversationId, assistantId, chunk, raw);
 					if (chunk.kind === "tool_call" && chunk.call !== undefined) {
@@ -558,14 +620,33 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			if (room <= 0) return;
 			for (const call of roundCalls.slice(0, room)) {
 				executed += 1;
+				// `onToolCall` may veto or rewrite the call (spec §5). A vetoed
+				// call still records a result through `appendToolResult`, so the
+				// replayed body never carries a `tool_call` without its matching
+				// result — the dangling-call 400 on the next turn.
+				const decision = yield* runPipeline("onToolCall", call, meta);
+				const { call: effective, execute: shouldExecute } = resolveToolCall(
+					call,
+					decision,
+				);
+				if (!shouldExecute) {
+					appendMarker(
+						conversationId,
+						assistantId,
+						declinedMarker(call.name),
+						raw,
+					);
+					wire = appendToolResult(wire, effective, DECLINED_RESULT, true);
+					continue;
+				}
 				// The registry owns dispatch and the two built-ins' argument
 				// reading; a name no tool answers to is a failed outcome with a
 				// sentence, never an exception out of the loop.
-				const outcome = yield* executeTool(call.name, call);
+				const outcome = yield* executeTool(effective.name, effective);
 				appendMarker(conversationId, assistantId, outcome.marker, raw);
 				wire = appendToolResult(
 					wire,
-					{ ...call, input: outcome.input },
+					{ ...effective, input: outcome.input },
 					outcome.result,
 					outcome.failed,
 				);
@@ -579,7 +660,11 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			// replay already carries (and so the next
 			// turn's seed carries the question once).
 			replay = wire;
-			wire = buildBody(replay, { ...ctx, skipUserMessage: true });
+			wire = yield* runPipeline(
+				"transformBody",
+				buildBody(replay, { ...ctx, skipUserMessage: true }),
+				meta,
+			);
 		}
 	});
 
@@ -592,8 +677,18 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		Effect.exit(
 			run.pipe(
 				Effect.onExit((exit) =>
-					Effect.sync(() => {
+					Effect.gen(function* () {
 						const extracted = extractMemories(raw.value);
+						// `afterReply` inspects or rewrites the final reply before
+						// it is stored (spec §5). Only a successful turn has a
+						// reply to rewrite; a failed or stopped turn ignores it.
+						const reply = Exit.isSuccess(exit)
+							? yield* runPipeline(
+									"afterReply",
+									extractMemories(raw.value.slice(finalTextStart)).text,
+									meta,
+								)
+							: "";
 						finalize(
 							myRun,
 							conversationId,
@@ -602,10 +697,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 							// The final round's text (memory tags
 							// stripped), appended to the body the tool
 							// loop extended.
-							appendAssistant(
-								wire,
-								extractMemories(raw.value.slice(finalTextStart)).text,
-							),
+							appendAssistant(wire, reply),
 							extracted.memories,
 						);
 					}),

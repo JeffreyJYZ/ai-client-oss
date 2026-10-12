@@ -390,8 +390,122 @@ export const reference: DocReference = {
 			"path": "src/lib/plugins/pipeline.ts",
 			"label": "Pipeline",
 			"summary": "Ordered middleware stages around a request and its streamed reply.",
-			"status": "pending",
-			"symbols": []
+			"status": "documented",
+			"symbols": [
+				{
+					"name": "PipelineStageKind",
+					"kind": "type",
+					"signature": "export type PipelineStageKind = | \"beforeSend\" | \"transformBody\" | \"onChunk\" | \"afterReply\" | \"onToolCall\" | \"onHistory\";",
+					"description": "The six stages, in the order spec §5's table lists them.",
+					"members": []
+				},
+				{
+					"name": "PipelineMeta",
+					"kind": "interface",
+					"signature": "export interface PipelineMeta { readonly conversationId: string; readonly protocol: string; }",
+					"description": "The turn a stage is running in: what names it to a plugin that keys its own state per conversation or per protocol. The stage's own value rides as the first argument, not here.",
+					"members": [
+						"conversationId",
+						"protocol"
+					]
+				},
+				{
+					"name": "ToolCallDecision",
+					"kind": "interface",
+					"signature": "export interface ToolCallDecision { readonly allow: boolean; readonly rewrite?: ToolCallData; }",
+					"description": "`onToolCall`'s answer: veto the call, and/or rewrite it (spec §5).",
+					"members": [
+						"allow",
+						"rewrite"
+					]
+				},
+				{
+					"name": "PipelineInputMap",
+					"kind": "interface",
+					"signature": "export interface PipelineInputMap { readonly beforeSend: SendCtx; readonly transformBody: unknown; readonly onChunk: Chunk; readonly afterReply: string; readonly onToolCall: ToolCallData; readonly onHistory: readonly HistoryTurn[]; }",
+					"description": "What each stage receives: one entry per kind, so `run` stays typed.",
+					"members": [
+						"beforeSend",
+						"transformBody",
+						"onChunk",
+						"afterReply",
+						"onToolCall",
+						"onHistory"
+					]
+				},
+				{
+					"name": "PipelineOutputMap",
+					"kind": "interface",
+					"signature": "export interface PipelineOutputMap { readonly beforeSend: Option.Option<SendCtx>; readonly transformBody: unknown; readonly onChunk: Option.Option<Chunk>; readonly afterReply: string; readonly onToolCall: ToolCallDecision; readonly onHistory: readonly HistoryTurn[]; }",
+					"description": "What each stage returns. `Option.none()` in `beforeSend` aborts the turn; in `onChunk` it drops that one chunk (the stream still terminates).",
+					"members": [
+						"beforeSend",
+						"transformBody",
+						"onChunk",
+						"afterReply",
+						"onToolCall",
+						"onHistory"
+					]
+				},
+				{
+					"name": "PipelineStageMap",
+					"kind": "type",
+					"signature": "export type PipelineStageMap = { readonly [K in PipelineStageKind]: ( input: PipelineInputMap[K], meta: PipelineMeta, ) => Effect.Effect<PipelineOutputMap[K]>; };",
+					"description": "One stage contract per kind (spec §5). The error channel is `never`: a contract is success-only, and a stage that misbehaves is caught and skipped by {@link guard} rather than surfacing as a failure.",
+					"members": []
+				},
+				{
+					"name": "PipelineStage",
+					"kind": "interface",
+					"signature": "export interface PipelineStage< K extends PipelineStageKind = PipelineStageKind, > { readonly kind: K; readonly run: PipelineStageMap[K]; }",
+					"description": "A plugin's contribution to one stage kind (spec §5).",
+					"members": [
+						"kind",
+						"run"
+					]
+				},
+				{
+					"name": "PipelineEntry",
+					"kind": "interface",
+					"signature": "export interface PipelineEntry extends RegistryEntry { readonly kind: PipelineStageKind; readonly run: PipelineStageMap[PipelineStageKind]; }",
+					"description": "The entry a stage is stored as: `RegistryEntry`'s identity, ownership and sort keys plus the stage's kind and function.",
+					"members": [
+						"kind",
+						"run"
+					]
+				},
+				{
+					"name": "run",
+					"kind": "const",
+					"signature": "export const run = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): Effect.Effect<PipelineOutputMap[K], never, HostServices> => …",
+					"description": "Run every stage of `kind` over `input`, in resolution order. Reads the registry each call, so a stage registered or disposed mid-session takes effect on the next turn, and skips any stage disabled by an earlier fault.",
+					"members": []
+				},
+				{
+					"name": "runSync",
+					"kind": "const",
+					"signature": "export const runSync = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): PipelineOutputMap[K] => …",
+					"description": "{@link run} read synchronously off the app's one runtime.",
+					"members": []
+				},
+				{
+					"name": "ResolvedToolCall",
+					"kind": "interface",
+					"signature": "export interface ResolvedToolCall { readonly call: ToolCallData; readonly execute: boolean; }",
+					"description": "Project an `onToolCall` decision onto the call the loop acts on (spec §5). A declined call is still returned — never dropped — so the loop always appends a matching result and the replayed body carries no `tool_call` without one. A rewrite keeps the original `id`/`key` for that correlation.",
+					"members": [
+						"call",
+						"execute"
+					]
+				},
+				{
+					"name": "resolveToolCall",
+					"kind": "const",
+					"signature": "export const resolveToolCall = (call: ToolCallData, decision: ToolCallDecision): ResolvedToolCall => …",
+					"description": "",
+					"members": []
+				}
+			]
 		},
 		{
 			"path": "src/lib/plugins/commands.ts",
@@ -459,7 +573,7 @@ export const reference: DocReference = {
 					"name": "resolveKeybinding",
 					"kind": "const",
 					"signature": "export const resolveKeybinding = (binding: string): Effect.Effect<Option.Option<string>, never, HostServices> => …",
-					"description": "The id of the command bound to `binding`, or `none`. The **last** match in registration order wins, which is the second half of the duplicate-keybinding rule (the warning is logged at registration).",
+					"description": "The id of the command bound to `binding`, or `none`.",
 					"members": []
 				},
 				{
@@ -589,8 +703,224 @@ export const reference: DocReference = {
 			"path": "src/lib/plugins/notify.ts",
 			"label": "Notifications",
 			"summary": "Toasts, banners, confirms and modals, rendered by host components so they match the app.",
-			"status": "pending",
-			"symbols": []
+			"status": "documented",
+			"symbols": [
+				{
+					"name": "DEFAULT_TOAST_TTL",
+					"kind": "const",
+					"signature": "export const DEFAULT_TOAST_TTL = 5000;",
+					"description": "How long a toast stays up when the caller does not give a `ttl`.",
+					"members": []
+				},
+				{
+					"name": "tones",
+					"kind": "const",
+					"signature": "export const tones = [\"info\", \"success\", \"error\"] as const;",
+					"description": "The tones a notification can carry; the components map them to classes.",
+					"members": []
+				},
+				{
+					"name": "toneSchema",
+					"kind": "const",
+					"signature": "export const toneSchema = z.enum(tones);",
+					"description": "The zod schema for a tone — the single declaration of the union (spec §1).",
+					"members": []
+				},
+				{
+					"name": "Tone",
+					"kind": "type",
+					"signature": "export type Tone = z.infer<typeof toneSchema>;",
+					"description": "One notification tone.",
+					"members": []
+				},
+				{
+					"name": "toastSchema",
+					"kind": "const",
+					"signature": "export const toastSchema = z.object({ … });",
+					"description": "A transient notification (spec §5).",
+					"members": []
+				},
+				{
+					"name": "ToastOptions",
+					"kind": "type",
+					"signature": "export type ToastOptions = z.input<typeof toastSchema>;",
+					"description": "The arguments of {@link toast}; `tone` and `ttl` are optional.",
+					"members": []
+				},
+				{
+					"name": "bannerSchema",
+					"kind": "const",
+					"signature": "export const bannerSchema = z.object({ … });",
+					"description": "A sticky notification: a toast that never expires on its own.",
+					"members": []
+				},
+				{
+					"name": "BannerOptions",
+					"kind": "type",
+					"signature": "export type BannerOptions = z.input<typeof bannerSchema>;",
+					"description": "The arguments of {@link banner}.",
+					"members": []
+				},
+				{
+					"name": "confirmSchema",
+					"kind": "const",
+					"signature": "export const confirmSchema = z.object({ … });",
+					"description": "A modal yes/no question (spec §5).",
+					"members": []
+				},
+				{
+					"name": "ConfirmOptions",
+					"kind": "type",
+					"signature": "export type ConfirmOptions = z.input<typeof confirmSchema>;",
+					"description": "The arguments of {@link confirm}.",
+					"members": []
+				},
+				{
+					"name": "modalSchema",
+					"kind": "const",
+					"signature": "export const modalSchema = z.object({ … });",
+					"description": "A modal that displays a title and a body until it is dismissed.",
+					"members": []
+				},
+				{
+					"name": "ModalOptions",
+					"kind": "type",
+					"signature": "export type ModalOptions = z.input<typeof modalSchema>;",
+					"description": "The arguments of {@link modal}.",
+					"members": []
+				},
+				{
+					"name": "Toast",
+					"kind": "interface",
+					"signature": "export interface Toast { readonly id: number; readonly text: string; readonly tone: Tone; /** Sticky entries never expire; only a dismiss or an unload removes them. */ readonly sticky: boolean; }",
+					"description": "One entry in the toast stack.",
+					"members": [
+						"id",
+						"text",
+						"tone",
+						"sticky"
+					]
+				},
+				{
+					"name": "ModalRequest",
+					"kind": "interface",
+					"signature": "export interface ModalRequest { readonly id: number; readonly kind: \"confirm\" | \"modal\"; readonly title: string; readonly text: string; /** Present for a `confirm`; resolved with the user's answer. */ readonly deferred?: Deferred.Deferred<boolean>; }",
+					"description": "One entry in the modal queue; only the head is rendered.",
+					"members": [
+						"id",
+						"kind",
+						"title",
+						"text",
+						"deferred"
+					]
+				},
+				{
+					"name": "OverlayState",
+					"kind": "interface",
+					"signature": "export interface OverlayState { readonly toasts: readonly Toast[]; readonly modals: readonly ModalRequest[]; }",
+					"description": "What the overlay region renders, and the whole of its state.",
+					"members": [
+						"toasts",
+						"modals"
+					]
+				},
+				{
+					"name": "getOverlaySnapshot",
+					"kind": "const",
+					"signature": "export const getOverlaySnapshot = (): OverlayState => …",
+					"description": "The current overlay state. Referentially stable between mutations.",
+					"members": []
+				},
+				{
+					"name": "subscribeOverlay",
+					"kind": "const",
+					"signature": "export const subscribeOverlay = (listener: () => void): (() => void) => …",
+					"description": "Subscribe to overlay changes, in the `useSyncExternalStore` shape.",
+					"members": []
+				},
+				{
+					"name": "overlayChanges",
+					"kind": "const",
+					"signature": "export const overlayChanges: Stream.Stream<OverlayState>;",
+					"description": "The overlay state as a stream, for an Effect consumer (spec §3).",
+					"members": []
+				},
+				{
+					"name": "dismissToast",
+					"kind": "const",
+					"signature": "export const dismissToast = (id: number): void => …",
+					"description": "Drop one toast (the dismiss control).",
+					"members": []
+				},
+				{
+					"name": "resolveModal",
+					"kind": "const",
+					"signature": "export const resolveModal = (id: number, value: boolean): void => …",
+					"description": "Resolve the request called `id` — `true` from a confirm's affirmative, `false` from a cancel, a backdrop or a close. The entry leaves the queue first (so the next request becomes the head) and its `Deferred`, when it has one, is completed with the answer.",
+					"members": []
+				},
+				{
+					"name": "clearOverlay",
+					"kind": "const",
+					"signature": "export const clearOverlay = (): void => …",
+					"description": "Drop every toast and modal. The host's reset, and each test's isolation.",
+					"members": []
+				},
+				{
+					"name": "toast",
+					"kind": "const",
+					"signature": "export const toast = (options: ToastOptions): Effect.Effect<void> => …",
+					"description": "Show a toast (spec §5); it expires after `ttl` unless dismissed first.",
+					"members": []
+				},
+				{
+					"name": "banner",
+					"kind": "const",
+					"signature": "export const banner = (options: BannerOptions): Effect.Effect<void> => …",
+					"description": "Show a sticky notice; it stays until dismissed or its plugin unloads.",
+					"members": []
+				},
+				{
+					"name": "confirm",
+					"kind": "const",
+					"signature": "export const confirm = (options: ConfirmOptions): Effect.Effect<boolean> => …",
+					"description": "Ask the user a yes/no question (spec §5) and resolve with the answer. A second call while one is open queues behind it (the modal queue renders one head at a time) and each waits on its own `Deferred`.",
+					"members": []
+				},
+				{
+					"name": "modal",
+					"kind": "const",
+					"signature": "export const modal = (options: ModalOptions): Effect.Effect<void> => …",
+					"description": "Show a modal that displays a title and a body until it is dismissed.",
+					"members": []
+				},
+				{
+					"name": "NotifyService",
+					"kind": "interface",
+					"signature": "export interface NotifyService { toast(options: ToastOptions): void; banner(options: BannerOptions): void; modal(options: ModalOptions): void; confirm(options: ConfirmOptions): Effect.Effect<boolean>; }",
+					"description": "The notification surface as a plugin's `setup` receives it (spec §2).",
+					"members": [
+						"toast",
+						"banner",
+						"modal",
+						"confirm"
+					]
+				},
+				{
+					"name": "makeNotifyService",
+					"kind": "const",
+					"signature": "export const makeNotifyService = (scope?: Scope.Scope): NotifyService => …",
+					"description": "Build the notification calls bound to one plugin's `Scope`, the shape `host.notify` takes (spec §2). `toast`/`banner`/`modal` are synchronous because a plugin's `setup` is synchronous; each runs its primitive on the subsystem's one runtime, so the scope it is given is the scope that owns the presentation. `confirm` stays an `Effect` because it answers.",
+					"members": []
+				},
+				{
+					"name": "useOverlay",
+					"kind": "const",
+					"signature": "export const useOverlay = (): OverlayState => …",
+					"description": "The overlay state, re-rendering on every change (the toast/modal region).",
+					"members": []
+				}
+			]
 		},
 		{
 			"path": "src/lib/plugins/renderers.ts",
@@ -862,8 +1192,6 @@ export const reference: DocReference = {
 		}
 	],
 	"pending": [
-		"src/lib/plugins/pipeline.ts",
-		"src/lib/plugins/notify.ts",
 		"src/lib/plugins/renderers.ts"
 	],
 	"authorGuide": {
