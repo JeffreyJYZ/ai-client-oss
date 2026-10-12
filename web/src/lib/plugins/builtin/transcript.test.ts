@@ -31,6 +31,10 @@ const record = (): readonly Registered[] => {
 describe("registerTranscriptBuiltins", () => {
 	test("registers every transcript region and renderer id", () => {
 		const ids = record().map((entry) => entry.id);
+		// Set equality below catches a dropped or unexpected id, but it also
+		// *collapses* a duplicate — and a region registered twice renders twice.
+		// The length check is what makes double registration fail here.
+		expect(ids.length).toBe(new Set(ids).size);
 		expect(new Set(ids)).toEqual(
 			new Set([
 				"chat.pane",

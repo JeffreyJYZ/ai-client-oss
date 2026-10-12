@@ -36,6 +36,11 @@ const asContribution = <P>(
  * share it would render all four as siblings of the message. The message list
  * therefore renders each message through `useComponent("ui.message")`, and
  * `chat.message` stays the region those components declare.
+ *
+ * The reservation a plugin author must know: because no `<Slot id="chat.message">`
+ * is rendered, registering into it through the slot API succeeds and renders
+ * **nothing**. `chat.message` is consumed only via `useComponent`, so replacing a
+ * renderer means replacing `ui.message` (or `ui.markdown`/`ui.marker`/`ui.reasoning`).
  */
 export const registerTranscriptBuiltins = (host: Host): void => {
 	const region = (
