@@ -1,7 +1,6 @@
 import { PluginFault } from "@lib/plugins/errors";
 import { HostServices } from "@lib/plugins/host";
 import type { RegistryEntry } from "@lib/plugins/registry";
-import { runtime } from "@lib/plugins/runtime";
 import type {
 	Chunk,
 	HistoryTurn,
@@ -78,6 +77,10 @@ export interface PipelineOutputMap {
  * One stage contract per kind (spec §5). The error channel is `never`: a
  * contract is success-only, and a stage that misbehaves is caught and skipped
  * by {@link guard} rather than surfacing as a failure.
+ *
+ * `transformBody` runs **once per turn**, over the body the turn sends and
+ * stores (see {@link composeTurnBody}); it is not re-run per request round, so
+ * an additive rewrite does not compound as a tool loop iterates.
  */
 export type PipelineStageMap = {
 	readonly [K in PipelineStageKind]: (
@@ -269,12 +272,14 @@ const foldOnHistory = (
 /**
  * The stages of one kind, in the pipeline's own resolution order: `priority`
  * descending, then registration order (a stable sort preserves the registry's
- * insertion order for equal priorities). The sort is applied here rather than
- * taken from the registry's `entries()` because the registry's generic rule
- * compares `order` first, and with no entry setting `order` it computes
- * `Infinity - Infinity = NaN` and falls straight through to registration
- * order — so `priority` would never break a tie. The pipeline names only
- * `priority`, so it owns that one comparison.
+ * insertion order for equal priorities).
+ *
+ * This is a *narrowing* of the registry's rule, not a copy of it. The registry
+ * sorts by `order`, then `priority`, then registration order; spec §5 gives the
+ * pipeline only "`priority` then registration order" and exposes no `order`
+ * key on a stage, so the pipeline applies the one comparison its rule names.
+ * Reading `entries()` and re-sorting by priority is therefore exact for
+ * stages that set none.
  */
 const stagesOf = (
 	entries: readonly RegistryEntry[],
@@ -289,53 +294,83 @@ const stagesOf = (
 		.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
 /**
- * Run every stage of `kind` over `input`, in resolution order. Reads the
- * registry each call, so a stage registered or disposed mid-session takes
- * effect on the next turn, and skips any stage disabled by an earlier fault.
+ * A stage kind resolved against the registry once, so a caller that runs the
+ * same kind many times — `onChunk` per streamed chunk, `onToolCall` per call —
+ * pays the registry read, filter and sort a single time.
+ */
+export interface PipelineRunner<K extends PipelineStageKind> {
+	readonly kind: K;
+	readonly run: (
+		input: PipelineInputMap[K],
+	) => Effect.Effect<PipelineOutputMap[K]>;
+}
+
+/**
+ * Resolve every stage of `kind` now, in order, returning a runner that folds
+ * `input` through them. Reads the registry once, so a stage registered or
+ * disposed mid-turn takes effect on the next resolution, and skips any stage
+ * disabled by an earlier fault.
+ */
+export const stageRunner = <K extends PipelineStageKind>(
+	kind: K,
+	meta: PipelineMeta,
+): Effect.Effect<PipelineRunner<K>, never, HostServices> =>
+	Effect.gen(function* () {
+		const services = yield* HostServices;
+		const off = yield* Ref.get(disabled);
+		const stages = stagesOf(yield* services.pipeline.entries(), kind, off);
+		const dispatch: {
+			readonly [P in PipelineStageKind]: (
+				input: PipelineInputMap[P],
+			) => Effect.Effect<PipelineOutputMap[P]>;
+		} = {
+			beforeSend: (input) => foldBeforeSend(stages, input, meta),
+			transformBody: (input) => foldTransformBody(stages, input, meta),
+			onChunk: (input) => foldOnChunk(stages, input, meta),
+			afterReply: (input) => foldAfterReply(stages, input, meta),
+			onToolCall: (input) => foldOnToolCall(stages, input, meta),
+			onHistory: (input) => foldOnHistory(stages, input, meta),
+		};
+		return { kind, run: dispatch[kind] };
+	});
+
+/**
+ * Run every stage of `kind` over `input`, in resolution order. A one-shot
+ * convenience over {@link stageRunner} for the sites that run a kind once;
+ * a loop should hold a {@link stageRunner} instead.
  */
 export const run = <K extends PipelineStageKind>(
 	kind: K,
 	input: PipelineInputMap[K],
 	meta: PipelineMeta,
 ): Effect.Effect<PipelineOutputMap[K], never, HostServices> =>
-	Effect.gen(function* () {
-		const services = yield* HostServices;
-		const off = yield* Ref.get(disabled);
-		const stages = stagesOf(yield* services.pipeline.entries(), kind, off);
-		const dispatch: {
-			readonly [P in PipelineStageKind]: () => Effect.Effect<
-				PipelineOutputMap[P]
-			>;
-		} = {
-			beforeSend: () => foldBeforeSend(stages, input as SendCtx, meta),
-			transformBody: () => foldTransformBody(stages, input, meta),
-			onChunk: () => foldOnChunk(stages, input as Chunk, meta),
-			afterReply: () => foldAfterReply(stages, input as string, meta),
-			onToolCall: () => foldOnToolCall(stages, input as ToolCallData, meta),
-			onHistory: () =>
-				foldOnHistory(stages, input as readonly HistoryTurn[], meta),
-		};
-		return yield* dispatch[kind]();
-	});
+	Effect.flatMap(stageRunner(kind, meta), (runner) => runner.run(input));
 
 /**
- * {@link run} read synchronously off the app's one runtime. `state/chat.ts`'s
- * `send` builds the request body it forks with, so `beforeSend`,
- * `transformBody` (the first round's body) and `onHistory` are read here
- * rather than pushed into an Effect that would change when the optimistic rows
- * appear. The runtime's layer is built before the first render (`main.tsx`
- * awaits `runtime.runPromise`), so the context is cached and this has no async
- * boundary.
+ * Compose a turn's one outgoing body: the provider's own `buildRequest` over
+ * `base`, then `transformBody` over the built body (spec §5).
  *
- * A mid-`Effect.gen` caller must use {@link run} instead: `runSync` inside a
- * generator trips the Effect language service, and the body the tool loop
- * builds belongs in that generator.
+ * The result is the body the turn hands back to the provider as `prev` under
+ * `skipUserMessage` for every round. `buildRequest` is idempotent over an
+ * already-built body with the user message present (`chatCompletions.ts`'s
+ * filter-and-re-add of system, the overwritten tools/model/stream), so the
+ * provider sends exactly this body and `state/chat.ts` stores exactly it —
+ * **one body, so what is sent and what is stored cannot drift**, and
+ * `transformBody` runs once per turn rather than compounding across rounds.
  */
-export const runSync = <K extends PipelineStageKind>(
-	kind: K,
-	input: PipelineInputMap[K],
+export const composeTurnBody = <Send>(
+	build: (send: Send, ctx: SendCtx) => unknown,
+	base: Send,
+	ctx: SendCtx,
 	meta: PipelineMeta,
-): PipelineOutputMap[K] => runtime.runSync(run(kind, input, meta));
+): Effect.Effect<unknown, never, HostServices> =>
+	run("transformBody", build(base, ctx), meta);
+
+/** The call an `onToolCall` decision resolves to, and whether it executes. */
+export interface ResolvedToolCall {
+	readonly call: ToolCallData;
+	readonly execute: boolean;
+}
 
 /**
  * Project an `onToolCall` decision onto the call the loop acts on (spec §5).
@@ -343,11 +378,6 @@ export const runSync = <K extends PipelineStageKind>(
  * appends a matching result and the replayed body carries no `tool_call`
  * without one. A rewrite keeps the original `id`/`key` for that correlation.
  */
-export interface ResolvedToolCall {
-	readonly call: ToolCallData;
-	readonly execute: boolean;
-}
-
 export const resolveToolCall = (
 	call: ToolCallData,
 	decision: ToolCallDecision,

@@ -2,10 +2,11 @@ import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
 import {
+	composeTurnBody,
 	type PipelineMeta,
 	resolveToolCall,
 	run as runPipeline,
-	runSync as runPipelineSync,
+	stageRunner,
 } from "@lib/plugins/pipeline";
 import { protocolNames, resolveProviderSync } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
@@ -416,36 +417,6 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// back on the wire. `error` rows are the app's own words —
 	// no wire role matches them — so the seed skips them.
 	const meta: PipelineMeta = { conversationId, protocol };
-	// `onHistory` transforms the transcript seed before it is rebuilt into a
-	// body (spec §5). Only a seed — no stored body — has a turn list to transform.
-	const prev =
-		stored ??
-		provider.seedHistory(
-			runPipelineSync(
-				"onHistory",
-				conversation.messages.flatMap((message) => {
-					const parts = message.parts ?? [];
-					// The app's own rows are not turns the model said anything
-					// in, and a failed turn leaves an empty assistant placeholder
-					// behind; a row with neither words nor attachments carries
-					// nothing to replay. A turn that carried only a file must
-					// survive the rebuild, so attachments count as content.
-					if (
-						message.role === "error" ||
-						(message.text === "" && parts.length === 0)
-					)
-						return [];
-					return [
-						{
-							role: message.role,
-							text: message.text,
-							...(parts.length > 0 ? { parts } : {}),
-						},
-					];
-				}),
-				meta,
-			),
-		);
 
 	const searchKind = searchKindFor(active.baseUrl);
 	// Only an endpoint with a real mechanism searches; the stored `tools` array is
@@ -474,7 +445,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	const baseCtx: SendCtx = {
 		msg,
-		prev,
+		// The replay base is resolved inside the run: a seed goes through
+		// `onHistory` first, and the loop passes the turn's actual body as
+		// `prev`. `stored` is what the provider's `buildRequest` starts from.
+		prev: stored,
 		apiUrl: active.baseUrl,
 		apiKey: active.apiKey,
 		model: active.model,
@@ -496,39 +470,11 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			.join("\n\n"),
 	};
 
-	// `beforeSend` augments or rewrites the turn's context, or aborts it
-	// (spec §5). Run before the optimistic rows are appended so an abort never
-	// leaves a half-wired turn; a faulting stage is fail-open inside `run`.
-	const outgoing = runPipelineSync("beforeSend", baseCtx, meta);
-	if (Option.isNone(outgoing)) {
-		updateConversation(conversationId, (conversation) => ({
-			...conversation,
-			title: deriveTitle(conversation, msg),
-			messages: [
-				...conversation.messages,
-				{ id: nextMessageId(), role: "user", text: msg, parts, markers: [] },
-				{ id: nextMessageId(), role: "error", text: ABORTED_TURN, markers: [] },
-			],
-			updatedAt: Date.now(),
-		}));
-		refresh();
-		persistConversationById(conversationId);
-		return;
-	}
-	const ctx = outgoing.value;
-
-	// Body that would be sent *this* turn. The provider's own `send` builds the
-	// identical request from the same ctx; we keep this — plus the streamed reply
-	// appended on success — to seed the next turn. The registry erases the wire
-	// body's type (one registry holds every protocol's), so these are read at
-	// the erased shape the caller drives them with.
+	// The provider's own request builder and body appenders. The registry
+	// erases the wire body's type (one registry holds every protocol's), so
+	// these are read at the erased shape the caller drives them with.
 	const buildBody: (send: unknown, ctx: SendCtx) => unknown =
 		provider.buildRequest;
-	const nextBody = runPipelineSync(
-		"transformBody",
-		buildBody(prev ?? provider.template, ctx),
-		meta,
-	);
 	const appendAssistant: (send: unknown, text: string) => unknown =
 		provider.appendAssistant;
 	const appendToolResult: (
@@ -541,13 +487,15 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	const myRun = ++runSeq;
 	streamConversationId = conversationId;
 	const assistantId = nextMessageId();
+	// The user's row lands now; the assistant placeholder is added inside the
+	// run once `beforeSend` has not aborted, so an abort leaves no empty
+	// assistant bubble behind (its error row is `finalize`'s).
 	updateConversation(conversationId, (c) => ({
 		...c,
 		title: deriveTitle(c, msg),
 		messages: [
 			...c.messages,
 			{ id: nextMessageId(), role: "user", text: msg, parts, markers: [] },
-			{ id: assistantId, role: "assistant", text: "", markers: [] },
 		],
 	}));
 	status = "streaming";
@@ -558,44 +506,99 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// harvests completed memory blocks once the stream settles.
 	const raw: RawText = { value: "", markers: [] };
 	/**
-	 * The body the current round's request replays from: the
-	 * turn's `prev` until a tool round extends it, so the
-	 * first round's request is byte-identical to a
-	 * single-round send (the user message appears once).
+	 * The turn's one body: built from the seed (or stored replay) and passed
+	 * through `transformBody` once, then replayed as `prev` for every round
+	 * with `skipUserMessage` (it already carries the user message). The tool
+	 * loop extends this same body, so what the provider sends and what
+	 * `finalize` stores are one body — they cannot drift.
 	 */
-	let replay: unknown = prev;
-	/**
-	 * The current round's full request body — what the
-	 * provider sends and the tool loop extends. Seeded with
-	 * this turn's body; a turn with no tool calls never
-	 * touches it, so the next-turn seed is byte-identical to
-	 * a single-round send.
-	 */
-	let wire: unknown = nextBody;
+	let wire: unknown;
 	/** Where the final round's text starts in `raw`: its slice is
 	 * the reply that seeds the next turn. */
 	let finalTextStart = 0;
 	/** Tool calls executed so far this turn (the spin bound). */
 	let executed = 0;
 	const run = Effect.gen(function* () {
+		// Seed the turn's base: the stored body for this conversation+protocol,
+		// or a transcript rebuilt from its turns through `onHistory` (spec §5).
+		// `conversation` is the snapshot before this turn's user message, so
+		// the seed cannot replay the incoming message twice, and `error` rows
+		// are the app's own words — no wire role matches them — so they are
+		// skipped.
+		const prev =
+			stored ??
+			provider.seedHistory(
+				yield* runPipeline(
+					"onHistory",
+					conversation.messages.flatMap((message) => {
+						const parts = message.parts ?? [];
+						// A row with neither words nor attachments carries
+						// nothing to replay. A turn that carried only a file
+						// must survive the rebuild, so attachments count.
+						if (
+							message.role === "error" ||
+							(message.text === "" && parts.length === 0)
+						)
+							return [];
+						return [
+							{
+								role: message.role,
+								text: message.text,
+								...(parts.length > 0 ? { parts } : {}),
+							},
+						];
+					}),
+					meta,
+				),
+			);
+
+		// `beforeSend` augments or rewrites the turn's context, or aborts the
+		// turn (spec §5). Inside the run, so a stage may await a host service;
+		// `none` fails the turn, whose error row `finalize` writes.
+		const outgoing = yield* runPipeline(
+			"beforeSend",
+			{ ...baseCtx, prev },
+			meta,
+		);
+		if (Option.isNone(outgoing)) return yield* Effect.fail(ABORTED_TURN);
+		const ctx = outgoing.value;
+
+		// The one body this turn sends and stores; `transformBody` runs here,
+		// once, over the built body (spec §5).
+		wire = yield* composeTurnBody(
+			buildBody,
+			prev ?? provider.template,
+			ctx,
+			meta,
+		);
+
+		updateConversation(conversationId, (c) => ({
+			...c,
+			messages: [
+				...c.messages,
+				{ id: assistantId, role: "assistant", text: "", markers: [] },
+			],
+		}));
+		refresh();
+
 		for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
 			finalTextStart = raw.value.length;
-			// From round 2 the replayed body already carries the
-			// turn's user message (round 1 sent it), so the request
-			// must not append it again — the question would reach
-			// the model once per tool round. Round 1 sends with the
-			// flag unset, byte-identical to a single-round send.
+			// Resolve the chunk stage once for the whole round, not once per
+			// streamed chunk. The row replayed to the provider is the turn's
+			// one body; `skipUserMessage` stops `buildRequest` from appending
+			// the user message it already carries.
+			const onChunk = yield* stageRunner("onChunk", meta);
 			const stream = yield* SendMsg(protocol, {
 				...ctx,
-				prev: replay,
-				skipUserMessage: round > 0,
+				prev: wire,
+				skipUserMessage: true,
 			});
 			const roundCalls: ToolCallData[] = [];
 			// `onChunk` rewrites or drops one streamed chunk (spec §5) before it
 			// reaches the accumulator; a dropped chunk is simply absent, and the
 			// stream still terminates. Piped here so providers stay untouched.
 			const processed = stream.pipe(
-				Stream.mapEffect((chunk) => runPipeline("onChunk", chunk, meta)),
+				Stream.mapEffect((chunk) => onChunk.run(chunk)),
 				Stream.filter(Option.isSome),
 				Stream.map((option) => option.value),
 			);
@@ -618,13 +621,14 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			// the replayed body.
 			const room = MAX_TOOL_CALLS_PER_TURN - executed;
 			if (room <= 0) return;
+			const onToolCall = yield* stageRunner("onToolCall", meta);
 			for (const call of roundCalls.slice(0, room)) {
 				executed += 1;
 				// `onToolCall` may veto or rewrite the call (spec §5). A vetoed
 				// call still records a result through `appendToolResult`, so the
 				// replayed body never carries a `tool_call` without its matching
 				// result — the dangling-call 400 on the next turn.
-				const decision = yield* runPipeline("onToolCall", call, meta);
+				const decision = yield* onToolCall.run(call);
 				const { call: effective, execute: shouldExecute } = resolveToolCall(
 					call,
 					decision,
@@ -651,20 +655,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 					outcome.failed,
 				);
 			}
-			// The extended body is the next round's
-			// base: the provider rebuilds the request
-			// from it (system prompt included). The next
-			// round is always a tool round (2+), so its
-			// body is built as its request will be —
-			// without re-appending the user message the
-			// replay already carries (and so the next
-			// turn's seed carries the question once).
-			replay = wire;
-			wire = yield* runPipeline(
-				"transformBody",
-				buildBody(replay, { ...ctx, skipUserMessage: true }),
-				meta,
-			);
+			// No rebuild between rounds: the next round replays this same
+			// `wire`, which the provider rebuilds identically under
+			// `skipUserMessage`, so the sent and stored bodies stay equal.
 		}
 	});
 

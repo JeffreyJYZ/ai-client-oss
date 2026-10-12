@@ -6,13 +6,17 @@ import {
 	type HostServicesShape,
 } from "@lib/plugins/host";
 import {
+	composeTurnBody,
 	type PipelineMeta,
 	type PipelineStageKind,
 	type PipelineStageMap,
 	resolveToolCall,
 	run,
+	stageRunner,
 } from "@lib/plugins/pipeline";
+import { anthropic } from "@lib/providers/anthropicMessages";
 import { chatcompletions } from "@lib/providers/chatCompletions";
+import { responses } from "@lib/providers/responses";
 import type {
 	Chunk,
 	HistoryTurn,
@@ -322,5 +326,142 @@ describe("onToolCall", () => {
 		});
 		const decision = await runWith(run("onToolCall", call, meta), s);
 		expect(decision.allow).toBe(true);
+	});
+});
+
+describe("transformBody and the turn's single body", () => {
+	/**
+	 * `chat.ts` composes one body with {@link composeTurnBody} and sends it as
+	 * `prev` under `skipUserMessage` for every round. These tests drive that
+	 * exact pair with each real provider, so the invariant they pin is the one
+	 * the turn relies on: the transformed body is what round 1 sends *and* what
+	 * is stored, because the provider rebuilds the identical request from it.
+	 */
+	const providers = [chatcompletions, responses, anthropic];
+
+	test("a transformed body is what round 1 sends and what is stored", async () => {
+		for (const provider of providers) {
+			const s = services();
+			addStage(s, {
+				id: `temperature-${provider.endpoint}`,
+				owner: "acme",
+				kind: "transformBody",
+				run: (body) =>
+					Effect.succeed({
+						...(body as Record<string, unknown>),
+						temperature: 0.25,
+					}),
+			});
+			const ctx: SendCtx = {
+				msg: "hi",
+				prev: undefined,
+				apiUrl: "https://example.com",
+				model: "the-model",
+			};
+			const build = provider.buildRequest as (
+				send: unknown,
+				ctx: SendCtx,
+			) => unknown;
+			const wire = (await runWith(
+				composeTurnBody(build, provider.template, ctx, meta),
+				s,
+			)) as Record<string, unknown>;
+
+			// What round 1 sends: the provider rebuilds its request from this
+			// body, exactly as `SendMsg(protocol, { ...ctx, prev: wire })` does.
+			const sent = provider.buildRequest(wire as never, {
+				...ctx,
+				prev: wire,
+				skipUserMessage: true,
+			}) as Record<string, unknown>;
+
+			expect(sent.temperature).toBe(0.25);
+			// What is stored is the same body: the provider's rebuild is the
+			// identity, so sent and stored cannot drift.
+			expect(sent).toEqual(wire);
+		}
+	});
+
+	test("transformBody runs once per turn, so an additive rewrite does not compound", async () => {
+		const s = services();
+		addStage(s, {
+			id: "append-x",
+			owner: "acme",
+			kind: "transformBody",
+			run: (body) => Effect.succeed(`${body as string}x`),
+		});
+		const ctx: SendCtx = {
+			msg: "hi",
+			prev: undefined,
+			apiUrl: "u",
+			model: "m",
+		};
+		const out = await runWith(
+			composeTurnBody((base: unknown) => base, "", ctx, meta),
+			s,
+		);
+		expect(out).toBe("x");
+	});
+});
+
+describe("async stages", () => {
+	test("a stage that awaits a host service runs through `run`, not a throw", async () => {
+		const s = services();
+		addStage(s, {
+			id: "async",
+			owner: "acme",
+			kind: "transformBody",
+			run: (body) =>
+				Effect.map(Effect.sleep("1 millis"), () => `${body as string}!`),
+		});
+		const out = await runWith(run("transformBody", "", meta), s);
+		expect(out).toBe("!");
+	});
+
+	test("a stage whose async work dies fails open and is disabled", async () => {
+		const s = services();
+		let consulted = 0;
+		addStage(s, {
+			id: "reject",
+			owner: "acme",
+			kind: "transformBody",
+			run: () => {
+				consulted += 1;
+				return Effect.promise(() => Promise.reject(new Error("nope")));
+			},
+		});
+		const first = await runWith(run("transformBody", "kept", meta), s);
+		const second = await runWith(run("transformBody", "kept", meta), s);
+		expect(first).toBe("kept");
+		expect(second).toBe("kept");
+		expect(consulted).toBe(1);
+	});
+});
+
+describe("stageRunner", () => {
+	test("resolves the stage list once, so repeated runs skip a late registration", async () => {
+		const s = services();
+		addStage(s, {
+			id: "first",
+			owner: "acme",
+			kind: "onChunk",
+			run: (chunk) =>
+				Effect.succeed(Option.some({ ...chunk, text: `${chunk.text}1` })),
+		});
+		const runner = await runWith(stageRunner("onChunk", meta), s);
+		addStage(s, {
+			id: "second",
+			owner: "acme",
+			kind: "onChunk",
+			run: (chunk) =>
+				Effect.succeed(Option.some({ ...chunk, text: `${chunk.text}2` })),
+		});
+
+		const first = await Effect.runPromise(runner.run(text("x")));
+		expect(Option.getOrThrow(first).text).toBe("x1");
+
+		const fresh = await runWith(stageRunner("onChunk", meta), s);
+		const second = await Effect.runPromise(fresh.run(text("x")));
+		expect(Option.getOrThrow(second).text).toBe("x12");
 	});
 });
