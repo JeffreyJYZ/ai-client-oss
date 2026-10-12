@@ -2,11 +2,21 @@ import {
 	type Conversation,
 	conversationSchema,
 	type Db,
+	REJECTED_SETTINGS_MESSAGE,
 	Settings,
 	settingsDefaults,
 } from "@lib/db/types";
 import { invoke } from "@tauri-apps/api/core";
 import { Effect, Option } from "effect";
+
+/**
+ * Raw text of the last stored blob that failed to parse, or `none` when the
+ * store is readable. Set by a failed {@link getSettings}, cleared by a
+ * successful read, a successful write, or {@link resetRejectedSettings}. This
+ * is the whole preservation mechanism: while it is `some`, {@link setSettings}
+ * refuses, so the Rust side's `settings.json` is simply never overwritten.
+ */
+let rejected: Option.Option<string> = Option.none();
 
 /**
  * Invoke one Rust storage command, mapping any rejection to a typed `string`
@@ -66,22 +76,45 @@ const getSettings = (): Effect.Effect<Settings> =>
 	Effect.orElseSucceed(
 		Effect.gen(function* () {
 			const raw = yield* call<string | null>("db_get_settings");
-			if (raw === null) return settingsDefaults();
+			if (raw === null) {
+				rejected = Option.none();
+				return settingsDefaults();
+			}
 			const data = yield* parseJson(raw);
 			const parsed = Settings.safeParse(data);
-			return parsed.success ? parsed.data : settingsDefaults();
+			if (parsed.success) {
+				rejected = Option.none();
+				return parsed.data;
+			}
+			// Unreadable: keep the raw text so a write can refuse, and run on
+			// in-memory defaults meanwhile. The stored file is left untouched.
+			rejected = Option.some(raw);
+			return settingsDefaults();
 		}),
 		() => settingsDefaults(),
 	);
 
+const rejectedSettings = (): Effect.Effect<Option.Option<string>> =>
+	Effect.sync(() => rejected);
+
+const resetRejectedSettings = (): Effect.Effect<void> =>
+	Effect.sync(() => {
+		rejected = Option.none();
+	});
+
 const setSettings = (patch: Partial<Settings>): Effect.Effect<void, string> =>
 	Effect.gen(function* () {
+		if (Option.isSome(rejected)) {
+			return yield* Effect.fail(REJECTED_SETTINGS_MESSAGE);
+		}
 		const current = yield* getSettings();
 		const parsed = Settings.safeParse({ ...current, ...patch });
 		if (!parsed.success) return yield* Effect.fail("invalid settings");
-		return yield* call<void>("db_set_settings", {
+		yield* call<void>("db_set_settings", {
 			json: JSON.stringify(parsed.data),
 		});
+		// The store now holds valid settings, so nothing is outstanding.
+		rejected = Option.none();
 	});
 
 export const tauri: Db = {
@@ -90,5 +123,7 @@ export const tauri: Db = {
 	upsertConversation,
 	deleteConversation,
 	getSettings,
+	rejectedSettings,
+	resetRejectedSettings,
 	setSettings,
 };

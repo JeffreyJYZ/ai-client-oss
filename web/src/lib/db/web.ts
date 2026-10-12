@@ -2,6 +2,7 @@ import {
 	type Conversation,
 	conversationSchema,
 	type Db,
+	REJECTED_SETTINGS_MESSAGE,
 	Settings,
 	settingsDefaults,
 } from "@lib/db/types";
@@ -13,6 +14,25 @@ const STORE = "conversations";
 
 /** localStorage key for settings; also imported by the settings store. */
 export const SETTINGS_KEY = "ai-client.settings";
+
+/**
+ * Raw text of the last stored blob that failed to parse, or `none` when the
+ * store is readable. Set by a failed {@link getSettings}, cleared by a
+ * successful read, a successful write, or {@link resetRejectedSettings}. This
+ * is the whole preservation mechanism: while it is `some`, {@link setSettings}
+ * refuses, so the stored value is never overwritten with defaults.
+ */
+let rejected: Option.Option<string> = Option.none();
+
+/** Parse a stored string, degrading malformed JSON to `undefined`. */
+const parseJson = (raw: string): Effect.Effect<unknown> =>
+	Effect.orElseSucceed(
+		Effect.try({
+			try: () => JSON.parse(raw) as unknown,
+			catch: () => "invalid json",
+		}),
+		() => undefined,
+	);
 
 /**
  * Open (creating on first run) the IndexedDB database. `Effect.callback` keeps
@@ -102,29 +122,53 @@ const deleteConversation = (id: string): Effect.Effect<void, string> =>
 
 const getSettings = (): Effect.Effect<Settings> =>
 	Effect.orElseSucceed(
-		Effect.try({
-			try: () => {
-				const raw = localStorage.getItem(SETTINGS_KEY);
-				if (raw === null) return settingsDefaults();
-				const parsed = Settings.safeParse(JSON.parse(raw));
-				return parsed.success ? parsed.data : settingsDefaults();
-			},
-			catch: () => "settings read failed",
+		Effect.gen(function* () {
+			const raw = yield* Effect.try({
+				try: () => localStorage.getItem(SETTINGS_KEY),
+				catch: (cause) => String(cause),
+			});
+			if (raw === null) {
+				rejected = Option.none();
+				return settingsDefaults();
+			}
+			const data = yield* parseJson(raw);
+			const parsed = Settings.safeParse(data);
+			if (parsed.success) {
+				rejected = Option.none();
+				return parsed.data;
+			}
+			// Unreadable: keep the raw text so a write can refuse, and run on
+			// in-memory defaults meanwhile. The stored value is left untouched.
+			rejected = Option.some(raw);
+			return settingsDefaults();
 		}),
 		() => settingsDefaults(),
 	);
 
+const rejectedSettings = (): Effect.Effect<Option.Option<string>> =>
+	Effect.sync(() => rejected);
+
+const resetRejectedSettings = (): Effect.Effect<void> =>
+	Effect.sync(() => {
+		rejected = Option.none();
+	});
+
 const setSettings = (patch: Partial<Settings>): Effect.Effect<void, string> =>
 	Effect.gen(function* () {
+		if (Option.isSome(rejected)) {
+			return yield* Effect.fail(REJECTED_SETTINGS_MESSAGE);
+		}
 		const current = yield* getSettings();
 		const parsed = Settings.safeParse({ ...current, ...patch });
 		if (!parsed.success) return yield* Effect.fail("invalid settings");
-		return yield* Effect.try({
+		yield* Effect.try({
 			try: () => {
 				localStorage.setItem(SETTINGS_KEY, JSON.stringify(parsed.data));
 			},
 			catch: (cause) => String(cause),
 		});
+		// The store now holds valid settings, so nothing is outstanding.
+		rejected = Option.none();
 	});
 
 export const web: Db = {
@@ -133,5 +177,7 @@ export const web: Db = {
 	upsertConversation,
 	deleteConversation,
 	getSettings,
+	rejectedSettings,
+	resetRejectedSettings,
 	setSettings,
 };

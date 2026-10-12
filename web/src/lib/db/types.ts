@@ -129,6 +129,14 @@ export type Settings = z.infer<typeof Settings>;
 export const settingsDefaults = (): Settings => Settings.parse({});
 
 /**
+ * Reason `setSettings` fails with while a stored blob is unreadable. A schema
+ * regression must never silently replace that blob with defaults — the user
+ * resets explicitly (`resetRejectedSettings`) or nothing is written at all.
+ */
+export const REJECTED_SETTINGS_MESSAGE =
+	"stored settings are unreadable; refusing to overwrite";
+
+/**
  * Canonical persisted chat message shape (was `state/chat.ts`).
  */
 export const chatMessageSchema = z.object({
@@ -183,5 +191,19 @@ export interface Db {
 	upsertConversation(c: Conversation): Effect.Effect<void, string>;
 	deleteConversation(id: string): Effect.Effect<void, string>;
 	getSettings(): Effect.Effect<Settings>;
+	/**
+	 * Raw stored text when the last read failed to parse, so the UI can offer
+	 * it for download; `none` while the store is readable.
+	 */
+	rejectedSettings(): Effect.Effect<Option.Option<string>>;
+	/**
+	 * The user's explicit "start fresh": clear the rejection so writes resume.
+	 * The stored blob is not touched — the next `setSettings` overwrites it.
+	 */
+	resetRejectedSettings(): Effect.Effect<void>;
+	/**
+	 * Fails with {@link REJECTED_SETTINGS_MESSAGE} while a rejection stands, so
+	 * a parse failure can never silently replace the stored blob with defaults.
+	 */
 	setSettings(patch: Partial<Settings>): Effect.Effect<void, string>;
 }

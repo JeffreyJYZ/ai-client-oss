@@ -1,5 +1,10 @@
 import { type Backup, exportBackup, importBackup } from "@lib/backup";
-import type { MemoryNote, Profile, ProviderConfig } from "@lib/db";
+import {
+	db,
+	type MemoryNote,
+	type Profile,
+	type ProviderConfig,
+} from "@lib/db";
 import { MAX_MEMORY_NOTE_LENGTH, mergeMemories } from "@lib/memory";
 import { isDesktop } from "@lib/platform";
 import { type ProtocolName, protocolNames } from "@lib/providers";
@@ -10,7 +15,7 @@ import {
 	searchKindFor,
 } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import {
 	type ChangeEvent,
 	type ReactNode,
@@ -100,6 +105,14 @@ export default function Settings() {
 		readonly ok: boolean;
 		readonly text: string;
 	} | null>(null);
+	/**
+	 * Raw text of a stored settings blob that failed to parse, or `null` when
+	 * the store is readable. Non-null shows the preservation banner, which is
+	 * the only place the user learns the file was left alone.
+	 */
+	const [unreadableSettings, setUnreadableSettings] = useState<string | null>(
+		null,
+	);
 	const importInputRef = useRef<HTMLInputElement>(null);
 
 	// This view owns the Updates section: run a fresh check when
@@ -109,6 +122,17 @@ export default function Settings() {
 		if (!isDesktop) return;
 		checkForUpdates();
 	}, []);
+
+	// Re-read the rejection on every render: the settings store records it
+	// during its own (async) hydration, which may settle after this view
+	// mounts. The value stabilises, so setting it here does not loop.
+	useEffect(() => {
+		Effect.runFork(
+			Effect.map(db.rejectedSettings(), (raw) =>
+				setUnreadableSettings(Option.getOrNull(raw)),
+			),
+		);
+	});
 
 	const missingKey =
 		!isLocalEndpoint(active?.baseUrl ?? "") &&
@@ -310,6 +334,38 @@ export default function Settings() {
 				),
 				Effect.catch((error) =>
 					Effect.sync(() => setBackupStatus({ ok: false, text: error })),
+				),
+			),
+		);
+	};
+
+	/** Download the raw, unreadable settings text so nothing is lost. */
+	const downloadUnreadableSettings = (): void => {
+		if (unreadableSettings === null) return;
+		const blob = new Blob([unreadableSettings], {
+			type: "application/json",
+		});
+		const url = URL.createObjectURL(blob);
+		const anchor = document.createElement("a");
+		anchor.href = url;
+		anchor.download = "ai-client-settings-unreadable.json";
+		anchor.click();
+		URL.revokeObjectURL(url);
+	};
+
+	/**
+	 * The user's explicit "start fresh": clear the rejection, then rewrite the
+	 * store from the app's live settings so a valid blob replaces the
+	 * unreadable one. Without the write the banner would return on next boot.
+	 */
+	const resetUnreadableSettings = (): void => {
+		Effect.runFork(
+			db.resetRejectedSettings().pipe(
+				Effect.tap(() =>
+					Effect.sync(() => {
+						setUnreadableSettings(null);
+						setSettings({});
+					}),
 				),
 			),
 		);
@@ -961,6 +1017,30 @@ export default function Settings() {
 						onChange={onImportFile}
 						className="hidden"
 					/>
+					{unreadableSettings !== null ? (
+						<div className="flex flex-col gap-3 rounded-md border border-red-500/40 bg-red-500/5 p-3">
+							<p className="text-sm text-red-300">
+								Your stored settings could not be read, so the app is running on
+								defaults. The original file has been left untouched and nothing
+								will be written over it until you choose. Download a copy first
+								if you want to keep it, then reset to start fresh.
+							</p>
+							<div className="flex gap-2">
+								<button
+									type="button"
+									onClick={downloadUnreadableSettings}
+									className={BUTTON}
+								>
+									Download settings
+								</button>
+								<ConfirmButton
+									label="Reset settings"
+									confirmLabel="Confirm reset"
+									onConfirm={resetUnreadableSettings}
+								/>
+							</div>
+						</div>
+					) : null}
 					<p className="text-xs text-neutral-500">
 						Move settings and conversations between the desktop app and the
 						website as a JSON file. The file contains your API keys — keep it
