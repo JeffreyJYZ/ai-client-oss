@@ -10,6 +10,10 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - `android/`, `ios/` at repo root — empty placeholders, not real mobile output.
 - License: **GPL-3.0-only** (`LICENSE` + `web/src-tauri/Cargo.toml` `license`, and `web/package.json`). The published **0.1.x releases were MIT and stay MIT** — those grants are irrevocable, so never claim the released versions are GPL.
 
+## Search
+
+- **`rg` (or the `grep` tool), always scoped to a path — never a bare `grep -r`.** The shell's `grep` alias excludes `.git` and VCS dirs but **not** `node_modules`, which is the bulk of this tree, so an unscoped recursive grep walks every dependency and returns their matches as if they were yours. Scope it (`rg <pat> web/src`) or exclude the tree (`rg -g '!node_modules' <pat> .`).
+
 ## Fonts
 
 - **System stacks only — never bundle font files.** Sole font home is `web/src/ui/fonts.css` (`--sans/--heading/--mono/--rounded/--serif` on `:root`); the CSS entry `web/src/App.css` consumes them (`html { font-family: var(--mono) }`).
