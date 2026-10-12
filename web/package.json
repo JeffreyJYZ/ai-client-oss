@@ -6,7 +6,8 @@
 	"type": "module",
 	"scripts": {
 		"dev": "vite",
-		"build": "tsc -b && bun run lint && vite build",
+		"docs": "bun ../scripts/build-docs.ts",
+		"build": "bun run docs && tsc -b && bun run lint && vite build",
 		"verify": "tsc -b && biome check . && effect-language-service diagnostics --project tsconfig.app.json && bun test",
 		"lint": "biome check . && effect-language-service diagnostics --project tsconfig.app.json",
 		"fix": "biome check . --write",

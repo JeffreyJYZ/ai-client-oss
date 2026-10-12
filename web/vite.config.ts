@@ -24,4 +24,15 @@ export default defineConfig({
 		tailwindcss(),
 		babel({ presets: [reactCompilerPreset()] }),
 	],
+	build: {
+		// Two entries: the app at `/` and the documentation site at `/docs/`.
+		// A second HTML input is what makes `/docs/` exist on Vercel without a
+		// router or a rewrite (the app is a single page and has no router).
+		rollupOptions: {
+			input: {
+				app: fromConfig("./index.html"),
+				docs: fromConfig("./docs/index.html"),
+			},
+		},
+	},
 });

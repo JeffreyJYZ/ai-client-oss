@@ -1,0 +1,22 @@
+/*
+ * The `/docs` page's own overrides. `../App.css` (imported first, from
+ * `main.tsx`) brings Tailwind and the system font tokens; this only changes
+ * what a documentation page needs — prose in the sans stack rather than the
+ * app's mono, smooth in-page navigation, and anchors that clear the sticky
+ * header. No font file, ever (the repo's rule).
+ */
+html {
+	font-family: var(--sans);
+	scroll-behavior: smooth;
+}
+
+code,
+pre,
+.docs-mono {
+	font-family: var(--mono);
+}
+
+::selection {
+	background-color: #1d4ed8;
+	color: #f5f5f5;
+}

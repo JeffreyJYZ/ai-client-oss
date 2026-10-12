@@ -1,7 +1,11 @@
 {
 	"$schema": "https://biomejs.dev/schemas/2.5.15/schema.json",
 	"files": {
-		"includes": ["**", "!**/.vercel"]
+		// `docs/reference.generated.ts` is machine-written by `scripts/build-docs.ts`
+		// and validated by `docs/reference.test.ts`. Biome must not reformat it: a
+		// formatter pass would make the artifact differ from its generator's output,
+		// which is exactly what the coverage gate compares.
+		"includes": ["**", "!**/.vercel", "!**/web/src/docs/reference.generated.ts"]
 	},
 	"vcs": {
 		"useIgnoreFile": true,
