@@ -27,6 +27,30 @@ export const exportBackup: () => Effect.Effect<Backup, string> = () =>
 	);
 
 /**
+ * The backup's bytes: pretty-printed JSON with one trailing newline. One
+ * function, so the download and the clipboard copy cannot drift apart.
+ */
+export const serializeBackup = (backup: Backup): string =>
+	`${JSON.stringify(backup, null, 2)}\n`;
+
+/**
+ * Download a backup as `ai-client-backup-<YYYY-MM-DD>.json`. The one delivery
+ * half of export, shared by Settings → Backup and the `app.backup.export`
+ * command, so the filename pattern and the bytes are the same behind both.
+ */
+export const downloadBackup = (backup: Backup): void => {
+	const blob = new Blob([serializeBackup(backup)], {
+		type: "application/json",
+	});
+	const url = URL.createObjectURL(blob);
+	const anchor = document.createElement("a");
+	anchor.href = url;
+	anchor.download = `ai-client-backup-${new Date().toISOString().slice(0, 10)}.json`;
+	anchor.click();
+	URL.revokeObjectURL(url);
+};
+
+/**
  * Validate + write a backup: replace settings, upsert conversations
  * (additive — never deletes anything). Fails with a readable message
  * on a bad payload and leaves storage untouched.

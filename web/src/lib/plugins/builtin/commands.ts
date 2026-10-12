@@ -1,6 +1,7 @@
-import { exportBackup } from "@lib/backup";
+import { downloadBackup, exportBackup } from "@lib/backup";
 import { type CommandDefinition, registerCommand } from "@lib/plugins/commands";
 import type { Host } from "@lib/plugins/host";
+import { makeNotifyService } from "@lib/plugins/notify";
 import { Effect } from "effect";
 import { getChat, newConversation, stop } from "@/state/chat";
 import {
@@ -33,6 +34,18 @@ import { CommandPalette, CommandResults } from "@/ui/CommandPalette";
  * Ctrl/Cmd+N, +T and +W for itself however the page calls `preventDefault`.
  */
 export const registerCommandBuiltins = (host: Host): void => {
+	/**
+	 * The notification surface this file pushes through. The built-in plugin's
+	 * `Scope` is not on the `Host` it is handed, and a built-in's scope is never
+	 * closed anyway, so the service is built without one: notify's documented
+	 * host-caller path detaches the toast's `ttl` fibre, which expires the toast
+	 * on its `ttl` exactly as a scope-owned one would — and a never-closed scope
+	 * would otherwise accumulate one finalizer per toast. The toast is therefore
+	 * transient (ttl'd), not app-lifetime: a failure the user has seen goes away
+	 * on its own rather than sitting on screen until dismissed.
+	 */
+	const notify = makeNotifyService();
+
 	const toggleSettings = (): void =>
 		setView(getUIState().view === "settings" ? "chat" : "settings");
 
@@ -59,30 +72,28 @@ export const registerCommandBuiltins = (host: Host): void => {
 	};
 
 	/**
-	 * The download half of Settings → Backup, byte-identical to it
-	 * (`BackupSection.exportBackupFile`): same name pattern, same pretty-printed
-	 * JSON. The import/status banner is a section-local concern and stays there.
+	 * The download half of Settings → Backup. The bytes and the filename come
+	 * from `lib/backup.ts`, the same functions `BackupSection` uses, so the two
+	 * entry points cannot drift. Unlike the section, a command has no banner of
+	 * its own, so a failure is surfaced as an error toast (and logged) — the
+	 * user who ran it from the palette otherwise sees nothing happen.
 	 */
 	const exportBackupFile = (): void => {
 		Effect.runFork(
 			exportBackup().pipe(
-				Effect.tap((backup) =>
-					Effect.sync(() => {
-						const blob = new Blob([`${JSON.stringify(backup, null, 2)}\n`], {
-							type: "application/json",
-						});
-						const url = URL.createObjectURL(blob);
-						const anchor = document.createElement("a");
-						anchor.href = url;
-						anchor.download = `ai-client-backup-${new Date()
-							.toISOString()
-							.slice(0, 10)}.json`;
-						anchor.click();
-						URL.revokeObjectURL(url);
-					}),
-				),
+				Effect.tap((backup) => Effect.sync(() => downloadBackup(backup))),
 				Effect.catch((error) =>
-					Effect.logError(`failed to export a backup: ${error}`),
+					Effect.andThen(
+						Effect.logError(`failed to export a backup: ${error}`),
+						Effect.sync(() => {
+							// Clearer than Settings' bare error text: a toast is
+							// context-free, so it names what failed.
+							notify.toast({
+								text: `Backup export failed: ${error}`,
+								tone: "error",
+							});
+						}),
+					),
 				),
 			),
 		);

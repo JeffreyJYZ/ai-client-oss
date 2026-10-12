@@ -1,4 +1,9 @@
-import { type Backup, exportBackup, importBackup } from "@lib/backup";
+import {
+	downloadBackup,
+	exportBackup,
+	importBackup,
+	serializeBackup,
+} from "@lib/backup";
 import {
 	clearPreMigrationCapture,
 	db,
@@ -918,29 +923,16 @@ export function BackupSection() {
 		setPreMigration(getPreMigrationCapture());
 	});
 
-	/** Identical bytes for the download and the clipboard copy. */
-	const serializeBackup = (backup: Backup): string =>
-		`${JSON.stringify(backup, null, 2)}\n`;
-
-	/** Download the backup as `ai-client-backup-<YYYY-MM-DD>.json`. */
+	/**
+	 * Download the backup as `ai-client-backup-<YYYY-MM-DD>.json`. The bytes and
+	 * the filename come from `lib/backup.ts`, shared with the
+	 * `app.backup.export` command, so the two entry points cannot drift. Only the
+	 * banner below is this section's own.
+	 */
 	const exportBackupFile = (): void => {
 		Effect.runFork(
 			exportBackup().pipe(
-				Effect.tap((backup) =>
-					Effect.sync(() => {
-						const blob = new Blob([serializeBackup(backup)], {
-							type: "application/json",
-						});
-						const url = URL.createObjectURL(blob);
-						const anchor = document.createElement("a");
-						anchor.href = url;
-						anchor.download = `ai-client-backup-${new Date()
-							.toISOString()
-							.slice(0, 10)}.json`;
-						anchor.click();
-						URL.revokeObjectURL(url);
-					}),
-				),
+				Effect.tap((backup) => Effect.sync(() => downloadBackup(backup))),
 				Effect.catch((error) =>
 					Effect.sync(() => setBackupStatus({ ok: false, text: error })),
 				),
