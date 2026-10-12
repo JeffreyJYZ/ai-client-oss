@@ -1,9 +1,27 @@
-import { type ProtocolName, providers } from "@lib/providers";
-import { Effect } from "effect";
+import type { HostServices } from "@lib/plugins/host";
+import { type AnyProvider, resolveProvider } from "@lib/plugins/providers";
+import { Effect, Option } from "effect";
 
 interface ModelsPayload {
 	readonly data?: readonly { readonly id?: unknown }[];
 }
+
+/**
+ * The endpoint helpers resolve their protocol through the registry (spec §5),
+ * so a protocol a plugin registered gets its own headers and path. An unknown
+ * name fails with the same sentence `SendMsg` uses — never a `TypeError` on an
+ * absent provider.
+ */
+const requireProvider = (
+	protocol: string,
+): Effect.Effect<AnyProvider, string, HostServices> =>
+	Effect.gen(function* () {
+		const provider = yield* resolveProvider(protocol);
+		if (Option.isNone(provider)) {
+			return yield* Effect.fail(`unknown protocol: ${protocol}`);
+		}
+		return provider.value;
+	});
 
 /**
  * `GET ${baseUrl}/models` — the OpenAI list endpoint (`baseUrl` carries the
@@ -13,14 +31,15 @@ interface ModelsPayload {
  * channel.
  */
 export const listModels = (
-	protocol: ProtocolName,
+	protocol: string,
 	baseUrl: string,
 	apiKey: string | undefined,
-): Effect.Effect<string[], string> =>
+): Effect.Effect<string[], string, HostServices> =>
 	Effect.gen(function* () {
+		const provider = yield* requireProvider(protocol);
 		const headers: Record<string, string> = {
 			accept: "application/json",
-			...providers[protocol].headers(apiKey),
+			...provider.headers(apiKey),
 		};
 
 		const response = yield* Effect.tryPromise({
@@ -47,20 +66,21 @@ export const listModels = (
 	});
 
 /**
- * `POST ${baseUrl}${providers[protocol].endpoint}` with a 1-token-capped body
+ * `POST ${baseUrl}${endpoint}` with a 1-token-capped body
  * (`max_output_tokens`/`max_tokens: 1`), a real generation that proves the
  * selected model answers. The response stream is never read — a 2xx is enough,
  * so the body is cancelled to release the connection. A non-2xx response or a
  * transport failure becomes the `string` error channel.
  */
 export const testModel = (
-	protocol: ProtocolName,
+	protocol: string,
 	baseUrl: string,
 	apiKey: string | undefined,
 	model: string,
-): Effect.Effect<void, string> =>
+): Effect.Effect<void, string, HostServices> =>
 	Effect.gen(function* () {
-		const headers: Record<string, string> = providers[protocol].headers(apiKey);
+		const provider = yield* requireProvider(protocol);
+		const headers: Record<string, string> = provider.headers(apiKey);
 
 		const body =
 			protocol === "responses"
@@ -74,7 +94,7 @@ export const testModel = (
 
 		const response = yield* Effect.tryPromise({
 			try: () =>
-				fetch(`${baseUrl}${providers[protocol].endpoint}`, {
+				fetch(`${baseUrl}${provider.endpoint}`, {
 					method: "POST",
 					headers,
 					body: JSON.stringify(body),

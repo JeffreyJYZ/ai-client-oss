@@ -1,9 +1,9 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
+import { protocolNames, resolveProviderSync } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
 import { executeTool } from "@lib/plugins/tools";
-import { type ProtocolName, protocolNames, providers } from "@lib/providers";
 import { searchKindFor } from "@lib/providers/presets";
 import type {
 	AttachmentPart,
@@ -57,7 +57,7 @@ const MAX_TOOL_ROUNDS = 4;
 const prevByConversationProtocol = new Map<string, unknown>();
 
 /** Composite key scoping a conversation's `prev` body to one protocol. */
-const prevKey = (conversationId: string, protocol: ProtocolName): string =>
+const prevKey = (conversationId: string, protocol: string): string =>
 	`${conversationId}\u0000${protocol}`;
 
 let activeFiber: Fiber.Fiber<Exit.Exit<void, string>, never> | undefined;
@@ -288,7 +288,7 @@ const commitMemories = (additions: readonly string[]): void => {
 const finalize = (
 	myRun: number,
 	conversationId: string,
-	protocol: ProtocolName,
+	protocol: string,
 	exit: Exit.Exit<void, string>,
 	next: unknown,
 	memories: readonly string[],
@@ -354,11 +354,33 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// API: refuse rather than stream a request with no protocol to build from.
 	if (active === undefined) return;
 
-	// `protocol` is a plain string on the wire-facing schema (a plugin may
-	// register one). Built-ins are all that resolve here yet; Task 11's
-	// provider registry replaces this narrowing with a registry lookup.
-	const protocol: ProtocolName = active.protocol as ProtocolName;
-	const provider = providers[protocol];
+	// `protocol` is a plain string on the wire-facing schema — a plugin may
+	// register one — so the registry decides whether it resolves. `send` builds
+	// its request body synchronously and shows the turn immediately, so this is
+	// the sync read; a name that does not resolve is a failed turn here, never
+	// a crash on an absent provider.
+	const protocol = active.protocol;
+	const resolved = resolveProviderSync(protocol);
+	if (Option.isNone(resolved)) {
+		updateConversation(conversationId, (conversation) => ({
+			...conversation,
+			title: deriveTitle(conversation, msg),
+			messages: [
+				...conversation.messages,
+				{ id: nextMessageId(), role: "user", text: msg, parts, markers: [] },
+				{
+					id: nextMessageId(),
+					role: "error",
+					text: `unknown protocol: ${protocol}`,
+					markers: [],
+				},
+			],
+		}));
+		refresh();
+		persistConversationById(conversationId);
+		return;
+	}
+	const provider = resolved.value;
 	const stored = prevByConversationProtocol.get(
 		prevKey(conversationId, protocol),
 	);
@@ -447,22 +469,20 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	// Body that would be sent *this* turn. The provider's own `send` builds the
 	// identical request from the same ctx; we keep this — plus the streamed reply
-	// appended on success — to seed the next turn.
-	const buildBody = provider.buildRequest as (
-		send: unknown,
-		ctx: SendCtx,
-	) => unknown;
+	// appended on success — to seed the next turn. The registry erases the wire
+	// body's type (one registry holds every protocol's), so these are read at
+	// the erased shape the caller drives them with.
+	const buildBody: (send: unknown, ctx: SendCtx) => unknown =
+		provider.buildRequest;
 	const nextBody = buildBody(prev ?? provider.template, ctx);
-	const appendAssistant = provider.appendAssistant as (
-		send: unknown,
-		text: string,
-	) => unknown;
-	const appendToolResult = provider.appendToolResult as (
+	const appendAssistant: (send: unknown, text: string) => unknown =
+		provider.appendAssistant;
+	const appendToolResult: (
 		send: unknown,
 		call: ToolCallData,
 		result: string,
 		failed: boolean,
-	) => unknown;
+	) => unknown = provider.appendToolResult;
 
 	const myRun = ++runSeq;
 	streamConversationId = conversationId;
@@ -653,8 +673,9 @@ export const deleteConversation = (id: string): void => {
 	if (findConversation(id) === undefined) return;
 	conversations = conversations.filter((c) => c.id !== id);
 	// `prev` is keyed per protocol, so a delete must prune every
-	// protocol's entry for the conversation, not just one.
-	for (const protocol of protocolNames) {
+	// registered protocol's entry for the conversation — the registry is the
+	// list, so a plugin's protocol is pruned too.
+	for (const protocol of protocolNames()) {
 		prevByConversationProtocol.delete(prevKey(id, protocol));
 	}
 	Effect.runFork(

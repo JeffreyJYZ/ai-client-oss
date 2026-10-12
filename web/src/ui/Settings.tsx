@@ -9,7 +9,8 @@ import {
 } from "@lib/db";
 import { MAX_MEMORY_NOTE_LENGTH, mergeMemories } from "@lib/memory";
 import { isDesktop } from "@lib/platform";
-import { type ProtocolName, protocolNames } from "@lib/providers";
+import { protocolNames } from "@lib/plugins/providers";
+import { runtime } from "@lib/plugins/runtime";
 import { listModels, testModel } from "@lib/providers/models";
 import {
 	isLocalEndpoint,
@@ -319,15 +320,8 @@ export function ProviderEditor() {
 		const id = active.id;
 		editor?.setMessage(null);
 		setModelsPending(true);
-		Effect.runFork(
-			// `protocol` is a plain string on the schema (a plugin may register
-			// one); only built-ins resolve here yet. Task 11's provider registry
-			// replaces this narrowing with a registry lookup.
-			listModels(
-				active.protocol as ProtocolName,
-				active.baseUrl,
-				active.apiKey,
-			).pipe(
+		runtime.runFork(
+			listModels(active.protocol, active.baseUrl, active.apiKey).pipe(
 				Effect.tap((ids) =>
 					Effect.sync(() => updateProvider(id, { models: ids })),
 				),
@@ -342,14 +336,8 @@ export function ProviderEditor() {
 		const model = active.model;
 		editor?.setMessage(null);
 		setTestPending(true);
-		Effect.runFork(
-			// Same as `fetchModels`: Task 11's registry replaces the cast.
-			testModel(
-				active.protocol as ProtocolName,
-				active.baseUrl,
-				active.apiKey,
-				model,
-			).pipe(
+		runtime.runFork(
+			testModel(active.protocol, active.baseUrl, active.apiKey, model).pipe(
 				Effect.tap(() =>
 					Effect.sync(() => editor?.setMessage(`✓ ${model} responded`)),
 				),
@@ -398,12 +386,12 @@ export function ProviderEditor() {
 					value={active.protocol}
 					onChange={(event) =>
 						patchActive({
-							protocol: event.target.value as ProtocolName,
+							protocol: event.target.value,
 						})
 					}
 					className={INPUT}
 				>
-					{protocolNames.map((name) => (
+					{protocolNames().map((name) => (
 						<option key={name} value={name}>
 							{name}
 						</option>

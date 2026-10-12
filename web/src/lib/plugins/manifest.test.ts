@@ -58,4 +58,14 @@ describe("Settings", () => {
 		});
 		expect(parsed.plugins[0]?.data).toEqual({ any: { shape: 1 } });
 	});
+	test("a stored provider naming a protocol only a plugin can register still parses", () => {
+		// The field was `z.enum(protocolNames)`; a name no built-in ships is now
+		// valid, so a plugin protocol in a stored blob must survive the round
+		// trip rather than fail the whole `Settings` object (spec §13).
+		const parsed = Settings.parse({
+			providers: [{ id: "p", protocol: "some-plugin-thing" }],
+		});
+		expect(parsed.providers[0]?.protocol).toBe("some-plugin-thing");
+		expect(parsed.providers[0]?.id).toBe("p");
+	});
 });
