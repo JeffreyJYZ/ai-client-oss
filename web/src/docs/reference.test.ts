@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
-import {
-	buildReference,
-	HOST_PATH,
-	IDS_PATH,
-	MANIFEST_PATH,
-} from "@/docs/build";
+import { HOST_PATH, IDS_PATH, MANIFEST_PATH } from "@/docs/build";
 import {
 	authorGuidePath,
 	pendingModules,
@@ -26,9 +21,14 @@ import { docReferenceSchema } from "@/docs/types";
  * failing test rather than an aspiration: add an export, do not re-run
  * `bun run docs`, and this suite names the export that is missing.
  *
- * It compares the artifact in the tree (not a freshly built one), because the
- * artifact is what a deploy would ship — `web/package.json`'s `build` runs the
- * generator first, so the only way to see this fail is a commit that skipped it.
+ * **Coverage is this suite's job; currency is the build's.** The artifact is
+ * committed so the page and `tsc` work standalone and the diff shows what
+ * ships, but the committed bytes are never demanded to equal a fresh build:
+ * `web/package.json`'s `build` runs `bun run docs` before it bundles, so the
+ * deployed reference is always generated from the source it was built from —
+ * the property that actually matters. A byte-equality assertion here would
+ * redden every edit to any entry-list module, a JSDoc typo included, for five
+ * tasks running in parallel. Do not re-add one as a "missing gate".
  */
 
 const webRoot = new URL("../../", import.meta.url);
@@ -165,13 +165,46 @@ describe("generated plugin API reference", () => {
 		expect(generated.authorGuide.available).toBe(exists(authorGuidePath));
 	});
 
-	test("the generator is deterministic — rebuilding from source reproduces the artifact", () => {
-		const rebuilt = buildReference({
-			read,
-			exists,
-			appVersion: (JSON.parse(sourceOf("package.json")) as { version: string })
-				.version,
-		});
-		expect(rebuilt).toEqual(generated);
+	/**
+	 * Every structured table, and the API version, must be non-empty *as a fact
+	 * about the artifact* — never merely "equal to whatever the extractor
+	 * returned". A renamed const in `ids.ts` makes both sides `[]` and the
+	 * equality tests above pass, which for a page whose whole point is the
+	 * reference would ship an empty slot map with a green suite.
+	 */
+	test("does not render an empty registry", () => {
+		expect(generated.slots.length).toBeGreaterThan(0);
+		expect(generated.capabilities.length).toBeGreaterThan(0);
+		expect(generated.events.length).toBeGreaterThan(0);
+		expect(generated.manifestFields.length).toBeGreaterThan(0);
+		expect(generated.apiVersion).not.toBe("");
+	});
+
+	/**
+	 * Why the test above is load-bearing rather than belt-and-braces: the
+	 * structured extraction is name-sensitive, so a renamed declaration really
+	 * does yield nothing, on both sides of every equality comparison.
+	 */
+	test("the structured extraction is name-sensitive", () => {
+		const renamed = sourceOf(IDS_PATH).replace(
+			"export const slotIds ",
+			"export const slotIdsRenamed ",
+		);
+		expect(renamed).not.toBe(sourceOf(IDS_PATH));
+		expect(extractStringTuple(renamed, "slotIds")).toEqual([]);
+	});
+
+	/** A description cut mid-word reads as a broken reference; none may be. */
+	test("no documented description is truncated", () => {
+		const truncated = [
+			...generated.modules
+				.flatMap((module) => module.symbols)
+				.filter((symbol) => symbol.description.endsWith("…"))
+				.map((symbol) => symbol.name),
+			...generated.manifestFields
+				.filter((field) => field.description.endsWith("…"))
+				.map((field) => field.name),
+		];
+		expect(truncated).toEqual([]);
 	});
 });

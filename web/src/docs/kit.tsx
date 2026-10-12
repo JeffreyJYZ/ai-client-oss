@@ -19,9 +19,9 @@ export const Section = ({
 	children: ReactNode;
 }) => (
 	<section id={id} className="scroll-mt-24">
-		<h2 className="text-xl font-medium text-neutral-100">{title}</h2>
+		<h2 className="text-xl font-medium text-[color:var(--docs-fg)]">{title}</h2>
 		{lead !== undefined ? (
-			<p className="mt-2 max-w-3xl text-sm leading-6 text-neutral-400">
+			<p className="mt-2 max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 				{lead}
 			</p>
 		) : null}
@@ -37,7 +37,7 @@ export const SubSection = ({
 	children: ReactNode;
 }) => (
 	<div>
-		<h3 className="uppercase tracking-widest text-[11px] text-neutral-500">
+		<h3 className="uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]">
 			{title}
 		</h3>
 		<div className="mt-3 flex flex-col gap-4">{children}</div>
@@ -45,7 +45,7 @@ export const SubSection = ({
 );
 
 export const Prose = ({ children }: { children: ReactNode }) => (
-	<div className="flex max-w-3xl flex-col gap-3 text-sm leading-6 text-neutral-300">
+	<div className="flex max-w-3xl flex-col gap-3 text-sm leading-6 text-[color:var(--docs-body)]">
 		{children}
 	</div>
 );
@@ -66,27 +66,27 @@ export const Callout = ({
 	<div
 		className={
 			tone === "warning"
-				? "rounded-lg border border-amber-900/70 bg-amber-950/30 p-4"
-				: "rounded-lg border border-neutral-800 bg-neutral-900/50 p-4"
+				? "rounded-lg border border-[color:var(--docs-warn-border)] bg-[var(--docs-warn-bg)] p-4"
+				: "rounded-lg border border-[color:var(--docs-border)] bg-[var(--docs-panel-soft)] p-4"
 		}
 	>
 		<p
 			className={
 				tone === "warning"
-					? "uppercase tracking-widest text-[11px] text-amber-400"
-					: "uppercase tracking-widest text-[11px] text-neutral-500"
+					? "uppercase tracking-widest text-[11px] text-[color:var(--docs-warn-fg)]"
+					: "uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]"
 			}
 		>
 			{title}
 		</p>
-		<div className="mt-3 flex flex-col gap-3 text-sm leading-6 text-neutral-300">
+		<div className="mt-3 flex flex-col gap-3 text-sm leading-6 text-[color:var(--docs-body)]">
 			{children}
 		</div>
 	</div>
 );
 
 export const Code = ({ children }: { children: ReactNode }) => (
-	<pre className="overflow-x-auto rounded-lg border border-neutral-800 bg-neutral-900/70 p-3 text-[12.5px] leading-5 text-neutral-200">
+	<pre className="overflow-x-auto rounded-lg border border-[color:var(--docs-border)] bg-[var(--docs-panel)] p-3 text-[12.5px] leading-5 text-[color:var(--docs-code-fg)]">
 		<code>{children}</code>
 	</pre>
 );
@@ -101,10 +101,10 @@ export const Chip = ({
 	<span
 		className={`rounded border px-1.5 py-0.5 text-[11px] ${
 			tone === "amber"
-				? "border-amber-900 bg-amber-950/40 text-amber-300"
+				? "border-[color:var(--docs-amber-border)] bg-[var(--docs-amber-bg)] text-[color:var(--docs-amber-fg)]"
 				: tone === "rose"
-					? "border-rose-900 bg-rose-950/40 text-rose-300"
-					: "border-neutral-700 bg-neutral-900 text-neutral-400"
+					? "border-[color:var(--docs-rose-border)] bg-[var(--docs-rose-bg)] text-[color:var(--docs-rose-fg)]"
+					: "border-[color:var(--docs-border-strong)] bg-[var(--docs-panel-solid)] text-[color:var(--docs-muted)]"
 		}`}
 	>
 		{children}
@@ -128,7 +128,7 @@ export const Table = ({
 					{head.map((cell) => (
 						<th
 							key={cell}
-							className="border-b border-neutral-800 pb-2 pr-4 uppercase tracking-widest text-[11px] font-normal text-neutral-500"
+							className="border-b border-[color:var(--docs-border)] pb-2 pr-4 uppercase tracking-widest text-[11px] font-normal text-[color:var(--docs-faint)]"
 						>
 							{cell}
 						</th>
@@ -141,7 +141,7 @@ export const Table = ({
 						{head.map((label, column) => (
 							<td
 								key={label}
-								className="border-b border-neutral-900 py-2.5 pr-4 align-top leading-5 text-neutral-300"
+								className="border-b border-[color:var(--docs-border-soft)] py-2.5 pr-4 align-top leading-5 text-[color:var(--docs-body)]"
 							>
 								{row.cells[column]}
 							</td>

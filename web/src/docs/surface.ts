@@ -46,6 +46,22 @@ const nameText = (name: ts.Node | undefined, sf: ts.SourceFile): string => {
 	return collapse(name.getText(sf));
 };
 
+/**
+ * One line of prose from a doc comment, never cut mid-word.
+ *
+ * A character cap alone reads as a broken reference the moment it lands on the
+ * page — the shipped `Host` comment is longer than the cap and used to end
+ * `…populated by Ta…`. So the first sentence wins; the cap is only the last
+ * resort for a sentence that is itself longer than the cap.
+ */
+const summarise = (text: string): string => {
+	const collapsed = collapse(text);
+	if (collapsed.length <= 400) return collapsed;
+	const sentence = /^.*?[.!?](?=\s|$)/.exec(collapsed)?.[0].trim() ?? "";
+	if (sentence !== "" && sentence.length <= 400) return sentence;
+	return truncate(collapsed, 400);
+};
+
 /** The last `/** … *​/` block immediately above `node`, as one line. */
 const descriptionOf = (
 	source: string,
@@ -63,7 +79,7 @@ const descriptionOf = (
 		.map((line) => line.replace(/^\s*\*?\s?/, "").trim())
 		.filter((line) => line !== "" && !line.startsWith("@"))
 		.join(" ");
-	return truncate(collapse(cleaned), 400);
+	return summarise(cleaned);
 };
 
 const memberNames = (

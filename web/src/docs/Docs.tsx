@@ -29,27 +29,27 @@ const navItems = [
 
 export default function Docs() {
 	return (
-		<div className="min-h-screen bg-neutral-950">
-			<header className="border-b border-neutral-800">
+		<div className="min-h-screen bg-[var(--docs-bg)]">
+			<header className="border-b border-[color:var(--docs-border)]">
 				<div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
 					<a
 						href="/"
-						className="text-sm text-neutral-300 hover:text-neutral-100"
+						className="text-sm text-[color:var(--docs-body)] hover:text-[color:var(--docs-fg)]"
 					>
 						← Open Source AI Client
 					</a>
-					<span className="uppercase tracking-widest text-[11px] text-neutral-500">
+					<span className="uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]">
 						Docs
 					</span>
 				</div>
 			</header>
 
-			<nav className="flex flex-wrap gap-2 border-b border-neutral-800 px-6 py-4 lg:hidden">
+			<nav className="flex flex-wrap gap-2 border-b border-[color:var(--docs-border)] px-6 py-4 lg:hidden">
 				{navItems.map((item) => (
 					<a
 						key={item.id}
 						href={`#${item.id}`}
-						className="rounded border border-neutral-800 px-2 py-1 text-xs text-neutral-400"
+						className="rounded border border-[color:var(--docs-border)] px-2 py-1 text-xs text-[color:var(--docs-muted)]"
 					>
 						{item.label}
 					</a>
@@ -58,14 +58,14 @@ export default function Docs() {
 
 			<div className="mx-auto flex max-w-6xl items-start gap-12 px-6">
 				<nav className="sticky top-8 hidden w-48 shrink-0 flex-col gap-0.5 py-10 lg:flex">
-					<p className="mb-2 uppercase tracking-widest text-[11px] text-neutral-500">
+					<p className="mb-2 uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]">
 						On this page
 					</p>
 					{navItems.map((item) => (
 						<a
 							key={item.id}
 							href={`#${item.id}`}
-							className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-900 hover:text-neutral-100"
+							className="rounded px-2 py-1 text-sm text-[color:var(--docs-muted)] hover:bg-[var(--docs-panel-solid)] hover:text-[color:var(--docs-fg)]"
 						>
 							{item.label}
 						</a>

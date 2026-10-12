@@ -1,12 +1,71 @@
 /*
- * The `/docs` page's own overrides. `../App.css` (imported first, from
- * `main.tsx`) brings Tailwind and the system font tokens; this only changes
- * what a documentation page needs — prose in the sans stack rather than the
- * app's mono, smooth in-page navigation, and anchors that clear the sticky
- * header. No font file, ever (the repo's rule).
+ * `../App.css` (imported first, from `main.tsx`) brings Tailwind and the system
+ * font tokens. This file adds the docs page's own theme.
+ *
+ * `:root` holds the dark values, and they are exactly the app's own canvas
+ * colours — dark mode is therefore unchanged. `prefers-color-scheme: light`
+ * re-points the same tokens, so the page ships both themes without touching the
+ * app's styles (the app itself is dark-only). Every colour the page uses goes
+ * through a token; nothing here is a font file, ever.
  */
+:root {
+	--docs-bg: #0a0a0a;
+	--docs-panel: rgb(23 23 23 / 70%);
+	--docs-panel-soft: rgb(23 23 23 / 50%);
+	--docs-panel-solid: #171717;
+	--docs-fg: #f5f5f5;
+	--docs-code-fg: #e5e5e5;
+	--docs-body: #d4d4d4;
+	--docs-muted: #a3a3a3;
+	--docs-faint: #737373;
+	--docs-border: #262626;
+	--docs-border-soft: #171717;
+	--docs-border-strong: #404040;
+	--docs-link: #60a5fa;
+	--docs-link-hover: #93c5fd;
+	--docs-warn-bg: rgb(69 26 3 / 30%);
+	--docs-warn-border: rgb(120 53 15 / 70%);
+	--docs-warn-fg: #fbbf24;
+	--docs-amber-bg: rgb(69 26 3 / 40%);
+	--docs-amber-border: #78350f;
+	--docs-amber-fg: #fcd34d;
+	--docs-rose-bg: rgb(76 5 25 / 40%);
+	--docs-rose-border: #881337;
+	--docs-rose-fg: #fda4af;
+}
+
+@media (prefers-color-scheme: light) {
+	:root {
+		--docs-bg: #ffffff;
+		--docs-panel: #fafafa;
+		--docs-panel-soft: #f5f5f5;
+		--docs-panel-solid: #f5f5f5;
+		--docs-fg: #171717;
+		--docs-code-fg: #262626;
+		--docs-body: #404040;
+		--docs-muted: #525252;
+		--docs-faint: #737373;
+		--docs-border: #e5e5e5;
+		--docs-border-soft: #eeeeee;
+		--docs-border-strong: #d4d4d4;
+		--docs-link: #1d4ed8;
+		--docs-link-hover: #1e40af;
+		--docs-warn-bg: #fffbeb;
+		--docs-warn-border: #f59e0b;
+		--docs-warn-fg: #b45309;
+		--docs-amber-bg: #fffbeb;
+		--docs-amber-border: #fcd34d;
+		--docs-amber-fg: #b45309;
+		--docs-rose-bg: #fff1f2;
+		--docs-rose-border: #fecdd3;
+		--docs-rose-fg: #be123c;
+	}
+}
+
 html {
 	font-family: var(--sans);
+	background-color: var(--docs-bg);
+	color: var(--docs-fg);
 	scroll-behavior: smooth;
 }
 
@@ -17,6 +76,6 @@ pre,
 }
 
 ::selection {
-	background-color: #1d4ed8;
-	color: #f5f5f5;
+	background-color: var(--docs-link);
+	color: var(--docs-bg);
 }

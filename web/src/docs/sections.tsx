@@ -25,38 +25,44 @@ export const OverviewSection = () => (
 			</p>
 		</Prose>
 		<SubSection title="Highlights">
-			<ul className="flex max-w-3xl flex-col gap-2 text-sm leading-6 text-neutral-300">
+			<ul className="flex max-w-3xl flex-col gap-2 text-sm leading-6 text-[color:var(--docs-body)]">
 				<li>
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						Any compatible endpoint
 					</strong>{" "}
 					— no vendor lock-in, including local models through Ollama or LM
 					Studio.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						Reads pages you link
 					</strong>{" "}
 					— the model can fetch a URL and answer from the page itself.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">Web search</strong> —
-					through the endpoint's own tool where it has one, or TinyFish with
+					<strong className="font-medium text-[color:var(--docs-fg)]">
+						Web search
+					</strong>{" "}
+					— through the endpoint's own tool where it has one, or TinyFish with
 					your own key, which is how a local model gets search at all.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						Durable notes
 					</strong>{" "}
 					— memories the model writes as it works, plus your own.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">Extensible</strong> —
-					plugins can contribute to any UI region and drive every logic seam.
+					<strong className="font-medium text-[color:var(--docs-fg)]">
+						Extensible
+					</strong>{" "}
+					— plugins can contribute to any UI region and drive every logic seam.
 					See the plugin API reference below.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">GPL-3.0-only</strong>{" "}
+					<strong className="font-medium text-[color:var(--docs-fg)]">
+						GPL-3.0-only
+					</strong>{" "}
 					— open source; the 0.1.x releases were MIT and stay MIT.
 				</li>
 			</ul>
@@ -102,9 +108,14 @@ brew install --cask jeffreyjyz/tap/oss-ai-client`}</Code>
 			<Prose>
 				<p>
 					The installer is unsigned too, so SmartScreen warns first: choose{" "}
-					<strong className="font-medium text-neutral-100">More info</strong>{" "}
+					<strong className="font-medium text-[color:var(--docs-fg)]">
+						More info
+					</strong>{" "}
 					then{" "}
-					<strong className="font-medium text-neutral-100">Run anyway</strong>.
+					<strong className="font-medium text-[color:var(--docs-fg)]">
+						Run anyway
+					</strong>
+					.
 				</p>
 			</Prose>
 		</SubSection>
@@ -123,7 +134,7 @@ brew install --cask jeffreyjyz/tap/oss-ai-client`}</Code>
 				<p>
 					The same frontend runs at{" "}
 					<a
-						className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+						className="text-[color:var(--docs-link)] underline underline-offset-2 hover:text-[color:var(--docs-link-hover)]"
 						href="https://aiclient.jyz.land"
 						target="_blank"
 						rel="noreferrer"
@@ -225,7 +236,7 @@ export const PluginsSection = ({
 					<span className="docs-mono">plugin.json</span> declares identity,
 					version, the entry file, the capability labels it wants and the app
 					version it targets. The entry is{" "}
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						one pre-built ESM file with no imports
 					</strong>{" "}
 					— a bundled desktop app has no module resolver for a plugin directory,
@@ -244,7 +255,7 @@ export const PluginsSection = ({
 				<Prose>
 					<p>
 						<a
-							className="text-blue-400 underline underline-offset-2 hover:text-blue-300"
+							className="text-[color:var(--docs-link)] underline underline-offset-2 hover:text-[color:var(--docs-link-hover)]"
 							href={authorGuide.url}
 							target="_blank"
 							rel="noreferrer"
@@ -257,7 +268,7 @@ export const PluginsSection = ({
 				</Prose>
 			) : (
 				<Prose>
-					<p className="text-neutral-400">
+					<p className="text-[color:var(--docs-muted)]">
 						The plugin author's guide ({" "}
 						<span className="docs-mono">{authorGuide.url}</span> ) lands with
 						the plugin system and is not in the tree yet; the generated API
@@ -291,9 +302,9 @@ export const TrustSection = () => (
 			</p>
 		</Callout>
 		<SubSection title="What is actually enforced">
-			<ul className="flex max-w-3xl flex-col gap-2 text-sm leading-6 text-neutral-300">
+			<ul className="flex max-w-3xl flex-col gap-2 text-sm leading-6 text-[color:var(--docs-body)]">
 				<li>
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						Failure isolation is real.
 					</strong>{" "}
 					A plugin that throws, fails to load, or faults a middleware stage is
@@ -301,14 +312,14 @@ export const TrustSection = () => (
 					plugin.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						Lifetime is real.
 					</strong>{" "}
 					Disabling a plugin disposes every registration it made, in reverse
 					order.
 				</li>
 				<li>
-					<strong className="font-medium text-neutral-100">
+					<strong className="font-medium text-[color:var(--docs-fg)]">
 						Capability labels are labels.
 					</strong>{" "}
 					They are shown and consented to. What each one enforces — usually

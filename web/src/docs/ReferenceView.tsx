@@ -18,15 +18,17 @@ const boundaryTone = (
 			: "neutral";
 
 const SymbolRow = ({ symbol }: { symbol: DocSymbol }) => (
-	<div className="border-l-2 border-neutral-800 pl-4">
+	<div className="border-l-2 border-[color:var(--docs-border)] pl-4">
 		<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-			<h4 className="docs-mono text-sm text-neutral-100">{symbol.name}</h4>
-			<span className="uppercase tracking-widest text-[11px] text-neutral-500">
+			<h4 className="docs-mono text-sm text-[color:var(--docs-fg)]">
+				{symbol.name}
+			</h4>
+			<span className="uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]">
 				{symbol.kind}
 			</span>
 		</div>
 		{symbol.description !== "" ? (
-			<p className="mt-1.5 max-w-3xl text-sm leading-6 text-neutral-400">
+			<p className="mt-1.5 max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 				{symbol.description}
 			</p>
 		) : null}
@@ -53,7 +55,7 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 	return (
 		<>
 			<SubSection title="API surface">
-				<p className="max-w-3xl text-sm leading-6 text-neutral-400">
+				<p className="max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 					Extracted from the shipped source by{" "}
 					<span className="docs-mono">scripts/build-docs.ts</span>, so it cannot
 					describe an API the app does not have. Plugin API{" "}
@@ -63,14 +65,14 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 				{documented.map((module) => (
 					<div key={module.path}>
 						<div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-							<h4 className="text-sm font-medium text-neutral-100">
+							<h4 className="text-sm font-medium text-[color:var(--docs-fg)]">
 								{module.label}
 							</h4>
-							<span className="docs-mono text-[11px] text-neutral-500">
+							<span className="docs-mono text-[11px] text-[color:var(--docs-faint)]">
 								{module.path}
 							</span>
 						</div>
-						<p className="mt-1 max-w-3xl text-sm leading-6 text-neutral-400">
+						<p className="mt-1 max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 							{module.summary}
 						</p>
 						<div className="mt-4 flex flex-col gap-5">
@@ -99,7 +101,7 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 			) : null}
 
 			<SubSection title="Slot map">
-				<p className="max-w-3xl text-sm leading-6 text-neutral-400">
+				<p className="max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 					Every region a contribution can render into, read from{" "}
 					<span className="docs-mono">slotIds</span>. An id that is not here is
 					refused at registration as a logged fault, not a crash.
@@ -119,7 +121,7 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 			</SubSection>
 
 			<SubSection title="Manifest fields">
-				<p className="max-w-3xl text-sm leading-6 text-neutral-400">
+				<p className="max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 					Read from <span className="docs-mono">manifestSchema</span> — the
 					published shape, not a copy of it. A field with a default may be
 					omitted.
@@ -134,7 +136,7 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 							</span>,
 							<span
 								key="schema"
-								className="docs-mono text-[12.5px] text-neutral-400"
+								className="docs-mono text-[12.5px] text-[color:var(--docs-muted)]"
 							>
 								{field.schema}
 							</span>,
@@ -146,7 +148,7 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 			</SubSection>
 
 			<SubSection title="Capabilities">
-				<p className="max-w-3xl text-sm leading-6 text-neutral-400">
+				<p className="max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 					Declared permission labels. They are honest labels for consent and
 					display — what is enforced is stated per row, and nothing here is a
 					sandbox.
@@ -170,7 +172,7 @@ export const ReferenceView = ({ reference }: { reference: DocReference }) => {
 			</SubSection>
 
 			<SubSection title="Host events">
-				<p className="max-w-3xl text-sm leading-6 text-neutral-400">
+				<p className="max-w-3xl text-sm leading-6 text-[color:var(--docs-muted)]">
 					Accepted by <span className="docs-mono">host.on(event, handler)</span>
 					.
 				</p>
