@@ -1,4 +1,12 @@
 {
+	"compilerOptions": {
+		"paths": {
+			"@lib/*": ["./src/lib/*"],
+			"@ui/*": ["./src/ui/*"],
+			"@/*": ["./src/*"],
+			"@root/*": ["./*"]
+		}
+	},
 	"files": [],
 	"references": [
 		{ "path": "./tsconfig.app.json" },

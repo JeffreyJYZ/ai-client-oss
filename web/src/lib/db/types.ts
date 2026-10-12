@@ -1,3 +1,4 @@
+import { pluginStateSchema } from "@lib/plugins/manifest";
 import { type ProtocolName, protocolNames } from "@lib/providers";
 import type { AttachmentPart } from "@lib/providers/types";
 import type { Effect, Option } from "effect";
@@ -108,6 +109,19 @@ export const Settings = z.object({
 	dismissedInstallNote: z.boolean().default(false),
 	/** Newest release whose update notice the user has dismissed. */
 	dismissedUpdateVersion: z.string().default(""),
+	/**
+	 * Master switch for the plugin subsystem, default off. With it off
+	 * nothing loads and the app behaves exactly as it did before the
+	 * feature existed.
+	 */
+	pluginsEnabled: z.boolean().default(false),
+	/**
+	 * Per-plugin persisted state: the enable flag, the manifest's
+	 * version and declared capabilities at enable time, and the
+	 * plugin's own `data`, which rides `settings.json` and every
+	 * backup untouched.
+	 */
+	plugins: z.array(pluginStateSchema).default([]),
 });
 
 export type Settings = z.infer<typeof Settings>;

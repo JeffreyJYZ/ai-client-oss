@@ -10,7 +10,8 @@
 		"lint": "biome check . && effect-language-service diagnostics --project tsconfig.app.json",
 		"fix": "biome check . --write",
 		"preview": "vite preview",
-		"tauri": "tauri"
+		"tauri": "tauri",
+		"test": "bun test"
 	},
 	"dependencies": {
 		"@tauri-apps/api": "^2.12.2",
@@ -32,6 +33,7 @@
 		"@rolldown/plugin-babel": "^0.2.3",
 		"@tailwindcss/vite": "^4.3.3",
 		"@types/babel__core": "^7.20.5",
+		"@types/bun": "^1.4.3",
 		"@types/node": "^24.13.3",
 		"@types/react": "^19.2.18",
 		"@types/react-dom": "^19.2.7",
