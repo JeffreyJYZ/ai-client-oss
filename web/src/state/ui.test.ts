@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, test } from "bun:test";
 import {
 	getUIState,
 	setPalette,
+	setSystemPromptOpen,
 	setView,
 	subscribe,
 	type UIView,
@@ -18,6 +19,7 @@ import {
 const reset = (): void => {
 	setView("chat");
 	setPalette(false);
+	setSystemPromptOpen(false);
 };
 
 beforeEach(reset);
@@ -26,7 +28,11 @@ describe("state/ui", () => {
 	test("starts on the chat view with no palette", () => {
 		// A fresh module always boots here; this also pins the shape the shell
 		// reads, so adding a field cannot silently change the initial view.
-		expect(getUIState()).toEqual({ view: "chat", palette: false });
+		expect(getUIState()).toEqual({
+			view: "chat",
+			palette: false,
+			systemPromptOpen: false,
+		});
 		expect(uiStateSchema.safeParse(getUIState()).success).toBe(true);
 	});
 
@@ -48,7 +54,19 @@ describe("state/ui", () => {
 	test("setPalette writes the flag without disturbing the view", () => {
 		setView("settings");
 		setPalette(true);
-		expect(getUIState()).toEqual({ view: "settings", palette: true });
+		expect(getUIState()).toEqual({
+			view: "settings",
+			palette: true,
+			systemPromptOpen: false,
+		});
+	});
+
+	test("setSystemPromptOpen toggles the popover without disturbing the view", () => {
+		// The "toggle system prompt" command and the header button share this
+		// flag, so it is asserted here rather than in either component.
+		setSystemPromptOpen(true);
+		expect(getUIState().systemPromptOpen).toBe(true);
+		expect(getUIState().view).toBe("chat");
 	});
 
 	test("an invalid view is dropped, not stored", () => {

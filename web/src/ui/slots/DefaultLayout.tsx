@@ -3,6 +3,7 @@ import { LATEST_RELEASE_URL } from "@/constants/links";
 import { setSettings, useSettings } from "@/state/settings";
 import { setView, useUIState } from "@/state/ui";
 import Slot from "@/ui/slots/Slot";
+import { useGlobalKeys } from "@/ui/useGlobalKeys";
 
 /**
  * The app's own shell (spec §4), registered at `ui.root.layout` by
@@ -21,6 +22,9 @@ import Slot from "@/ui/slots/Slot";
  */
 export default function DefaultLayout() {
 	const { view } = useUIState();
+	// The global key handler is mounted here, the one component that is always
+	// present, and its scoped effect owns the document listener.
+	useGlobalKeys();
 
 	return (
 		<div className="flex h-full w-full text-left">
@@ -43,6 +47,10 @@ export default function DefaultLayout() {
 					</>
 				)}
 			</main>
+			{/* The overlay region (spec §4): toasts, modals and the command
+			    palette. Contributes no element until something renders into it,
+			    so a closed palette leaves this layout exactly as it was. */}
+			<Slot id="overlay.root" />
 		</div>
 	);
 }

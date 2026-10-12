@@ -15,6 +15,14 @@ import { z } from "zod";
 export const uiStateSchema = z.object({
 	view: z.enum(["chat", "settings"]),
 	palette: z.boolean(),
+	/**
+	 * Whether the header's system-prompt popover is open. It lives here, not in
+	 * `SystemPrompt`'s own `useState`, for the same reason the view does: a
+	 * contribution or a command cannot reach its host component's local state,
+	 * and the "toggle system prompt" built-in command has to open the same panel
+	 * the header button opens.
+	 */
+	systemPromptOpen: z.boolean(),
 });
 
 export type UIState = z.infer<typeof uiStateSchema>;
@@ -22,7 +30,11 @@ export type UIState = z.infer<typeof uiStateSchema>;
 /** Which top-level view the shell shows. */
 export type UIView = UIState["view"];
 
-let current: UIState = { view: "chat", palette: false };
+let current: UIState = {
+	view: "chat",
+	palette: false,
+	systemPromptOpen: false,
+};
 
 const listeners = new Set<() => void>();
 
@@ -54,6 +66,10 @@ const update = (patch: Partial<UIState>): void => {
 export const setView = (view: UIView): void => update({ view });
 
 export const setPalette = (open: boolean): void => update({ palette: open });
+
+/** Open or close the header's system-prompt popover. */
+export const setSystemPromptOpen = (open: boolean): void =>
+	update({ systemPromptOpen: open });
 
 export const useUIState = (): UIState =>
 	useSyncExternalStore(subscribe, getUIState);

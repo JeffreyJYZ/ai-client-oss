@@ -1,5 +1,5 @@
-import { useState } from "react";
 import { setSystemPrompt, useChat } from "@/state/chat";
+import { setSystemPromptOpen, useUIState } from "@/state/ui";
 
 const BUTTON =
 	"shrink-0 rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800";
@@ -13,7 +13,9 @@ const TEXTAREA =
  */
 export default function SystemPrompt() {
 	const { systemPrompt } = useChat();
-	const [open, setOpen] = useState(false);
+	// Open state is shell state, not local to this component: the "toggle system
+	// prompt" command has to open the same popover the header button does.
+	const { systemPromptOpen: open } = useUIState();
 	const hasPrompt = systemPrompt.trim() !== "";
 
 	return (
@@ -21,7 +23,7 @@ export default function SystemPrompt() {
 			<button
 				type="button"
 				aria-expanded={open}
-				onClick={() => setOpen((value) => !value)}
+				onClick={() => setSystemPromptOpen(!open)}
 				className={BUTTON}
 			>
 				System{hasPrompt ? " •" : ""}
