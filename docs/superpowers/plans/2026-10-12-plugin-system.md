@@ -4,7 +4,7 @@
 
 **Goal:** Make the app completely extensible with full-trust in-process plugins — registry-assembled UI (slots, replace, hide, order, layout takeover) over the same public API — with zod-derived types, Effect services throughout, and the app's own features re-plumbed as built-in plugins.
 
-**Architecture:** A host core of Effect services (`Context.Tag` + `Layer`, one `ManagedRuntime`) holds registries whose state is a `SubscriptionRef`; plugin lifetime is a `Scope` (one per plugin, closed = unloaded); events ride a `PubSub`; zod schemas are the single source of truth for every data type. A loader turns a manifest + one pre-built import-free ESM file into a `setup(host)` call. React reads registries through `SubscriptionRef.changes` → `useSyncExternalStore`, exactly as the existing stores do.
+**Architecture:** A host core of Effect services (`Context.Service` + `Layer`, one `ManagedRuntime`) holds registries whose state is a `SubscriptionRef`; plugin lifetime is a `Scope` (one per plugin, closed = unloaded); events ride a `PubSub`; zod schemas are the single source of truth for every data type. A loader turns a manifest + one pre-built import-free ESM file into a `setup(host)` call. React reads registries through `SubscriptionRef.changes` → `useSyncExternalStore`, exactly as the existing stores do.
 
 **Tech Stack:** TypeScript 6, React 19, Effect 4, zod 4, Tailwind v4, Vite 8, bun (`bun test`), Tauri 2 / Rust, Biome 2.5.15 + `@effect/language-service`.
 
@@ -13,14 +13,14 @@
 ## Global Constraints
 
 - **zod is the source of truth for types.** Anything persisted, parsed from disk, sent on the wire or declared by a plugin is a `z.ZodType` whose type is `z.infer`red at its definition site. Hand-written TS interfaces only for functions, Effects and Streams (registries, services, `Host`).
-- **Full Effect.** Services via `Context.Tag` + `Layer`, lifetime via `Scope`, state via `Ref`/`SubscriptionRef`, events via `PubSub`, errors via `Data.TaggedError`. No `async`, `await`, `throw`, `try`/`catch` or `new Promise` inside `web/src` (GritQL-enforced). One `decode` helper is the only place zod meets Effect.
+- **Full Effect.** Services via `Context.Service` + `Layer`, lifetime via `Scope`, state via `Ref`/`SubscriptionRef`, events via `PubSub`, errors via `Data.TaggedError`. No `async`, `await`, `throw`, `try`/`catch` or `new Promise` inside `web/src` (GritQL-enforced). One `decode` helper is the only place zod meets Effect.
 - **No new runtime dependencies.** React, zod, Effect, marked, dompurify only. The plugin build preset uses Vite (already a dependency). Zip import and publishing an SDK package are out of scope.
 - **Data compatibility is a hard requirement** (spec §13). Upgrading from a 0.2.3 install must lose nothing and need no manual step; a stored blob that fails to parse is preserved rather than replaced; every schema change ships a frozen-fixture test. A downgrade is *not* compatible — the release note tells users to export a backup first.
 - **With zero plugins enabled, rendering and behaviour are identical to today** — same components, same props, same children in the same order.
 - **Webview-only UI, dark-first**; desktop and web differ only behind source/bridge adapters (`isDesktop`), never inside the host.
 - **Gates stay green:** `bun test`, `biome check .`, `bunx effect-language-service diagnostics --project tsconfig.app.json`, `tsc -b`, `vite build`.
 - **Test files are typechecked — never excluded from a tsconfig project, never silenced.** With TypeScript 6+, `bun:test` types require the `@types/bun` devDependency **and** `"bun"` in `tsconfig.app.json`'s `types` array (bun's docs: "If you're using TypeScript 6.0 or later, you also need `\"types\": [\"bun\"]` in your `compilerOptions`"). An `exclude` of `**/*.test.ts` makes `tsc` green by checking no test at all, which is the one outcome this gate exists to prevent.
-- Where the installed Effect 4 API differs from the names used here (`Context.Tag`, `Data.TaggedError`, `SubscriptionRef`, `PubSub`, `Scope.close`), follow the installed API and keep the documented behaviour — **the tests are the contract.**
+- **Follow the installed Effect 4 API over the names this plan uses; the tests are the contract.** Deltas already hit in this run and verified against `web/node_modules/effect/dist` — do not rediscover them: it is **`Context.Service`** (Effect 4 renamed it; the plan's older text called it `Context.Tag`); there is **no `Effect.orElseFail`** (use `Effect.mapError`); **`Scope.addFinalizer(scope, effect)` takes the scope as its first argument**; the plan's `SubscriptionRef` route was **not** taken (Task 2's plan-sanctioned `Ref` + `PubSub` is what `changes` reads); a **`forkChild` fiber dies with its run**; and the effect language service **flags `Effect.runSync` used lexically inside an `Effect.gen`** (hoist it to a module-scope helper).
 - Every commit uses Conventional Commits, `git add` by explicit path, and **no measured number in a message** (test counts go stale; name the gate, not its total).
 
 ## Review Focus
@@ -179,13 +179,13 @@ describe("registry", () => {
 
 **Interfaces:**
 - Consumes: `registry.ts`, `ids.ts`, `manifest.ts`, `errors.ts`.
-- Produces: `Host` and `Plugin` types (spec §2) re-exported from `host.ts`; `makeHost(registries, pluginId, scope): Host`; `HostServices` (`Context.Tag`) carrying every registry; `HostLayer: Layer<HostServices>`; `runtime: ManagedRuntime` from `runtime.ts` for React/boot callers only.
+- Produces: `Host` and `Plugin` types (spec §2) re-exported from `host.ts`; `makeHost(registries, pluginId, scope): Host`; `HostServices` (`Context.Service`) carrying every registry; `HostLayer: Layer<HostServices>`; `runtime: ManagedRuntime` from `runtime.ts` for React/boot callers only.
 
 - [ ] **Step 1: Write the failing test** — `web/src/lib/plugins/host.test.ts`: an unknown slot id logs a `PluginFault` and does not throw; every `host.<registry>.register*` returns a `Disposable` that removes exactly its entry; `Scope.close` on the plugin's scope removes everything that plugin registered.
 
 - [ ] **Step 2: Run it and watch it fail.**
 
-- [ ] **Step 3: Implement `HostServices` + `HostLayer`** — one `Context.Tag` service holding a `Registry` per registry kind (slots/contributions, tools, providers, pipeline stages, commands, keybindings, settings sections, renderers, themes). Registries are created once in the layer's construction.
+- [ ] **Step 3: Implement `HostServices` + `HostLayer`** — one `Context.Service` service holding a `Registry` per registry kind (slots/contributions, tools, providers, pipeline stages, commands, keybindings, settings sections, renderers, themes). Registries are created once in the layer's construction.
 
 - [ ] **Step 4: Implement `makeHost`** — sync registration is `runtime.runSync(registry.add(entry))` with the finalizer added to the passed scope, and `Disposable.dispose` forks the removal. Validate slot ids against `slotIdSchema` before adding; an invalid id is `Effect.logWarning` + a `Disposable` that does nothing. Sync/Effect split per spec §2: `ui`/`commands`/`tools`/`providers`/`themes`/`renderers` are sync registries; `chat`/`db`/`storage`/`pipeline`/`on` return Effects/Streams.
 
