@@ -130,16 +130,17 @@ Rules that make the whole thing dispose cleanly:
 - **Events** are `PubSub` + `Stream.fromPubSub`, exposed as `host.on`.
 - **React bridge**: `SubscriptionRef.changes` → `useSyncExternalStore`. No new state library, and the existing stores keep working.
 - **Errors** are `Data.TaggedError`. Every function the host calls into plugin code is wrapped with `Effect.catchAllCause` → log + `PluginFault`; recovery uses `Effect.catchTag`.
-- **Concurrency**: plugins load with bounded concurrency, each `setup` in its own fiber under its own scope, with a timeout so a setup that never returns is a load failure rather than a hung boot.
-- **The zod↔Effect seam is one helper**:
+- **Concurrency**: plugins load with bounded concurrency, each under its own `Scope`, with a timeout bounding the **interruptible** load steps (reading the entry text, the dynamic import) so a stalled load is a load failure rather than a hung boot. The timeout cannot bound `setup`: JavaScript has no preemption and `setup` is invoked synchronously, so `setup` is contracted to be cheap and non-blocking — anything async belongs in an `Effect` the plugin runs or registers.
+- **The zod↔Effect seam is one helper**, shipped in `web/src/lib/plugins/effect.ts` (Effect 4 has no `orElseFail`, so the failure is mapped after `Effect.try`):
 
 ```ts
-const decode = <A>(schema: z.ZodType<A>, error: (detail: string) => PluginError) =>
+const decode =
+	<A, I>(schema: z.ZodType<A, I>, onError: (detail: string) => PluginError) =>
 	(u: unknown): Effect.Effect<A, PluginError> =>
-		Effect.orElseFail(
-			Effect.try({ try: () => schema.parse(u), catch: (cause) => String(cause) }),
-			(detail) => error(detail),
-		);
+		Effect.try({
+			try: () => schema.parse(u),
+			catch: (cause) => String(cause),
+		}).pipe(Effect.mapError(onError));
 ```
 
 - Chunk middleware composes into the stream that already exists: `lib/providers/send.ts` pipes `Stream.mapAccum` for tool-call assembly, and pipeline `onChunk` stages are `Stream.mapEffect` returning `Option<Chunk>` — a dropped chunk is `Option.none()`. No new stream machinery.
@@ -207,7 +208,7 @@ Manifest:
 }
 ```
 
-Steps: read `plugin.json` (`PluginSource`) → `decode(manifestSchema)` → version checks → read the entry text → register globals (`globalThis.__aiClient = host`, plus React and the jsx runtime) → `import(URL.createObjectURL(new Blob([source], { type: "text/javascript" })))` → `setup(host)` inside a scoped fiber with a timeout → activate.
+Steps: read `plugin.json` (`PluginSource`) → `decode(manifestSchema)` → version checks → read the entry text → register globals (`globalThis.__aiClient = host`, plus React and the jsx runtime) → `import(URL.createObjectURL(new Blob([source], { type: "text/javascript" })))` → `setup(host)` synchronously under its own `Scope` → activate. The load timeout covers the source read and the import, not `setup` (a synchronous `setup` is not preemptible).
 
 **The dependency contract, and why it is this shape.** A bundled desktop app has no module resolver for a plugin directory, and a blob module cannot resolve bare specifiers. So the entry is **one pre-built ESM file with no imports** — the Obsidian model — and the host supplies React and the API through globals set before the import. Authors still write `import { React } from "@ai-client/plugin-sdk"` in source, because `scripts/build-plugins.ts` (Vite lib mode: `external: ["react", "react/jsx-runtime"]`, `output.globals` → the host globals) rewrites it. The SDK is types plus that preset; publishing it as a package is out of scope, in-repo it is `web/src/lib/plugins/sdk.ts` re-exporting the API types and the schema-derived types.
 
@@ -261,7 +262,8 @@ Directories: `<app data>/plugins/<id>/` (source) and `<app data>/plugin-data/<id
 | Invalid manifest | listed, disabled, reason shown in the Plugins section |
 | Load failure (read/decode/import) | same, with the error text |
 | `setup` faults | logged, plugin disabled, app unaffected |
-| `setup` never returns | timeout → treated as load failure |
+| load stalls (source read / import) | timeout → treated as load failure |
+| `setup` blocks the thread | **not** detectable — no timer can fire on a blocked JS thread; `setup` is contracted synchronous and cheap (a contract, not a detected failure) |
 | Registration fault (unknown slot, bad schema) | that registration dropped, plugin keeps running |
 | Contribution render fault | React error boundary per contribution; the slot renders a fallback, the rest of the app lives |
 | Pipeline stage fault | logged, stage disabled for the session, request continues (fail-open) |
