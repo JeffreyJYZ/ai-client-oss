@@ -284,19 +284,18 @@ const foldOnHistory = (
 const stagesOf = (
 	entries: readonly RegistryEntry[],
 	kind: PipelineStageKind,
-	off: ReadonlySet<string>,
 ): readonly PipelineEntry[] =>
 	entries
-		.filter(
-			(entry): entry is PipelineEntry =>
-				isStageEntry(entry, kind) && !off.has(entry.id),
-		)
+		.filter((entry): entry is PipelineEntry => isStageEntry(entry, kind))
 		.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
 
 /**
  * A stage kind resolved against the registry once, so a caller that runs the
  * same kind many times — `onChunk` per streamed chunk, `onToolCall` per call —
- * pays the registry read, filter and sort a single time.
+ * pays the registry read, filter and sort a single time. The disabled set is
+ * still read **per call** (below), so a stage disabled by its own fault is
+ * skipped from then on within the same runner, not only at the next
+ * resolution.
  */
 export interface PipelineRunner<K extends PipelineStageKind> {
 	readonly kind: K;
@@ -307,9 +306,8 @@ export interface PipelineRunner<K extends PipelineStageKind> {
 
 /**
  * Resolve every stage of `kind` now, in order, returning a runner that folds
- * `input` through them. Reads the registry once, so a stage registered or
- * disposed mid-turn takes effect on the next resolution, and skips any stage
- * disabled by an earlier fault.
+ * `input` through the live ones. Reads the registry once, so a stage registered
+ * or disposed mid-turn takes effect on the next resolution.
  */
 export const stageRunner = <K extends PipelineStageKind>(
 	kind: K,
@@ -317,21 +315,34 @@ export const stageRunner = <K extends PipelineStageKind>(
 ): Effect.Effect<PipelineRunner<K>, never, HostServices> =>
 	Effect.gen(function* () {
 		const services = yield* HostServices;
-		const off = yield* Ref.get(disabled);
-		const stages = stagesOf(yield* services.pipeline.entries(), kind, off);
+		const stages = stagesOf(yield* services.pipeline.entries(), kind);
 		const dispatch: {
 			readonly [P in PipelineStageKind]: (
+				stages: readonly PipelineEntry[],
 				input: PipelineInputMap[P],
 			) => Effect.Effect<PipelineOutputMap[P]>;
 		} = {
-			beforeSend: (input) => foldBeforeSend(stages, input, meta),
-			transformBody: (input) => foldTransformBody(stages, input, meta),
-			onChunk: (input) => foldOnChunk(stages, input, meta),
-			afterReply: (input) => foldAfterReply(stages, input, meta),
-			onToolCall: (input) => foldOnToolCall(stages, input, meta),
-			onHistory: (input) => foldOnHistory(stages, input, meta),
+			beforeSend: (live, input) => foldBeforeSend(live, input, meta),
+			transformBody: (live, input) => foldTransformBody(live, input, meta),
+			onChunk: (live, input) => foldOnChunk(live, input, meta),
+			afterReply: (live, input) => foldAfterReply(live, input, meta),
+			onToolCall: (live, input) => foldOnToolCall(live, input, meta),
+			onHistory: (live, input) => foldOnHistory(live, input, meta),
 		};
-		return { kind, run: dispatch[kind] };
+		return {
+			kind,
+			run: (input) =>
+				Effect.gen(function* () {
+					// Per call, not per resolution: a stage disabled by its own
+					// fault is skipped for every call after it, so a faulting
+					// `onChunk` stage does not log once per remaining chunk.
+					const off = yield* Ref.get(disabled);
+					return yield* dispatch[kind](
+						stages.filter((entry) => !off.has(entry.id)),
+						input,
+					);
+				}),
+		};
 	});
 
 /**

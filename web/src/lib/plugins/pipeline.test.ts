@@ -1,4 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { emptyProviderConfig } from "@lib/db";
 import { PluginFault } from "@lib/plugins/errors";
 import {
 	HostLayer,
@@ -14,6 +15,8 @@ import {
 	run,
 	stageRunner,
 } from "@lib/plugins/pipeline";
+import type { Disposable, RegistryEntry } from "@lib/plugins/registry";
+import { runtime } from "@lib/plugins/runtime";
 import { anthropic } from "@lib/providers/anthropicMessages";
 import { chatcompletions } from "@lib/providers/chatCompletions";
 import { responses } from "@lib/providers/responses";
@@ -24,6 +27,8 @@ import type {
 	ToolCallData,
 } from "@lib/providers/types";
 import { Effect, Option, Stream } from "effect";
+import { getChat, send } from "@/state/chat";
+import { getSettings, setSettings } from "@/state/settings";
 
 /**
  * A fresh registry set per test: registrations are the subject, so a shared
@@ -463,5 +468,154 @@ describe("stageRunner", () => {
 		const fresh = await runWith(stageRunner("onChunk", meta), s);
 		const second = await Effect.runPromise(fresh.run(text("x")));
 		expect(Option.getOrThrow(second).text).toBe("x12");
+	});
+
+	test("a faulting stage is skipped for the rest of the runner's calls", async () => {
+		const s = services();
+		let consulted = 0;
+		addStage(s, {
+			id: "flaky-chunk",
+			owner: "acme",
+			kind: "onChunk",
+			run: (chunk) => {
+				consulted += 1;
+				if (chunk.text === "b") throw new Error("chunk exploded");
+				return Effect.succeed(Option.some(chunk));
+			},
+		});
+		const runner = await runWith(stageRunner("onChunk", meta), s);
+
+		const a = await Effect.runPromise(runner.run(text("a")));
+		const b = await Effect.runPromise(runner.run(text("b")));
+		const c = await Effect.runPromise(runner.run(text("c")));
+
+		// a consults it, b faults and disables it, c must not consult it again.
+		expect(consulted).toBe(2);
+		expect(Option.getOrThrow(a).text).toBe("a");
+		expect(Option.getOrThrow(b).text).toBe("b");
+		expect(Option.getOrThrow(c).text).toBe("c");
+	});
+});
+
+describe("tool-extended bodies", () => {
+	test("a tool-extended body also rebuilds to itself, for every provider", () => {
+		for (const provider of [chatcompletions, responses, anthropic]) {
+			// The three providers' methods are structurally the same but not a
+			// single callable union, so widen once.
+			const p = provider as {
+				readonly template: unknown;
+				readonly buildRequest: (send: unknown, ctx: SendCtx) => unknown;
+				readonly appendAssistant: (send: unknown, text: string) => unknown;
+				readonly appendToolResult: (
+					send: unknown,
+					call: ToolCallData,
+					result: string,
+					failed: boolean,
+				) => unknown;
+			};
+			const ctx: SendCtx = {
+				msg: "hi",
+				prev: undefined,
+				apiUrl: "https://example.com",
+				model: "the-model",
+			};
+			const transformed = {
+				...(p.buildRequest(p.template, ctx) as Record<string, unknown>),
+				temperature: 0.25,
+			};
+			const extended = p.appendToolResult(
+				p.appendAssistant(transformed, "let me"),
+				call,
+				"a result",
+				true,
+			);
+			// The turn replays the extended body as `prev`; the provider's
+			// rebuild must be the identity or the sent and stored bodies drift.
+			const resent = p.buildRequest(extended, {
+				...ctx,
+				skipUserMessage: true,
+			});
+			expect(resent).toEqual(extended);
+			expect((resent as { temperature?: number }).temperature).toBe(0.25);
+		}
+	});
+});
+
+describe("beforeSend abort", () => {
+	const protocol = "t12-abort-protocol";
+
+	/**
+	 * The real `chatcompletions` provider with a non-streaming `send`: the
+	 * veto fires before any request, but its `appendAssistant` — which reads
+	 * `send.messages` — is the strict one the finalizer must satisfy.
+	 */
+	const abortProvider = {
+		...chatcompletions,
+		send: () => Effect.succeed(Stream.empty),
+	};
+
+	const addToRuntime = (
+		add: (
+			services: HostServicesShape,
+		) => Effect.Effect<Disposable, never, HostServices>,
+	): Disposable => runtime.runSync(Effect.flatMap(HostServices, add));
+
+	const waitFor = async <A>(
+		probe: () => A | undefined,
+		timeoutMs = 2000,
+	): Promise<A> => {
+		const deadline = Date.now() + timeoutMs;
+		for (;;) {
+			const value = probe();
+			if (value !== undefined) return value;
+			if (Date.now() > deadline) throw new Error("timed out");
+			await Bun.sleep(5);
+		}
+	};
+
+	test("a beforeSend veto reaches finalize: an error row lands and the turn ends", async () => {
+		const providerHandle = addToRuntime((services) =>
+			services.providers.add({
+				id: protocol,
+				owner: "t12",
+				...abortProvider,
+			} as unknown as RegistryEntry),
+		);
+		const stageHandle = addToRuntime((services) =>
+			services.pipeline.add({
+				id: "veto-abort",
+				owner: "t12",
+				kind: "beforeSend",
+				run: () => Effect.succeed(Option.none<SendCtx>()),
+			} as unknown as RegistryEntry),
+		);
+		const before = getSettings();
+		setSettings({
+			providers: [{ ...emptyProviderConfig("t12-provider"), protocol }],
+			activeProviderId: "t12-provider",
+		});
+		try {
+			send("please abort", []);
+			const snapshot = await waitFor(() => {
+				const current = getChat();
+				// `finalize` is the only writer of `status = "idle"` after a
+				// turn, and it clears `activeFiber` on the same path.
+				return current.status === "idle" &&
+					current.messages.some((message) => message.role === "error")
+					? current
+					: undefined;
+			});
+			const error = snapshot.messages.at(-1);
+			expect(error?.role).toBe("error");
+			expect(error?.text).toContain("aborted");
+			expect(snapshot.status).toBe("idle");
+		} finally {
+			stageHandle.dispose();
+			providerHandle.dispose();
+			setSettings({
+				providers: before.providers,
+				activeProviderId: before.activeProviderId,
+			});
+		}
 	});
 });

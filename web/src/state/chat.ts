@@ -511,8 +511,14 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	 * with `skipUserMessage` (it already carries the user message). The tool
 	 * loop extends this same body, so what the provider sends and what
 	 * `finalize` stores are one body — they cannot drift.
+	 *
+	 * Seeded with the provider's template, never left undefined: a `beforeSend`
+	 * veto fails the turn *before* the body is composed, and the finalizer still
+	 * hands it to `appendAssistant`. `finalize` ignores the body on a failed
+	 * turn, but the appender reads it — an unset `wire` would throw there, so
+	 * `finalize` would never run and `status`/`activeFiber` would be stranded.
 	 */
-	let wire: unknown;
+	let wire: unknown = provider.template;
 	/** Where the final round's text starts in `raw`: its slice is
 	 * the reply that seeds the next turn. */
 	let finalTextStart = 0;
