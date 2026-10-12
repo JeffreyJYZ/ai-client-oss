@@ -13,6 +13,9 @@ dist-ssr
 *.local
 .vercel
 
+# Built plugins (scripts/build-plugins.ts) — build products, not source.
+public/plugins/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

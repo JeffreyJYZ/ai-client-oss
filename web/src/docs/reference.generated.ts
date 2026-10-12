@@ -10,11 +10,109 @@ export const reference: DocReference = {
 	"appVersion": "0.2.3",
 	"modules": [
 		{
-			"path": "src/lib/plugins/host.ts",
-			"label": "Host API",
-			"summary": "The `Host` object a plugin's `setup` receives — the app and API versions, and one registry per kind.",
+			"path": "src/lib/plugins/sdk.ts",
+			"label": "Plugin SDK",
+			"summary": "The single module a plugin imports: the API types and the schema-derived types, re-exported.",
 			"status": "documented",
 			"symbols": [
+				{
+					"name": "commandSchema",
+					"kind": "const",
+					"signature": "export const commandSchema = z.object({ … });",
+					"description": "A command as a plugin declares it (spec §1: zod is the source of truth). The value is plugin-supplied, untyped JavaScript at this boundary, so it is validated before it is stored rather than trusted.",
+					"members": []
+				},
+				{
+					"name": "CommandDefinition",
+					"kind": "type",
+					"signature": "export type CommandDefinition = z.infer<typeof commandSchema>;",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "Command",
+					"kind": "type",
+					"signature": "export type Command = CommandDefinition & { readonly owner: string };",
+					"description": "A stored command: the definition plus the plugin that owns it. `owner` is stamped by the host, never by the registrar's caller.",
+					"members": []
+				},
+				{
+					"name": "normaliseKeybinding",
+					"kind": "const",
+					"signature": "export const normaliseKeybinding = (binding: string): string => …",
+					"description": "The one canonical form of a keybinding: lowercased, modifiers folded to `mod`/`shift`/`alt`, ordered modifiers first. Both a registered binding and a live event go through this, so the two can only agree or differ.",
+					"members": []
+				},
+				{
+					"name": "matchKeybinding",
+					"kind": "const",
+					"signature": "export const matchKeybinding = (event: KeyboardEvent): Option.Option<string> => …",
+					"description": "The canonical keybinding one keydown event represents (spec §5), or `none` when the event is not a binding: a keystroke typed into an `<input>`, `<textarea>` or contentEditable surface, or a modifier pressed alone. It is a pure function of the event — the caller pairs it with `resolveKeybinding`.",
+					"members": []
+				},
+				{
+					"name": "registerCommand",
+					"kind": "const",
+					"signature": "export const registerCommand = (host: Host, definition: CommandDefinition, pluginId?: string): Disposable => …",
+					"description": "Register `command` through `host` (spec §5). A duplicate id is handed to the registry, whose own rule is replace-in-place plus a warning — later wins, which is what a command wants. A keybinding already bound by another command logs the same warning here; the later one wins because `resolveKeybinding` takes the last match in registration order.",
+					"members": []
+				},
+				{
+					"name": "listCommands",
+					"kind": "const",
+					"signature": "export const listCommands = (): Effect.Effect< readonly Command[], never, HostServices > => …",
+					"description": "Every registered command, in resolution order.",
+					"members": []
+				},
+				{
+					"name": "resolveCommand",
+					"kind": "const",
+					"signature": "export const resolveCommand = (id: string): Effect.Effect<Option.Option<Command>, never, HostServices> => …",
+					"description": "The registered command called `id`, or `none`.",
+					"members": []
+				},
+				{
+					"name": "resolveKeybinding",
+					"kind": "const",
+					"signature": "export const resolveKeybinding = (binding: string): Effect.Effect<Option.Option<string>, never, HostServices> => …",
+					"description": "The id of the command bound to `binding`, or `none`.",
+					"members": []
+				},
+				{
+					"name": "runCommand",
+					"kind": "const",
+					"signature": "export const runCommand = (id: string): Effect.Effect<void, never, HostServices> => …",
+					"description": "Run the command called `id` (spec §5). A missing id is a logged warning, and a command that throws is caught here and logged, so one plugin's broken command cannot take the key handler or the palette down with it.",
+					"members": []
+				},
+				{
+					"name": "filterCommands",
+					"kind": "const",
+					"signature": "export const filterCommands = (commands: readonly Command[], query: string): readonly Command[] => …",
+					"description": "The commands matching a palette query: a case-insensitive substring of the title or the id, with an empty query listing everything. Pure, so the palette's filtering is testable without a DOM.",
+					"members": []
+				},
+				{
+					"name": "getCommandsSnapshot",
+					"kind": "const",
+					"signature": "export const getCommandsSnapshot = (): readonly Command[] => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "subscribeCommands",
+					"kind": "const",
+					"signature": "export const subscribeCommands = (listener: () => void): (() => void) => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "installCommandBridge",
+					"kind": "const",
+					"signature": "export const installCommandBridge = (): void => …",
+					"description": "Fold the `commands` registry into the snapshot above, once per app. Seeded synchronously so the first palette render already sees every built-in, then kept in step by the registry's `changes` stream. Idempotent because React StrictMode mounts effects twice in development.",
+					"members": []
+				},
 				{
 					"name": "pluginApiVersion",
 					"kind": "const",
@@ -124,65 +222,7 @@ export const reference: DocReference = {
 					"signature": "export const HostLayer: Layer.Layer<HostServices>;",
 					"description": "The host service layer (spec §3): the app version is resolved here, once, and every registry is created here, once, so the runtime that consumes this layer is the one place registries come from.",
 					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/manifest.ts",
-			"label": "Manifest",
-			"summary": "`plugin.json` and the per-plugin persisted state, both decoded with zod.",
-			"status": "documented",
-			"symbols": [
-				{
-					"name": "manifestSchema",
-					"kind": "const",
-					"signature": "export const manifestSchema = z.object({ … });",
-					"description": "`plugin.json` — the only thing parsed from disk (spec §6). Identity and version are non-empty strings; the loader checks `apiVersion`'s major and `engines.app` separately (spec §10), so they stay plain strings here. Defaults make a manifest minimal: only `id`, `name`, `version` and `apiVersion` are required.",
-					"members": []
 				},
-				{
-					"name": "PluginManifest",
-					"kind": "type",
-					"signature": "export type PluginManifest = z.infer<typeof manifestSchema>;",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "pluginStateSchema",
-					"kind": "const",
-					"signature": "export const pluginStateSchema = z.object({ … });",
-					"description": "Per-plugin persisted state, nested in `Settings` (spec §8). `capabilities` is a plain string list — it records what the manifest declared at enable time for display, and is never re-validated here. `data` is the plugin's own storage, so later tasks can write whatever shape they need without a schema change.",
-					"members": []
-				},
-				{
-					"name": "PluginState",
-					"kind": "type",
-					"signature": "export type PluginState = z.infer<typeof pluginStateSchema>;",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "PLUGIN_DATA_MAX_BYTES",
-					"kind": "const",
-					"signature": "export const PLUGIN_DATA_MAX_BYTES = 64 * 1024;",
-					"description": "Per-plugin ceiling, in bytes, for `pluginStateSchema.data`. A full-trust plugin's `data` rides `settings.json` and every backup, so one plugin must not be able to balloon either to unusable size (spec §13, \"Plugin-owned data\"). Measured on the JSON-serialised value — the bytes actually persisted.",
-					"members": []
-				},
-				{
-					"name": "pluginDataWithinCap",
-					"kind": "const",
-					"signature": "export const pluginDataWithinCap = (data: unknown): boolean => …",
-					"description": "Whether a plugin's `data` is within {@link PLUGIN_DATA_MAX_BYTES}. Pure. The storage service (Task 16) must call this on the write path and reject a write that returns false; it is a guard, not a schema constraint, because `pluginStateSchema.data` stays an open record. A value that serialises to UTF-8 beyond the cap (or to nothing at all) is out of bounds.",
-					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/ids.ts",
-			"label": "Identifiers",
-			"summary": "The slot, capability and event unions — the slot map's source of truth.",
-			"status": "documented",
-			"symbols": [
 				{
 					"name": "slotIds",
 					"kind": "const",
@@ -245,483 +285,49 @@ export const reference: DocReference = {
 					"signature": "export type HostEvent = z.infer<typeof hostEventSchema>;",
 					"description": "",
 					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/tools.ts",
-			"label": "Tools",
-			"summary": "Model-callable tools: the declaration sent on the wire, the registry lookup and execution.",
-			"status": "documented",
-			"symbols": [
+				},
 				{
-					"name": "toolDeclarationSchema",
+					"name": "manifestSchema",
 					"kind": "const",
-					"signature": "export const toolDeclarationSchema = z.object({ … });",
-					"description": "A tool's wire declaration (spec §1): what the model is told it may call. The `parameters` half is JSON Schema, sent verbatim, so it stays `unknown`-valued here rather than being re-modelled.",
+					"signature": "export const manifestSchema = z.object({ … });",
+					"description": "`plugin.json` — the only thing parsed from disk (spec §6). Identity and version are non-empty strings; the loader checks `apiVersion`'s major and `engines.app` separately (spec §10), so they stay plain strings here. Defaults make a manifest minimal: only `id`, `name`, `version` and `apiVersion` are required.",
 					"members": []
 				},
 				{
-					"name": "ToolDeclaration",
+					"name": "PluginManifest",
 					"kind": "type",
-					"signature": "export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;",
+					"signature": "export type PluginManifest = z.infer<typeof manifestSchema>;",
 					"description": "",
 					"members": []
 				},
 				{
-					"name": "ToolExecCtx",
-					"kind": "interface",
-					"signature": "export interface ToolExecCtx { readonly tinyfishApiKey?: string; }",
-					"description": "What a tool execution needs from the turn it runs in (spec §5). Today that is the TinyFish key, which backs both the client-side search and the fetch-first route; a tool that needs nothing simply ignores the argument.",
-					"members": [
-						"tinyfishApiKey"
-					]
-				},
-				{
-					"name": "ToolOutcome",
-					"kind": "interface",
-					"signature": "export interface ToolOutcome { readonly result: string; readonly marker: string; readonly failed: boolean; readonly input: unknown; }",
-					"description": "One executed tool call (spec §5): the text the model reads, the marker the transcript shows for it, whether it failed, and the call's arguments parsed to a value (the loop writes them back into the replayed wire body).",
-					"members": [
-						"result",
-						"marker",
-						"failed",
-						"input"
-					]
-				},
-				{
-					"name": "Tool",
-					"kind": "interface",
-					"signature": "export interface Tool { readonly declaration: ToolDeclaration; readonly execute: ( input: unknown, ctx: ToolExecCtx, ) => Effect.Effect<ToolOutcome>; }",
-					"description": "A tool as a plugin declares it: the wire declaration plus the executor.",
-					"members": [
-						"declaration",
-						"execute"
-					]
-				},
-				{
-					"name": "ToolEntry",
-					"kind": "interface",
-					"signature": "export interface ToolEntry extends RegistryEntry, Tool {}",
-					"description": "The entry a `Tool` is stored as (spec §2): `RegistryEntry`'s identity and ownership plus the tool's own fields. `id` is the declaration's wire name, so a call resolves by name and registration order is resolution order.",
-					"members": []
-				},
-				{
-					"name": "registerTool",
+					"name": "pluginStateSchema",
 					"kind": "const",
-					"signature": "export const registerTool = (host: Host, tool: Tool, pluginId?: string): Disposable => …",
-					"description": "Register `tool` through `host`, first wins (spec §5).",
+					"signature": "export const pluginStateSchema = z.object({ … });",
+					"description": "Per-plugin persisted state, nested in `Settings` (spec §8). `capabilities` is a plain string list — it records what the manifest declared at enable time for display, and is never re-validated here. `data` is the plugin's own storage, so later tasks can write whatever shape they need without a schema change.",
 					"members": []
 				},
 				{
-					"name": "resolveTool",
-					"kind": "const",
-					"signature": "export const resolveTool = (name: string): Effect.Effect<Option.Option<Tool>, never, HostServices> => …",
-					"description": "The registered tool called `name`, or `none`.",
-					"members": []
-				},
-				{
-					"name": "executeTool",
-					"kind": "const",
-					"signature": "export const executeTool = (name: string, call: ToolCallData, ctx: ToolExecCtx = ambientExecCtx()): Effect.Effect<ToolOutcome, never, HostServices> => …",
-					"description": "Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown name used to fall through into the fetch path, which existed only because there were two tools and no registry; with a registry a miss is its own case and fails with its own sentence. The invariant is preserved — a string result either way, never an exception out of the loop.",
-					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/providers.ts",
-			"label": "Providers",
-			"summary": "The wire protocols the chat loop can send a turn through.",
-			"status": "documented",
-			"symbols": [
-				{
-					"name": "AnyProvider",
+					"name": "PluginState",
 					"kind": "type",
-					"signature": "export type AnyProvider = Provider<any>;",
-					"description": "The contract with its wire-body type erased. `Send` is existential across the registry — one collection holds `responses`, `chatcompletions` and a plugin's own body type — and `Provider<Send>` is invariant in `Send` (each member takes `Send` as a parameter), so no single `Send` type can hold all three. Callers that need the concrete body re-narrow, exactly as `state/chat.ts` already does.",
-					"members": []
-				},
-				{
-					"name": "ProviderEntry",
-					"kind": "type",
-					"signature": "export type ProviderEntry = RegistryEntry & AnyProvider;",
-					"description": "The entry a provider is stored as (spec §2): `RegistryEntry`'s identity and ownership plus the protocol contract. `id` is the wire name, so a provider resolves by name and registration order is resolution order.",
-					"members": []
-				},
-				{
-					"name": "registerProvider",
-					"kind": "const",
-					"signature": "export const registerProvider = (host: Host, name: string, provider: AnyProvider, pluginId?: string): Disposable => …",
-					"description": "Register `provider` under `name` through `host`, first wins (spec §5) — the same rule the tool registry follows.",
-					"members": []
-				},
-				{
-					"name": "resolveProvider",
-					"kind": "const",
-					"signature": "export const resolveProvider = (name: string): Effect.Effect<Option.Option<AnyProvider>, never, HostServices> => …",
-					"description": "The protocol registered as `name`, or `none` (spec §5). `SendMsg` maps `none` to a failed turn, so a caller never dereferences an absent provider — the `TypeError` on `undefined.send` the old static lookup could produce.",
-					"members": []
-				},
-				{
-					"name": "listProtocols",
-					"kind": "const",
-					"signature": "export const listProtocols = (): Effect.Effect< readonly string[], never, HostServices > => …",
-					"description": "Every registered protocol name, in resolution order (spec §5). The registry is the only source: a plugin's protocol is listed without any page knowing its name.",
-					"members": []
-				},
-				{
-					"name": "resolveProviderSync",
-					"kind": "const",
-					"signature": "export const resolveProviderSync = (name: string): Option.Option<AnyProvider> => …",
-					"description": "{@link resolveProvider} read synchronously off the app's one runtime.",
-					"members": []
-				},
-				{
-					"name": "protocolNames",
-					"kind": "const",
-					"signature": "export const protocolNames = (): readonly string[] => …",
-					"description": "The registered protocol names, read synchronously (see {@link resolveProviderSync}).",
-					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/pipeline.ts",
-			"label": "Pipeline",
-			"summary": "Ordered middleware stages around a request and its streamed reply.",
-			"status": "documented",
-			"symbols": [
-				{
-					"name": "PipelineStageKind",
-					"kind": "type",
-					"signature": "export type PipelineStageKind = | \"beforeSend\" | \"transformBody\" | \"onChunk\" | \"afterReply\" | \"onToolCall\" | \"onHistory\";",
-					"description": "The six stages, in the order spec §5's table lists them.",
-					"members": []
-				},
-				{
-					"name": "PipelineMeta",
-					"kind": "interface",
-					"signature": "export interface PipelineMeta { readonly conversationId: string; readonly protocol: string; }",
-					"description": "The turn a stage is running in: what names it to a plugin that keys its own state per conversation or per protocol. The stage's own value rides as the first argument, not here.",
-					"members": [
-						"conversationId",
-						"protocol"
-					]
-				},
-				{
-					"name": "ToolCallDecision",
-					"kind": "interface",
-					"signature": "export interface ToolCallDecision { readonly allow: boolean; readonly rewrite?: ToolCallData; }",
-					"description": "`onToolCall`'s answer: veto the call, and/or rewrite it (spec §5).",
-					"members": [
-						"allow",
-						"rewrite"
-					]
-				},
-				{
-					"name": "PipelineInputMap",
-					"kind": "interface",
-					"signature": "export interface PipelineInputMap { readonly beforeSend: SendCtx; readonly transformBody: unknown; readonly onChunk: Chunk; readonly afterReply: string; readonly onToolCall: ToolCallData; readonly onHistory: readonly HistoryTurn[]; }",
-					"description": "What each stage receives: one entry per kind, so `run` stays typed.",
-					"members": [
-						"beforeSend",
-						"transformBody",
-						"onChunk",
-						"afterReply",
-						"onToolCall",
-						"onHistory"
-					]
-				},
-				{
-					"name": "PipelineOutputMap",
-					"kind": "interface",
-					"signature": "export interface PipelineOutputMap { readonly beforeSend: Option.Option<SendCtx>; readonly transformBody: unknown; readonly onChunk: Option.Option<Chunk>; readonly afterReply: string; readonly onToolCall: ToolCallDecision; readonly onHistory: readonly HistoryTurn[]; }",
-					"description": "What each stage returns. `Option.none()` in `beforeSend` aborts the turn; in `onChunk` it drops that one chunk (the stream still terminates).",
-					"members": [
-						"beforeSend",
-						"transformBody",
-						"onChunk",
-						"afterReply",
-						"onToolCall",
-						"onHistory"
-					]
-				},
-				{
-					"name": "PipelineStageMap",
-					"kind": "type",
-					"signature": "export type PipelineStageMap = { readonly [K in PipelineStageKind]: ( input: PipelineInputMap[K], meta: PipelineMeta, ) => Effect.Effect<PipelineOutputMap[K]>; };",
-					"description": "One stage contract per kind (spec §5).",
-					"members": []
-				},
-				{
-					"name": "PipelineStage",
-					"kind": "interface",
-					"signature": "export interface PipelineStage< K extends PipelineStageKind = PipelineStageKind, > { readonly kind: K; readonly run: PipelineStageMap[K]; }",
-					"description": "A plugin's contribution to one stage kind (spec §5).",
-					"members": [
-						"kind",
-						"run"
-					]
-				},
-				{
-					"name": "PipelineEntry",
-					"kind": "interface",
-					"signature": "export interface PipelineEntry extends RegistryEntry { readonly kind: PipelineStageKind; readonly run: PipelineStageMap[PipelineStageKind]; }",
-					"description": "The entry a stage is stored as: `RegistryEntry`'s identity, ownership and sort keys plus the stage's kind and function.",
-					"members": [
-						"kind",
-						"run"
-					]
-				},
-				{
-					"name": "PipelineRunner",
-					"kind": "interface",
-					"signature": "export interface PipelineRunner<K extends PipelineStageKind> { readonly kind: K; readonly run: ( input: PipelineInputMap[K], ) => Effect.Effect<PipelineOutputMap[K]>; }",
-					"description": "A stage kind resolved against the registry once, so a caller that runs the same kind many times — `onChunk` per streamed chunk, `onToolCall` per call — pays the registry read, filter and sort a single time.",
-					"members": [
-						"kind",
-						"run"
-					]
-				},
-				{
-					"name": "stageRunner",
-					"kind": "const",
-					"signature": "export const stageRunner = <K extends PipelineStageKind>(kind: K, meta: PipelineMeta): Effect.Effect<PipelineRunner<K>, never, HostServices> => …",
-					"description": "Resolve every stage of `kind` now, in order, returning a runner that folds `input` through them. Reads the registry once, so a stage registered or disposed mid-turn takes effect on the next resolution, and skips any stage disabled by an earlier fault.",
-					"members": []
-				},
-				{
-					"name": "run",
-					"kind": "const",
-					"signature": "export const run = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): Effect.Effect<PipelineOutputMap[K], never, HostServices> => …",
-					"description": "Run every stage of `kind` over `input`, in resolution order. A one-shot convenience over {@link stageRunner} for the sites that run a kind once; a loop should hold a {@link stageRunner} instead.",
-					"members": []
-				},
-				{
-					"name": "composeTurnBody",
-					"kind": "const",
-					"signature": "export const composeTurnBody = <Send>(build: (send: Send, ctx: SendCtx) => unknown, base: Send, ctx: SendCtx, meta: PipelineMeta): Effect.Effect<unknown, never, HostServices> => …",
-					"description": "Compose a turn's one outgoing body: the provider's own `buildRequest` over `base`, then `transformBody` over the built body (spec §5).",
-					"members": []
-				},
-				{
-					"name": "ResolvedToolCall",
-					"kind": "interface",
-					"signature": "export interface ResolvedToolCall { readonly call: ToolCallData; readonly execute: boolean; }",
-					"description": "The call an `onToolCall` decision resolves to, and whether it executes.",
-					"members": [
-						"call",
-						"execute"
-					]
-				},
-				{
-					"name": "resolveToolCall",
-					"kind": "const",
-					"signature": "export const resolveToolCall = (call: ToolCallData, decision: ToolCallDecision): ResolvedToolCall => …",
-					"description": "Project an `onToolCall` decision onto the call the loop acts on (spec §5). A declined call is still returned — never dropped — so the loop always appends a matching result and the replayed body carries no `tool_call` without one. A rewrite keeps the original `id`/`key` for that correlation.",
-					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/commands.ts",
-			"label": "Commands",
-			"summary": "Commands and keybindings for the command palette.",
-			"status": "documented",
-			"symbols": [
-				{
-					"name": "commandSchema",
-					"kind": "const",
-					"signature": "export const commandSchema = z.object({ … });",
-					"description": "A command as a plugin declares it (spec §1: zod is the source of truth). The value is plugin-supplied, untyped JavaScript at this boundary, so it is validated before it is stored rather than trusted.",
-					"members": []
-				},
-				{
-					"name": "CommandDefinition",
-					"kind": "type",
-					"signature": "export type CommandDefinition = z.infer<typeof commandSchema>;",
+					"signature": "export type PluginState = z.infer<typeof pluginStateSchema>;",
 					"description": "",
 					"members": []
 				},
 				{
-					"name": "Command",
-					"kind": "type",
-					"signature": "export type Command = CommandDefinition & { readonly owner: string };",
-					"description": "A stored command: the definition plus the plugin that owns it. `owner` is stamped by the host, never by the registrar's caller.",
-					"members": []
-				},
-				{
-					"name": "normaliseKeybinding",
+					"name": "PLUGIN_DATA_MAX_BYTES",
 					"kind": "const",
-					"signature": "export const normaliseKeybinding = (binding: string): string => …",
-					"description": "The one canonical form of a keybinding: lowercased, modifiers folded to `mod`/`shift`/`alt`, ordered modifiers first. Both a registered binding and a live event go through this, so the two can only agree or differ.",
+					"signature": "export const PLUGIN_DATA_MAX_BYTES = 64 * 1024;",
+					"description": "Per-plugin ceiling, in bytes, for `pluginStateSchema.data`. A full-trust plugin's `data` rides `settings.json` and every backup, so one plugin must not be able to balloon either to unusable size (spec §13, \"Plugin-owned data\"). Measured on the JSON-serialised value — the bytes actually persisted.",
 					"members": []
 				},
 				{
-					"name": "matchKeybinding",
+					"name": "pluginDataWithinCap",
 					"kind": "const",
-					"signature": "export const matchKeybinding = (event: KeyboardEvent): Option.Option<string> => …",
-					"description": "The canonical keybinding one keydown event represents (spec §5), or `none` when the event is not a binding: a keystroke typed into an `<input>`, `<textarea>` or contentEditable surface, or a modifier pressed alone. It is a pure function of the event — the caller pairs it with `resolveKeybinding`.",
+					"signature": "export const pluginDataWithinCap = (data: unknown): boolean => …",
+					"description": "Whether a plugin's `data` is within {@link PLUGIN_DATA_MAX_BYTES}. Pure. The storage service (Task 16) must call this on the write path and reject a write that returns false; it is a guard, not a schema constraint, because `pluginStateSchema.data` stays an open record. A value that serialises to UTF-8 beyond the cap (or to nothing at all) is out of bounds.",
 					"members": []
 				},
-				{
-					"name": "registerCommand",
-					"kind": "const",
-					"signature": "export const registerCommand = (host: Host, definition: CommandDefinition, pluginId?: string): Disposable => …",
-					"description": "Register `command` through `host` (spec §5). A duplicate id is handed to the registry, whose own rule is replace-in-place plus a warning — later wins, which is what a command wants. A keybinding already bound by another command logs the same warning here; the later one wins because `resolveKeybinding` takes the last match in registration order.",
-					"members": []
-				},
-				{
-					"name": "listCommands",
-					"kind": "const",
-					"signature": "export const listCommands = (): Effect.Effect< readonly Command[], never, HostServices > => …",
-					"description": "Every registered command, in resolution order.",
-					"members": []
-				},
-				{
-					"name": "resolveCommand",
-					"kind": "const",
-					"signature": "export const resolveCommand = (id: string): Effect.Effect<Option.Option<Command>, never, HostServices> => …",
-					"description": "The registered command called `id`, or `none`.",
-					"members": []
-				},
-				{
-					"name": "resolveKeybinding",
-					"kind": "const",
-					"signature": "export const resolveKeybinding = (binding: string): Effect.Effect<Option.Option<string>, never, HostServices> => …",
-					"description": "The id of the command bound to `binding`, or `none`.",
-					"members": []
-				},
-				{
-					"name": "runCommand",
-					"kind": "const",
-					"signature": "export const runCommand = (id: string): Effect.Effect<void, never, HostServices> => …",
-					"description": "Run the command called `id` (spec §5). A missing id is a logged warning, and a command that throws is caught here and logged, so one plugin's broken command cannot take the key handler or the palette down with it.",
-					"members": []
-				},
-				{
-					"name": "filterCommands",
-					"kind": "const",
-					"signature": "export const filterCommands = (commands: readonly Command[], query: string): readonly Command[] => …",
-					"description": "The commands matching a palette query: a case-insensitive substring of the title or the id, with an empty query listing everything. Pure, so the palette's filtering is testable without a DOM.",
-					"members": []
-				},
-				{
-					"name": "getCommandsSnapshot",
-					"kind": "const",
-					"signature": "export const getCommandsSnapshot = (): readonly Command[] => …",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "subscribeCommands",
-					"kind": "const",
-					"signature": "export const subscribeCommands = (listener: () => void): (() => void) => …",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "installCommandBridge",
-					"kind": "const",
-					"signature": "export const installCommandBridge = (): void => …",
-					"description": "Fold the `commands` registry into the snapshot above, once per app. Seeded synchronously so the first palette render already sees every built-in, then kept in step by the registry's `changes` stream. Idempotent because React StrictMode mounts effects twice in development.",
-					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/themes.ts",
-			"label": "Themes",
-			"summary": "Theme variables and one optional stylesheet, applied to the document root.",
-			"status": "documented",
-			"symbols": [
-				{
-					"name": "ThemeDom",
-					"kind": "interface",
-					"signature": "export interface ThemeDom { readonly setVariable: (name: string, value: string) => void; readonly removeVariable: (name: string) => void; /** Replace the one stylesheet; `undefined` removes it (defaults restored). */ readonly setStyleSheet: (css: string | undefined) => void; /** Record the active theme's id on the root, or clear it. */ readonly setActiveId: (id: string | undefined) => void; }",
-					"description": "The DOM the service reads and writes: the root element's custom properties, the one stylesheet it owns, and the marker of the active theme. It is a seam because bun's test environment has no DOM — the rules are asserted against a recorded {@link ThemeDom}, while the real element path ({@link browserThemeDom}) is deliberately tiny and proven in a browser.",
-					"members": [
-						"setVariable",
-						"removeVariable",
-						"setStyleSheet",
-						"setActiveId"
-					]
-				},
-				{
-					"name": "browserThemeDom",
-					"kind": "const",
-					"signature": "export const browserThemeDom = (): ThemeDom => …",
-					"description": "The real DOM adapter. One element, found by {@link STYLE_ELEMENT_ID} and reused, so a switch replaces the stylesheet rather than appending a second; `undefined` removes it, which is what restores the `:root` defaults.",
-					"members": []
-				},
-				{
-					"name": "ThemeContribution",
-					"kind": "interface",
-					"signature": "export interface ThemeContribution extends RegistryEntry { readonly name: string; readonly variables: Readonly<Record<string, string>>; /** Extra rules the variables cannot express; replaced on switch. */ readonly css?: string; }",
-					"description": "One theme contribution, as stored in the `themes` registry. The registry's own type is the untyped `RegistryEntry` (spec §2's uniform registry), so the theme's data half rides the entry and the service narrows on read.",
-					"members": [
-						"name",
-						"variables",
-						"css"
-					]
-				},
-				{
-					"name": "ThemeDefinition",
-					"kind": "type",
-					"signature": "export type ThemeDefinition = Omit<ThemeContribution, \"owner\">;",
-					"description": "A theme as an author writes one: identity and data, no owner plumbing.",
-					"members": []
-				},
-				{
-					"name": "ThemeService",
-					"kind": "interface",
-					"signature": "export interface ThemeService { /** Register a theme; disposing the handle unregisters it. */ readonly register: (theme: ThemeDefinition) => Disposable; /** Apply a registered theme by id. An unknown id leaves the defaults on. */ readonly apply: (id: string) => Effect.Effect<void>; /** The active theme's id, or `Option.none()` when the defaults are in force. */ readonly active: () => Effect.Effect<Option.Option<string>>; /** Reconcile with one registry snapshot: drop an active theme that is gone. */ readonly sync: (entries: readonly RegistryEntry[]) => Effect.Effect<void>; /** Reconcile on every registry change; fork this for the plugin-unload path. */ readonly run: () => Effect.Effect<void>; }",
-					"description": "The theme registry a plugin drives (spec §5).",
-					"members": [
-						"register",
-						"apply",
-						"active",
-						"sync",
-						"run"
-					]
-				},
-				{
-					"name": "makeThemeService",
-					"kind": "const",
-					"signature": "export const makeThemeService = (themes: HostRegistry<RegistryEntry>, dom: ThemeDom = browserThemeDom()): ThemeService => …",
-					"description": "The theme service over one registry (spec §3's `ThemeRegistry`). The applied state is the DOM's — there is one `documentElement` — so the service keeps only which theme it put there, and every method that touches it is an `Effect.sync`.",
-					"members": []
-				},
-				{
-					"name": "setAppThemeService",
-					"kind": "const",
-					"signature": "export const setAppThemeService = (service: ThemeService): void => …",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "applyTheme",
-					"kind": "const",
-					"signature": "export const applyTheme = (id: string): Effect.Effect<void> => …",
-					"description": "Apply a theme by id (spec §5).",
-					"members": []
-				},
-				{
-					"name": "activeTheme",
-					"kind": "const",
-					"signature": "export const activeTheme = (): Effect.Effect<Option.Option<string>> => …",
-					"description": "The active theme's id, or `Option.none()` when the defaults are in force.",
-					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/notify.ts",
-			"label": "Notifications",
-			"summary": "Toasts, banners, confirms and modals, rendered by host components so they match the app.",
-			"status": "documented",
-			"symbols": [
 				{
 					"name": "DEFAULT_TOAST_TTL",
 					"kind": "const",
@@ -936,15 +542,186 @@ export const reference: DocReference = {
 					"signature": "export const useOverlay = (): OverlayState => …",
 					"description": "The overlay state, re-rendering on every change (the toast/modal region).",
 					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/renderers.ts",
-			"label": "Renderers",
-			"summary": "Replacements for the message, markdown, marker and reasoning renderers.",
-			"status": "documented",
-			"symbols": [
+				},
+				{
+					"name": "PipelineStageKind",
+					"kind": "type",
+					"signature": "export type PipelineStageKind = | \"beforeSend\" | \"transformBody\" | \"onChunk\" | \"afterReply\" | \"onToolCall\" | \"onHistory\";",
+					"description": "The six stages, in the order spec §5's table lists them.",
+					"members": []
+				},
+				{
+					"name": "PipelineMeta",
+					"kind": "interface",
+					"signature": "export interface PipelineMeta { readonly conversationId: string; readonly protocol: string; }",
+					"description": "The turn a stage is running in: what names it to a plugin that keys its own state per conversation or per protocol. The stage's own value rides as the first argument, not here.",
+					"members": [
+						"conversationId",
+						"protocol"
+					]
+				},
+				{
+					"name": "ToolCallDecision",
+					"kind": "interface",
+					"signature": "export interface ToolCallDecision { readonly allow: boolean; readonly rewrite?: ToolCallData; }",
+					"description": "`onToolCall`'s answer: veto the call, and/or rewrite it (spec §5).",
+					"members": [
+						"allow",
+						"rewrite"
+					]
+				},
+				{
+					"name": "PipelineInputMap",
+					"kind": "interface",
+					"signature": "export interface PipelineInputMap { readonly beforeSend: SendCtx; readonly transformBody: unknown; readonly onChunk: Chunk; readonly afterReply: string; readonly onToolCall: ToolCallData; readonly onHistory: readonly HistoryTurn[]; }",
+					"description": "What each stage receives: one entry per kind, so `run` stays typed.",
+					"members": [
+						"beforeSend",
+						"transformBody",
+						"onChunk",
+						"afterReply",
+						"onToolCall",
+						"onHistory"
+					]
+				},
+				{
+					"name": "PipelineOutputMap",
+					"kind": "interface",
+					"signature": "export interface PipelineOutputMap { readonly beforeSend: Option.Option<SendCtx>; readonly transformBody: unknown; readonly onChunk: Option.Option<Chunk>; readonly afterReply: string; readonly onToolCall: ToolCallDecision; readonly onHistory: readonly HistoryTurn[]; }",
+					"description": "What each stage returns. `Option.none()` in `beforeSend` aborts the turn; in `onChunk` it drops that one chunk (the stream still terminates).",
+					"members": [
+						"beforeSend",
+						"transformBody",
+						"onChunk",
+						"afterReply",
+						"onToolCall",
+						"onHistory"
+					]
+				},
+				{
+					"name": "PipelineStageMap",
+					"kind": "type",
+					"signature": "export type PipelineStageMap = { readonly [K in PipelineStageKind]: ( input: PipelineInputMap[K], meta: PipelineMeta, ) => Effect.Effect<PipelineOutputMap[K]>; };",
+					"description": "One stage contract per kind (spec §5).",
+					"members": []
+				},
+				{
+					"name": "PipelineStage",
+					"kind": "interface",
+					"signature": "export interface PipelineStage< K extends PipelineStageKind = PipelineStageKind, > { readonly kind: K; readonly run: PipelineStageMap[K]; }",
+					"description": "A plugin's contribution to one stage kind (spec §5).",
+					"members": [
+						"kind",
+						"run"
+					]
+				},
+				{
+					"name": "PipelineEntry",
+					"kind": "interface",
+					"signature": "export interface PipelineEntry extends RegistryEntry { readonly kind: PipelineStageKind; readonly run: PipelineStageMap[PipelineStageKind]; }",
+					"description": "The entry a stage is stored as: `RegistryEntry`'s identity, ownership and sort keys plus the stage's kind and function.",
+					"members": [
+						"kind",
+						"run"
+					]
+				},
+				{
+					"name": "PipelineRunner",
+					"kind": "interface",
+					"signature": "export interface PipelineRunner<K extends PipelineStageKind> { readonly kind: K; readonly run: ( input: PipelineInputMap[K], ) => Effect.Effect<PipelineOutputMap[K]>; }",
+					"description": "A stage kind resolved against the registry once, so a caller that runs the same kind many times — `onChunk` per streamed chunk, `onToolCall` per call — pays the registry read, filter and sort a single time.",
+					"members": [
+						"kind",
+						"run"
+					]
+				},
+				{
+					"name": "stageRunner",
+					"kind": "const",
+					"signature": "export const stageRunner = <K extends PipelineStageKind>(kind: K, meta: PipelineMeta): Effect.Effect<PipelineRunner<K>, never, HostServices> => …",
+					"description": "Resolve every stage of `kind` now, in order, returning a runner that folds `input` through them. Reads the registry once, so a stage registered or disposed mid-turn takes effect on the next resolution, and skips any stage disabled by an earlier fault.",
+					"members": []
+				},
+				{
+					"name": "run",
+					"kind": "const",
+					"signature": "export const run = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): Effect.Effect<PipelineOutputMap[K], never, HostServices> => …",
+					"description": "Run every stage of `kind` over `input`, in resolution order. A one-shot convenience over {@link stageRunner} for the sites that run a kind once; a loop should hold a {@link stageRunner} instead.",
+					"members": []
+				},
+				{
+					"name": "composeTurnBody",
+					"kind": "const",
+					"signature": "export const composeTurnBody = <Send>(build: (send: Send, ctx: SendCtx) => unknown, base: Send, ctx: SendCtx, meta: PipelineMeta): Effect.Effect<unknown, never, HostServices> => …",
+					"description": "Compose a turn's one outgoing body: the provider's own `buildRequest` over `base`, then `transformBody` over the built body (spec §5).",
+					"members": []
+				},
+				{
+					"name": "ResolvedToolCall",
+					"kind": "interface",
+					"signature": "export interface ResolvedToolCall { readonly call: ToolCallData; readonly execute: boolean; }",
+					"description": "The call an `onToolCall` decision resolves to, and whether it executes.",
+					"members": [
+						"call",
+						"execute"
+					]
+				},
+				{
+					"name": "resolveToolCall",
+					"kind": "const",
+					"signature": "export const resolveToolCall = (call: ToolCallData, decision: ToolCallDecision): ResolvedToolCall => …",
+					"description": "Project an `onToolCall` decision onto the call the loop acts on (spec §5). A declined call is still returned — never dropped — so the loop always appends a matching result and the replayed body carries no `tool_call` without one. A rewrite keeps the original `id`/`key` for that correlation.",
+					"members": []
+				},
+				{
+					"name": "AnyProvider",
+					"kind": "type",
+					"signature": "export type AnyProvider = Provider<any>;",
+					"description": "The contract with its wire-body type erased. `Send` is existential across the registry — one collection holds `responses`, `chatcompletions` and a plugin's own body type — and `Provider<Send>` is invariant in `Send` (each member takes `Send` as a parameter), so no single `Send` type can hold all three. Callers that need the concrete body re-narrow, exactly as `state/chat.ts` already does.",
+					"members": []
+				},
+				{
+					"name": "ProviderEntry",
+					"kind": "type",
+					"signature": "export type ProviderEntry = RegistryEntry & AnyProvider;",
+					"description": "The entry a provider is stored as (spec §2): `RegistryEntry`'s identity and ownership plus the protocol contract. `id` is the wire name, so a provider resolves by name and registration order is resolution order.",
+					"members": []
+				},
+				{
+					"name": "registerProvider",
+					"kind": "const",
+					"signature": "export const registerProvider = (host: Host, name: string, provider: AnyProvider, pluginId?: string): Disposable => …",
+					"description": "Register `provider` under `name` through `host`, first wins (spec §5) — the same rule the tool registry follows.",
+					"members": []
+				},
+				{
+					"name": "resolveProvider",
+					"kind": "const",
+					"signature": "export const resolveProvider = (name: string): Effect.Effect<Option.Option<AnyProvider>, never, HostServices> => …",
+					"description": "The protocol registered as `name`, or `none` (spec §5). `SendMsg` maps `none` to a failed turn, so a caller never dereferences an absent provider — the `TypeError` on `undefined.send` the old static lookup could produce.",
+					"members": []
+				},
+				{
+					"name": "listProtocols",
+					"kind": "const",
+					"signature": "export const listProtocols = (): Effect.Effect< readonly string[], never, HostServices > => …",
+					"description": "Every registered protocol name, in resolution order (spec §5). The registry is the only source: a plugin's protocol is listed without any page knowing its name.",
+					"members": []
+				},
+				{
+					"name": "resolveProviderSync",
+					"kind": "const",
+					"signature": "export const resolveProviderSync = (name: string): Option.Option<AnyProvider> => …",
+					"description": "{@link resolveProvider} read synchronously off the app's one runtime.",
+					"members": []
+				},
+				{
+					"name": "protocolNames",
+					"kind": "const",
+					"signature": "export const protocolNames = (): readonly string[] => …",
+					"description": "The registered protocol names, read synchronously (see {@link resolveProviderSync}).",
+					"members": []
+				},
 				{
 					"name": "rendererKinds",
 					"kind": "const",
@@ -997,15 +774,7 @@ export const reference: DocReference = {
 					"signature": "export const makeRendererRegistry = (host: Host, options?: RegisterRendererOptions): RendererRegistry => …",
 					"description": "The renderer registry bound to one plugin's `host`, the shape `host.renderers` takes (spec §2). A thin typing of {@link registerRenderer}: registering through it is registering a contribution, so ownership and disposal are the registry's own. `options` (a logger, typically) is applied to every registration made through the returned object.",
 					"members": []
-				}
-			]
-		},
-		{
-			"path": "src/lib/plugins/settings.ts",
-			"label": "Settings sections",
-			"summary": "Plugin-contributed sections on the Settings page.",
-			"status": "documented",
-			"symbols": [
+				},
 				{
 					"name": "SettingsSection",
 					"kind": "interface",
@@ -1033,6 +802,157 @@ export const reference: DocReference = {
 					"kind": "const",
 					"signature": "export const makeSettingsRegistry = (host: Host): SettingsRegistry => …",
 					"description": "The settings registry over one host (spec §5). Registration is a slot contribution: `settings.sections` is already rendered by `SettingsShell` and resolved by the slot machinery, so no new rendering path exists here.",
+					"members": []
+				},
+				{
+					"name": "ThemeDom",
+					"kind": "interface",
+					"signature": "export interface ThemeDom { readonly setVariable: (name: string, value: string) => void; readonly removeVariable: (name: string) => void; /** Replace the one stylesheet; `undefined` removes it (defaults restored). */ readonly setStyleSheet: (css: string | undefined) => void; /** Record the active theme's id on the root, or clear it. */ readonly setActiveId: (id: string | undefined) => void; }",
+					"description": "The DOM the service reads and writes: the root element's custom properties, the one stylesheet it owns, and the marker of the active theme. It is a seam because bun's test environment has no DOM — the rules are asserted against a recorded {@link ThemeDom}, while the real element path ({@link browserThemeDom}) is deliberately tiny and proven in a browser.",
+					"members": [
+						"setVariable",
+						"removeVariable",
+						"setStyleSheet",
+						"setActiveId"
+					]
+				},
+				{
+					"name": "browserThemeDom",
+					"kind": "const",
+					"signature": "export const browserThemeDom = (): ThemeDom => …",
+					"description": "The real DOM adapter. One element, found by {@link STYLE_ELEMENT_ID} and reused, so a switch replaces the stylesheet rather than appending a second; `undefined` removes it, which is what restores the `:root` defaults.",
+					"members": []
+				},
+				{
+					"name": "ThemeContribution",
+					"kind": "interface",
+					"signature": "export interface ThemeContribution extends RegistryEntry { readonly name: string; readonly variables: Readonly<Record<string, string>>; /** Extra rules the variables cannot express; replaced on switch. */ readonly css?: string; }",
+					"description": "One theme contribution, as stored in the `themes` registry. The registry's own type is the untyped `RegistryEntry` (spec §2's uniform registry), so the theme's data half rides the entry and the service narrows on read.",
+					"members": [
+						"name",
+						"variables",
+						"css"
+					]
+				},
+				{
+					"name": "ThemeDefinition",
+					"kind": "type",
+					"signature": "export type ThemeDefinition = Omit<ThemeContribution, \"owner\">;",
+					"description": "A theme as an author writes one: identity and data, no owner plumbing.",
+					"members": []
+				},
+				{
+					"name": "ThemeService",
+					"kind": "interface",
+					"signature": "export interface ThemeService { /** Register a theme; disposing the handle unregisters it. */ readonly register: (theme: ThemeDefinition) => Disposable; /** Apply a registered theme by id. An unknown id leaves the defaults on. */ readonly apply: (id: string) => Effect.Effect<void>; /** The active theme's id, or `Option.none()` when the defaults are in force. */ readonly active: () => Effect.Effect<Option.Option<string>>; /** Reconcile with one registry snapshot: drop an active theme that is gone. */ readonly sync: (entries: readonly RegistryEntry[]) => Effect.Effect<void>; /** Reconcile on every registry change; fork this for the plugin-unload path. */ readonly run: () => Effect.Effect<void>; }",
+					"description": "The theme registry a plugin drives (spec §5).",
+					"members": [
+						"register",
+						"apply",
+						"active",
+						"sync",
+						"run"
+					]
+				},
+				{
+					"name": "makeThemeService",
+					"kind": "const",
+					"signature": "export const makeThemeService = (themes: HostRegistry<RegistryEntry>, dom: ThemeDom = browserThemeDom()): ThemeService => …",
+					"description": "The theme service over one registry (spec §3's `ThemeRegistry`). The applied state is the DOM's — there is one `documentElement` — so the service keeps only which theme it put there, and every method that touches it is an `Effect.sync`.",
+					"members": []
+				},
+				{
+					"name": "setAppThemeService",
+					"kind": "const",
+					"signature": "export const setAppThemeService = (service: ThemeService): void => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "applyTheme",
+					"kind": "const",
+					"signature": "export const applyTheme = (id: string): Effect.Effect<void> => …",
+					"description": "Apply a theme by id (spec §5).",
+					"members": []
+				},
+				{
+					"name": "activeTheme",
+					"kind": "const",
+					"signature": "export const activeTheme = (): Effect.Effect<Option.Option<string>> => …",
+					"description": "The active theme's id, or `Option.none()` when the defaults are in force.",
+					"members": []
+				},
+				{
+					"name": "toolDeclarationSchema",
+					"kind": "const",
+					"signature": "export const toolDeclarationSchema = z.object({ … });",
+					"description": "A tool's wire declaration (spec §1): what the model is told it may call. The `parameters` half is JSON Schema, sent verbatim, so it stays `unknown`-valued here rather than being re-modelled.",
+					"members": []
+				},
+				{
+					"name": "ToolDeclaration",
+					"kind": "type",
+					"signature": "export type ToolDeclaration = z.infer<typeof toolDeclarationSchema>;",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "ToolExecCtx",
+					"kind": "interface",
+					"signature": "export interface ToolExecCtx { readonly tinyfishApiKey?: string; }",
+					"description": "What a tool execution needs from the turn it runs in (spec §5). Today that is the TinyFish key, which backs both the client-side search and the fetch-first route; a tool that needs nothing simply ignores the argument.",
+					"members": [
+						"tinyfishApiKey"
+					]
+				},
+				{
+					"name": "ToolOutcome",
+					"kind": "interface",
+					"signature": "export interface ToolOutcome { readonly result: string; readonly marker: string; readonly failed: boolean; readonly input: unknown; }",
+					"description": "One executed tool call (spec §5): the text the model reads, the marker the transcript shows for it, whether it failed, and the call's arguments parsed to a value (the loop writes them back into the replayed wire body).",
+					"members": [
+						"result",
+						"marker",
+						"failed",
+						"input"
+					]
+				},
+				{
+					"name": "Tool",
+					"kind": "interface",
+					"signature": "export interface Tool { readonly declaration: ToolDeclaration; readonly execute: ( input: unknown, ctx: ToolExecCtx, ) => Effect.Effect<ToolOutcome>; }",
+					"description": "A tool as a plugin declares it: the wire declaration plus the executor.",
+					"members": [
+						"declaration",
+						"execute"
+					]
+				},
+				{
+					"name": "ToolEntry",
+					"kind": "interface",
+					"signature": "export interface ToolEntry extends RegistryEntry, Tool {}",
+					"description": "The entry a `Tool` is stored as (spec §2): `RegistryEntry`'s identity and ownership plus the tool's own fields. `id` is the declaration's wire name, so a call resolves by name and registration order is resolution order.",
+					"members": []
+				},
+				{
+					"name": "registerTool",
+					"kind": "const",
+					"signature": "export const registerTool = (host: Host, tool: Tool, pluginId?: string): Disposable => …",
+					"description": "Register `tool` through `host`, first wins (spec §5).",
+					"members": []
+				},
+				{
+					"name": "resolveTool",
+					"kind": "const",
+					"signature": "export const resolveTool = (name: string): Effect.Effect<Option.Option<Tool>, never, HostServices> => …",
+					"description": "The registered tool called `name`, or `none`.",
+					"members": []
+				},
+				{
+					"name": "executeTool",
+					"kind": "const",
+					"signature": "export const executeTool = (name: string, call: ToolCallData, ctx: ToolExecCtx = ambientExecCtx()): Effect.Effect<ToolOutcome, never, HostServices> => …",
+					"description": "Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown name used to fall through into the fetch path, which existed only because there were two tools and no registry; with a registry a miss is its own case and fails with its own sentence. The invariant is preserved — a string result either way, never an exception out of the loop.",
 					"members": []
 				}
 			]
