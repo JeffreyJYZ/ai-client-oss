@@ -1,6 +1,8 @@
 import type { ChatMessage } from "@lib/db";
-import { interleaveMarkers } from "@lib/text";
+import { type DisplayMarker, interleaveMarkers } from "@lib/text";
 import Markdown from "@ui/Markdown";
+import Slot from "@/ui/slots/Slot";
+import { useComponent } from "@/ui/slots/useContribution";
 
 interface MessageProps {
 	readonly message: ChatMessage;
@@ -18,8 +20,65 @@ const ROLE_STYLE: Record<ChatMessage["role"], string> = {
 	error: "bg-red-900/30 text-red-200",
 };
 
+/**
+ * The assistant body's markdown renderer (spec §4's `ui.markdown`): the
+ * built-in is the app's own `Markdown`, and a plugin can replace it without
+ * touching the message chrome. Split out from {@link MarkerBody} so a markdown
+ * override restyles code blocks and prose while the marker interleave stays the
+ * host's.
+ */
+export function MarkdownBody({ text }: { readonly text: string }) {
+	return <Markdown text={text} />;
+}
+
+/**
+ * The assistant body (`ui.marker`): the model's answer with its display-only
+ * markers interleaved at the offsets they were recorded at, rendered through
+ * whatever `ui.markdown` resolves to. Splitting the marker-aware body from the
+ * bare markdown renderer is what lets a plugin replace either half; the default
+ * pair renders exactly today's `<Markdown text={interleaveMarkers(...)} />`.
+ */
+export function MarkerBody({
+	text,
+	markers,
+}: {
+	readonly text: string;
+	readonly markers: readonly DisplayMarker[];
+}) {
+	const Body = useComponent("ui.markdown");
+	return <Body text={interleaveMarkers(text, markers)} />;
+}
+
+/**
+ * The collapsible reasoning block (`ui.reasoning`): a plugin can replace how a
+ * model's thinking is shown without replacing the message. Unchanged markup
+ * from the pre-migration `Message`.
+ */
+export function ReasoningBlock({ reasoning }: { readonly reasoning: string }) {
+	return (
+		<details className="mb-2 rounded border border-neutral-700/60 bg-neutral-900/60 px-2 py-1.5">
+			<summary className="cursor-pointer select-none text-[10px] uppercase tracking-widest text-neutral-500">
+				Thinking… {reasoning.length.toLocaleString()} chars
+			</summary>
+			<p className="mt-1 whitespace-pre-wrap break-words text-xs italic text-neutral-500">
+				{reasoning}
+			</p>
+		</details>
+	);
+}
+
+/**
+ * One transcript message (spec §4's `ui.message` built-in): the role label, the
+ * reasoning block, the markdown or literal body, the attachment chips, and —
+ * after the chips — the `chat.message.actions` region, which contributes
+ * nothing until a plugin targets it. The body and reasoning render through
+ * their own overridable components, so the whole message can be replaced
+ * (`ui.message`) or just its halves.
+ */
 export default function Message({ message }: MessageProps) {
 	const isUser = message.role === "user";
+	const Body = useComponent("ui.marker");
+	const Reasoning = useComponent("ui.reasoning");
 	// A marker-only message (a tool call with no text around it) still
 	// renders: the marker is its whole visible content.
 	const empty = message.text === "" && message.markers.length === 0;
@@ -32,19 +91,12 @@ export default function Message({ message }: MessageProps) {
 					{ROLE_LABEL[message.role]}
 				</div>
 				{message.reasoning !== undefined && message.reasoning !== "" ? (
-					<details className="mb-2 rounded border border-neutral-700/60 bg-neutral-900/60 px-2 py-1.5">
-						<summary className="cursor-pointer select-none text-[10px] uppercase tracking-widest text-neutral-500">
-							Thinking… {message.reasoning.length.toLocaleString()} chars
-						</summary>
-						<p className="mt-1 whitespace-pre-wrap break-words text-xs italic text-neutral-500">
-							{message.reasoning}
-						</p>
-					</details>
+					<Reasoning reasoning={message.reasoning} />
 				) : null}
 				{empty ? null : message.role === "assistant" ? (
 					// Markers are display-only: interleaved with the
 					// answer text for the transcript, never part of it.
-					<Markdown text={interleaveMarkers(message.text, message.markers)} />
+					<Body text={message.text} markers={message.markers} />
 				) : (
 					// Only the model's answer is markdown; user input and error
 					// strings stay literal, so `#` in pasted config is not a heading.
@@ -85,6 +137,9 @@ export default function Message({ message }: MessageProps) {
 						))}
 					</div>
 				) : null}
+				{/* Per-message plugin region: after the attachment chips, empty
+				    until a plugin registers into it. */}
+				<Slot id="chat.message.actions" props={{ message }} />
 			</div>
 		</div>
 	);
