@@ -25,9 +25,11 @@ export class PluginFault extends Data.TaggedError("PluginFault")<{
 }> {}
 
 /**
- * The manifest's `apiVersion` major differs from the host's, so the
- * plugin is refused rather than loaded against an API it was not built
- * for (spec §10).
+ * The plugin was refused rather than loaded against an API it was not
+ * built for (spec §10): either the manifest's `apiVersion` major differs
+ * from the host's, or its `engines.app` bound is unsatisfiable by the
+ * host's app version (which Task 3 made a real value, so the check can
+ * actually refuse).
  */
 export class ApiVersionIncompatible extends Data.TaggedError(
 	"ApiVersionIncompatible",
