@@ -24,7 +24,9 @@ export const useGlobalKeys = (): void => {
 	useEffect(() => {
 		const onKeyDown = (event: KeyboardEvent): void => {
 			// While the palette is open it owns the keyboard: Escape closes it
-			// and everything else belongs to its search field.
+			// and everything else belongs to its search field. That includes the
+			// palette's own `mod+k` — it cannot toggle itself shut, by design,
+			// so this is deliberate, not a missed binding.
 			if (getUIState().palette) {
 				if (event.key === "Escape") setPalette(false);
 				return;

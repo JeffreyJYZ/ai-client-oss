@@ -228,8 +228,11 @@ export const resolveCommand = (
 
 /**
  * The id of the command bound to `binding`, or `none`. The **last** match in
- * registration order wins, which is the second half of the duplicate-keybinding
- * rule (the warning is logged at registration).
+ * `resolveOrder` wins, which is the second half of the duplicate-keybinding
+ * rule (the warning is logged at registration) — though `resolveOrder` sorts an
+ * explicit `order` ahead of the rest, so a raw `host.commands.register` carrying
+ * one would never be that last match and would silently invert the rule;
+ * `registerCommand` cannot, since a `CommandDefinition` has no such field.
  */
 export const resolveKeybinding = (
 	binding: string,

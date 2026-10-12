@@ -47,7 +47,15 @@ export const registerCommandBuiltins = (host: Host): void => {
 			.reverse()
 			.find((message) => message.role === "assistant" && message.text !== "");
 		if (last === undefined) return;
-		void navigator.clipboard.writeText(last.text).catch(() => undefined);
+		// The clipboard write is a promise at the boundary, so it runs through
+		// the same Effect seam as Settings' copy (Settings.tsx `copyBackupJson`),
+		// never as a raw `.catch`.
+		Effect.runFork(
+			Effect.tryPromise({
+				try: () => navigator.clipboard.writeText(last.text),
+				catch: () => undefined,
+			}),
+		);
 	};
 
 	/**
