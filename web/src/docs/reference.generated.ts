@@ -75,7 +75,7 @@ export const reference: DocReference = {
 					"name": "resolveKeybinding",
 					"kind": "const",
 					"signature": "export const resolveKeybinding = (binding: string): Effect.Effect<Option.Option<string>, never, HostServices> => …",
-					"description": "The id of the command bound to `binding`, or `none`.",
+					"description": "The id of the command bound to `binding`, or `none`. The **last** match in `resolveOrder` wins, which is the second half of the duplicate-keybinding rule (the warning is logged at registration) — though `resolveOrder` sorts an explicit `order` ahead of the rest, so a raw `host.commands.register` carrying one would never be that last match and would silently invert the rule; `registerCommand` cannot, since a `CommandDefinition` has no such field.",
 					"members": []
 				},
 				{
@@ -171,7 +171,7 @@ export const reference: DocReference = {
 					"name": "Host",
 					"kind": "interface",
 					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; readonly ui: HostRegistry<Contribution>; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; readonly themes: HostRegistry<RegistryEntry>; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, absent until Task 20 (spec §7). */ readonly native: Option.Option<NativeHandle>; /** Scoped logging (spec §2). */ readonly log: Logger; /** Subscribe to a host event; the handler stops when the plugin unloads. */ readonly on: ( event: HostEvent, handler: (payload: unknown) => void, ) => Disposable; }",
-					"description": "The surface a plugin is compiled against (spec §2).",
+					"description": "The surface a plugin is compiled against (spec §2). Every method that adds something returns a `Disposable`, whose removal is attached to that plugin's `Scope` — closing the scope is unload, so a disabled plugin leaves no trace. Two kinds of member live here, deliberately split by signature. The **synchronous registries** (`ui`, `commands`, `settings`, `tools`, `providers`, `pipeline`, `renderers`, `themes`) register now and read as Effects/Streams. The **services** a plugin calls for behaviour (`chat`, `db`, `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface, populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with the plugin's `Scope`.",
 					"members": [
 						"version",
 						"ui",
@@ -195,7 +195,7 @@ export const reference: DocReference = {
 					"name": "HostServicesShape",
 					"kind": "interface",
 					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; }",
-					"description": "What `HostServices` provides: the versions the host reports, plus one registry per kind (spec §3).",
+					"description": "What `HostServices` provides: the versions the host reports, plus one registry per kind (spec §3). Registries are created once in `HostLayer`'s construction, so the whole app shares one collection per kind. The service members that carry no per-plugin state (`chat`, `db`, `storage`, `on`, `log`, `native`) are not held here — they live in `services.ts` and are bound per plugin in `makeHost`. Neither `keybindings` nor `renderers` is a registry: a command carries its own keybinding (`commands.ts` is the source of truth), and a renderer is a `ui` contribution resolved through `useComponent`. The app version is host data, not a registry — it is resolved once at boot (`runtime.ts` builds this layer), which is the only place with the async Tauri read in hand, and carried here so `makeHost` can report it without a parameter no later task could fill.",
 					"members": [
 						"version",
 						"ui",
@@ -218,7 +218,7 @@ export const reference: DocReference = {
 					"name": "makeHost",
 					"kind": "const",
 					"signature": "export const makeHost = (services: HostServicesShape, pluginId: string, scope: Scope.Scope): Host => …",
-					"description": "The `Host` a plugin's `setup` receives (spec §2).",
+					"description": "The `Host` a plugin's `setup` receives (spec §2). Built per plugin from the shared service plus that plugin's `pluginId` and `Scope`, so every registration is owned by the plugin and collected when its scope closes, and the version a plugin reads is the one the boot resolved. `settings` and `renderers` are typed views whose factory reads only `host.ui`; the full `Host` literal does not exist until it is assembled, so they are built from a view carrying that one member.",
 					"members": []
 				},
 				{
@@ -538,7 +538,7 @@ export const reference: DocReference = {
 					"name": "makeNotifyService",
 					"kind": "const",
 					"signature": "export const makeNotifyService = (scope?: Scope.Scope): NotifyService => …",
-					"description": "Build the notification calls bound to one plugin's `Scope`, the shape `host.notify` takes (spec §2).",
+					"description": "Build the notification calls bound to one plugin's `Scope`, the shape `host.notify` takes (spec §2). `toast`/`banner`/`modal` are synchronous because a plugin's `setup` is synchronous; each runs its primitive on the default Effect runtime — the primitives resolve no host service, so they need no context from the subsystem runtime (and importing that runtime here would close a module cycle with `host.ts`, which builds it). `confirm` stays an `Effect` because it answers.",
 					"members": []
 				},
 				{
@@ -607,7 +607,7 @@ export const reference: DocReference = {
 					"name": "PipelineStageMap",
 					"kind": "type",
 					"signature": "export type PipelineStageMap = { readonly [K in PipelineStageKind]: ( input: PipelineInputMap[K], meta: PipelineMeta, ) => Effect.Effect<PipelineOutputMap[K]>; };",
-					"description": "One stage contract per kind (spec §5).",
+					"description": "One stage contract per kind (spec §5). The error channel is `never`: a contract is success-only, and a stage that misbehaves is caught and skipped by {@link guard} rather than surfacing as a failure. `transformBody` runs **once per turn**, over the body the turn sends and stores (see {@link composeTurnBody}); it is not re-run per request round, so an additive rewrite does not compound as a tool loop iterates.",
 					"members": []
 				},
 				{
@@ -658,7 +658,7 @@ export const reference: DocReference = {
 					"name": "composeTurnBody",
 					"kind": "const",
 					"signature": "export const composeTurnBody = <Send>(build: (send: Send, ctx: SendCtx) => unknown, base: Send, ctx: SendCtx, meta: PipelineMeta): Effect.Effect<unknown, never, HostServices> => …",
-					"description": "Compose a turn's one outgoing body: the provider's own `buildRequest` over `base`, then `transformBody` over the built body (spec §5).",
+					"description": "Compose a turn's one outgoing body: the provider's own `buildRequest` over `base`, then `transformBody` over the built body (spec §5). The result is the body the turn hands back to the provider as `prev` under `skipUserMessage` for every round. `buildRequest` is idempotent over an already-built body with the user message present (`chatCompletions.ts`'s filter-and-re-add of system, the overwritten tools/model/stream), so the provider sends exactly this body and `state/chat.ts` stores exactly it — **one body, so what is sent and what is stored cannot drift**, and `transformBody` runs once per turn rather than compounding across rounds.",
 					"members": []
 				},
 				{
@@ -696,7 +696,7 @@ export const reference: DocReference = {
 					"name": "registerProvider",
 					"kind": "const",
 					"signature": "export const registerProvider = (host: Host, name: string, provider: AnyProvider, pluginId?: string): Disposable => …",
-					"description": "Register `provider` under `name` through `host`, first wins (spec §5) — the same rule the tool registry follows.",
+					"description": "Register `provider` under `name` through `host`, first wins (spec §5) — the same rule the tool registry follows. Built-ins register at boot, before any plugin loads, so a plugin's same-name protocol is refused with a `PluginFault` and the built-in stays the one that resolves: a plugin cannot silently displace a protocol an existing provider's `Settings` already names. `pluginId` names the refusing plugin in that fault; the built-in registrar omits it, since it registers first and can never collide.",
 					"members": []
 				},
 				{
@@ -717,7 +717,7 @@ export const reference: DocReference = {
 					"name": "resolveProviderSync",
 					"kind": "const",
 					"signature": "export const resolveProviderSync = (name: string): Option.Option<AnyProvider> => …",
-					"description": "{@link resolveProvider} read synchronously off the app's one runtime.",
+					"description": "{@link resolveProvider} read synchronously off the app's one runtime. A synchronous caller cannot yield — `state/chat.ts`'s `send` builds the request body it forks with, and the Settings picker renders during React's own render pass — so the read is bridged here rather than pushed into an Effect that would change when the optimistic rows appear. The runtime's layer is built before the first render (`main.tsx` awaits `runtime.runPromise`), so with the context cached this has no async boundary and never throws `AsyncFiberError`.",
 					"members": []
 				},
 				{
@@ -1077,7 +1077,7 @@ export const reference: DocReference = {
 					"name": "ToolRegistry",
 					"kind": "interface",
 					"signature": "export interface ToolRegistry { register(tool: Tool, pluginId?: string): Disposable; readonly entries: () => Effect.Effect<readonly ToolEntry[]>; readonly ownedBy: (owner: string) => Effect.Effect<readonly ToolEntry[]>; readonly changes: Stream.Stream<readonly ToolEntry[]>; }",
-					"description": "The tool registry a plugin reaches as `host.tools` (spec §2/§5).",
+					"description": "The tool registry a plugin reaches as `host.tools` (spec §2/§5). `register` is the **first-wins door**: built-ins register at boot, before any plugin loads, so a plugin's same-name tool is refused with a `PluginFault` and the built-in stays the one that resolves — a plugin cannot silently displace a name the model already knows. Reads stay Effects/Streams because the model loop and React drive them.",
 					"members": [
 						"register",
 						"entries",
@@ -1110,7 +1110,7 @@ export const reference: DocReference = {
 					"name": "executeTool",
 					"kind": "const",
 					"signature": "export const executeTool = (name: string, call: ToolCallData, ctx: ToolExecCtx = {}): Effect.Effect<ToolOutcome, never, HostServices> => …",
-					"description": "Execute one tool call (spec §5).",
+					"description": "Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown name used to fall through into the fetch path, which existed only because there were two tools and no registry; with a registry a miss is its own case and fails with its own sentence. The invariant is preserved — a string result either way, never an exception out of the loop. The execution is **failure-isolated** (spec §9): a third-party tool whose `execute` throws, or returns a failed/defected effect, is a logged `PluginFault` and a failed `ToolOutcome` — never a defect that takes the turn down. An interruption is re-raised, so a stopped turn stays a stop. `ctx` defaults to an empty context: the turn-scoped values (the TinyFish key) are the caller's to pass, and the loop passes the turn's own context. The default exists only so a caller that needs nothing (`executeTool(name, call)`) need not build one.",
 					"members": []
 				}
 			]

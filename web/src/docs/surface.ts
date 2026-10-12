@@ -47,19 +47,25 @@ const nameText = (name: ts.Node | undefined, sf: ts.SourceFile): string => {
 };
 
 /**
- * One line of prose from a doc comment, never cut mid-word.
+ * The whole doc comment, cut only if it is longer than `DESCRIPTION_CAP` — and
+ * then at a sentence boundary, never mid-word.
  *
- * A character cap alone reads as a broken reference the moment it lands on the
- * page — the shipped `Host` comment is longer than the cap and used to end
- * `…populated by Ta…`. So the first sentence wins; the cap is only the last
- * resort for a sentence that is itself longer than the cap.
+ * The reference is the deliverable, so a two-paragraph contract note (the
+ * provider `buildRequest` idempotence requirement, say) has to reach the page in
+ * full. An earlier cap cut to the **first sentence** of any comment over the
+ * limit, which meant every second paragraph silently vanished; the fallback now
+ * applies only past the cap. The cap matches the one on an interface signature
+ * and no entry module's comment reaches it, so in practice descriptions ship
+ * whole.
  */
+const DESCRIPTION_CAP = 1600;
+
 const summarise = (text: string): string => {
 	const collapsed = collapse(text);
-	if (collapsed.length <= 400) return collapsed;
+	if (collapsed.length <= DESCRIPTION_CAP) return collapsed;
 	const sentence = /^.*?[.!?](?=\s|$)/.exec(collapsed)?.[0].trim() ?? "";
-	if (sentence !== "" && sentence.length <= 400) return sentence;
-	return truncate(collapsed, 400);
+	if (sentence !== "" && sentence.length <= DESCRIPTION_CAP) return sentence;
+	return truncate(collapsed, DESCRIPTION_CAP);
 };
 
 /** The last `/** … *​/` block immediately above `node`, as one line. */
