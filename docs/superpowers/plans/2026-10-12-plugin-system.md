@@ -416,7 +416,7 @@ Tests to pin: a corrupt blob makes `getSettings()` return defaults **and** leave
 
 **Files:**
 - Create: `web/src/lib/plugins/providers.ts`, `web/src/lib/plugins/builtin/providers/index.ts`
-- Modify: `web/src/lib/providers/index.ts` (the static `as const` registry becomes a runtime lookup with the three built-ins pre-registered), `web/src/lib/api/index.ts` (`SendMsg` resolves through the registry), `web/src/lib/db/types.ts` (`protocol: z.enum(protocolNames)` → `z.string()`), `web/src/state/chat.ts` (protocol pruning iterates the registry), `web/src/ui/Settings.tsx` (the Protocol `<select>` and `ProviderPicker` options come from the registry)
+- Modify: `web/src/lib/providers/index.ts` (the static `as const` registry becomes a runtime lookup with the three built-ins pre-registered), `web/src/lib/api/index.ts` (`SendMsg` resolves through the registry), `web/src/lib/providers/models.ts` (its static `providers[protocol]` index must resolve through the registry too — **a plan omission Task 11 found**: the index `TypeError`s the moment a plugin protocol appears), `web/src/state/chat.ts` (protocol pruning iterates the registry), `web/src/ui/Settings.tsx` (the Protocol `<select>` lists registry names). **`db/types.ts` needs no change** — `protocol` has been `z.string()` since Task 0.2 (`81c55b5`), so this line's premise was stale. **`ProviderPicker` needs no change** — it lists provider *configs*, not protocols.
 - Test: `web/src/lib/plugins/providers.test.ts`, extend `web/src/lib/plugins/manifest.test.ts`
 
 **Interfaces:**
@@ -525,6 +525,13 @@ Tests to pin: a corrupt blob makes `getSettings()` return defaults **and** leave
 
 **Interfaces:**
 - Produces: `host.chat` (`snapshot()`, `changes: Stream<ChatSnapshot>`, `send`, `stop`, `newConversation`, `select`, `rename`, `delete`); `host.db` (the existing `Db` adapter); `host.storage` (`get(key)`, `set(key, value)`, `delete(key)`, `keys()`, all per-plugin, persisted into `Settings.plugins[].data`); `host.on(event, handler)`; `host.log`; `host.native` (`Option<NativeHandle>`, `Option.none()` until Task 20).
+
+**Carried obligations — found by Tasks 10/11/14's reviews, same shape every time: a rule written, but not at the door a plugin actually walks through.**
+
+- **[ ] `host.tools` must be first-wins.** The built-in-wins duplicate rule currently lives in Task 10's `registerTool`, while `host.tools` is a generic registry whose `register` **replaces in place** — so a plugin calling it directly can shadow `fetch_url`/`web_search`, contradicting the documented rule. Wrap `registerTool` into the typed member so the public API and the registry agree.
+- **[ ] Replace the ambient exec context.** `state/chat.ts`'s `executeTool` call site gets its ctx from `tools.ts`'s `ambientExecCtx`, which reads the TinyFish key through a `lib/` → `state/` import. The turn already holds that key: pass the turn's own context instead.
+- **[ ] Make `host.settings` the typed `SettingsRegistry`.** `makeSettingsRegistry` exists and nothing calls it, so `settings.registerSection` is unreachable for a plugin — the module is a seam, not a surface.
+- **[ ] Failure-isolate plugin executors (spec §9), and validate `execute` is callable.** Today a plugin tool's `execute` is invoked un-isolated, and `registerTool` never checks it is a function: a faulty third-party tool would defect the turn instead of being a logged `PluginFault`. Same for a protocol/registry entry a plugin supplies.
 
 - [ ] **Step 1: Write the failing test** — `services.test.ts`: storage round-trips through a fake `Db` and lands under that plugin's `plugins[].data` only; two plugins cannot read each other's keys; an event published on the `PubSub` reaches exactly the subscribers that are still loaded, and a plugin's handlers stop on unload; `host.db` is the same adapter instance the app uses.
 - [ ] **Step 2: Run it and watch it fail.**
