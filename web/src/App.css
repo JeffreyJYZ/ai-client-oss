@@ -1,10 +1,24 @@
 @import "tailwindcss";
 @import "ui/fonts.css";
 
+/* The theme seam's variables (spec §4). These are the app's own defaults, so
+   the built-in dark theme — which sets the same values inline on the root
+   element — changes nothing visually (lib/plugins/builtin/themes/dark.ts).
+   A plugin theme overrides what a variable or a rule reaches; the app's
+   Tailwind utility classes are not tokens, and that refactor is out of scope. */
+:root {
+	--app-bg: #0a0a0a;
+	--app-fg: whitesmoke;
+	--app-heading: #f5f5f5;
+	--app-link: #60a5fa;
+	--app-link-hover: #93c5fd;
+	--app-code-bg: rgba(255, 255, 255, 0.08);
+}
+
 html {
 	font-family: var(--mono);
-	background-color: #0a0a0a;
-	color: whitesmoke;
+	background-color: var(--app-bg);
+	color: var(--app-fg);
 	height: 100%;
 }
 
@@ -41,7 +55,7 @@ body {
 .md h5,
 .md h6 {
 	margin: 1rem 0 0.375rem;
-	color: #f5f5f5;
+	color: var(--app-heading);
 	font-weight: 600;
 }
 
@@ -92,17 +106,17 @@ body {
 }
 
 .md a {
-	color: #60a5fa;
+	color: var(--app-link);
 	text-decoration: underline;
 	text-underline-offset: 2px;
 }
 
 .md a:hover {
-	color: #93c5fd;
+	color: var(--app-link-hover);
 }
 
 .md strong {
-	color: #f5f5f5;
+	color: var(--app-heading);
 	font-weight: 600;
 }
 
@@ -113,7 +127,7 @@ body {
 .md code {
 	padding: 0.125rem 0.25rem;
 	border-radius: 0.25rem;
-	background-color: rgba(255, 255, 255, 0.08);
+	background-color: var(--app-code-bg);
 	font-size: 0.8125em;
 }
 
