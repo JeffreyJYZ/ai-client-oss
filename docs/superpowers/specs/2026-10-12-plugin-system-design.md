@@ -19,6 +19,7 @@ Secondary goal, and the reason this is worth the churn: the app's own features a
 - Webview-only UI. Dark-first. **With zero plugins enabled, rendering and behaviour are identical to today.**
 - Desktop and web builds both load plugins; platform differences live behind source adapters, never in the host.
 - Gates stay green: biome + `@effect/language-service` + `tsc` + `vite build`, plus `bun test`.
+- **Data compatibility is a hard requirement** (§13): upgrading from 0.2.3 must lose nothing and need no manual step, a stored blob that fails to parse must be preserved rather than replaced, and every schema change ships a frozen-fixture test.
 - Two pieces of test wiring do not exist yet and are prerequisites: a `"test": "bun test"` script in `web/package.json`, and `"!**/*.test.ts"` appended to every Grit plugin's `includes` in `biome.jsonc` (tests legitimately use `async`/`await`).
 
 ## Vocabulary
@@ -271,6 +272,8 @@ The app must never white-screen because of a plugin. Per AGENTS.md, a blank page
 
 `apiVersion` is semver-checked by the loader: a different major is refused with a clear reason, a different minor warns and loads. `engines.app` is checked against the Tauri app version. Within a major, the API only gains; removals bump the major. The SDK's types are versioned with the app so a plugin author can pin the app version they built against.
 
+Two axes, deliberately separate. The **app** version for this change is a **minor** (`0.3.0`): a user-facing feature with no data-format break (§13), and therefore no manual step for users. The **plugin API** starts at `0.1` and is unstable by declaration — which is exactly why the loader refuses a different major instead of pretending compatibility. A plugin built against `0.1` must be rebuilt when the API's major moves; the loader's refusal is a clear message, not a crash.
+
 ## §11 Testing and verification
 
 - **Wiring**: add `"test": "bun test"` to `web/package.json`; append `"!**/*.test.ts"` to each Grit plugin's `includes` in `biome.jsonc`.
@@ -292,8 +295,24 @@ Each phase leaves the app working; nothing is half-wired between phases.
 
 Subagent routing: phase 1's mechanical seam conversion and the fixtures are free-model subagent work; the registry, `Scope` lifetime, loader, pipeline and native-bridge work is review-class work. Every phase keeps `tsc` + gates green and names the seam it adds, not just the file.
 
+## §13 Data compatibility, migration and rollout
+
+- **The promise.** Upgrading must not lose or hide user data and must not require a manual step. The `protocol` field widening to `z.string()` and the two new `Settings` keys are additive (zod defaults), and no conversation field changes — so a 0.2.3 install's data loads as-is. That claim is only true once the parse-failure path stops destroying data (next bullet).
+- **The hazard this change would otherwise exercise.** `Db.getSettings` returns `settingsDefaults()` when the stored blob fails `Settings.safeParse` (`db/tauri.ts:65-75`, `db/web.ts:103-115`), and `Db.setSettings` re-reads through that same path and writes the merged result (`db/tauri.ts:77-85`, `db/web.ts:117-128`). One schema regression therefore becomes a **silent wipe**: providers, API keys, profiles and memories are replaced by defaults on the next settings write — a notice dismissal is enough — with no error shown and no copy kept. This is a pre-existing hazard; a schema change is what makes it likely, so this change fixes it rather than inherit it.
+- **Safety net (required, not optional).** On a parse failure the adapters must: leave the stored blob untouched; expose the raw value (`Db.rejectedSettings(): Effect<Option<string>>`) so the UI can offer it; refuse to write (`Db.setSettings` fails with a readable reason) until the user explicitly resets; and let the app run on in-memory defaults meanwhile. `Db.resetRejectedSettings(): Effect<void>` is the explicit escape hatch. No sidecar file and no new Rust command is needed: on desktop the original `settings.json` is simply never overwritten, and on web the `localStorage` value stays as written.
+- **Tolerance per field.** A field a plugin can write takes a per-field fallback (defaulted then caught) so one bad value degrades that field instead of failing the whole object — a whole-object failure is what triggers the defaults path, so this is the difference between one broken provider and every provider gone.
+- **Migrations.** `Settings` gains `dataVersion: z.number().default(1)` plus a migration registry: ordered, pure, idempotent `(settings) => settings` functions applied when a stored blob's `dataVersion` is below the current one. v0.3.0 ships the registry with **no** migrations — the machinery is what is missing and the next schema change is what will need it. Before any migration runs, the app writes a pre-migration backup through the existing `exportBackup` path.
+- **Downgrade is not compatible, and cannot be made so.** A 0.2.3 build reading a blob that names a plugin protocol fails the whole object (the `z.enum` on one provider) and would default-and-wipe; 0.2.3 has neither the safety net nor per-field tolerance. New keys read by an older build are stripped by zod rather than rejected, so an old build loses plugin state and no core data. The release note must therefore say: export a backup before downgrading.
+- **Backups both directions.** An old backup has no `plugins` key (defaulted); a new backup read by an older build keeps everything except plugin keys. `BACKUP_VERSION` stays `1` — it moves only with a change to the envelope's shape, and that bump fails loudly on the old side (`z.literal`) instead of silently.
+- **Conversations.** Their shape is unchanged, and both adapters silently drop an unparseable row (`db/tauri.ts:34-48`, `db/web.ts:76-84`) — a dropped row is invisible but still on disk, so it is recoverable. A frozen conversation fixture pins this, and the rule for future changes is: never narrow a field, never add a required one.
+- **Plugin-owned data.** A full-trust plugin can write arbitrary bytes into `Settings.plugins[].data`, which rides `settings.json` and every backup. Cap it per plugin, so one plugin cannot balloon the settings file to unusable size.
+- **Rollout.** A **minor** release (`0.3.0`). The in-app updater (present since 0.1.2, signed, driven by `release-tauri.yml` → `desktop-v*` + `latest.json`) delivers it automatically to installed 0.1.2+ builds — which is precisely why the guarantee above is load-bearing at release time, since there is no post-hoc rollback for data. Users on 0.1.0/0.1.1 have no updater and install by hand. The Homebrew cask sets `auto_updates true`, so it will not replace a self-updated app. **Plugins do not auto-update** — no registry exists in this design; a plugin is updated by reinstalling it or through the directory hot reload, and a plugin built against a different `apiVersion` major is refused with a clear message.
+- **Pre-release gate.** A committed fixture set run by `bun test`: a real 0.2.3 settings blob, conversation JSON and backup parse unchanged; the current schema round-trips a blob carrying a plugin protocol, plugin state and `dataVersion`; and a deliberately corrupted blob leaves the stored value intact while `setSettings` refuses.
+
 ## Decisions
 
+- **Data compatibility is a hard requirement** (§13), which is what keeps this change a minor release: the schema change is additive, no conversation field moves, and the parse-failure path is fixed to preserve rather than replace. The migration registry ships empty because the next schema change is what needs it.
+- **Plugin code has no auto-update** (no registry in this design); the app itself does auto-update, and therefore reaches real user data — which is why §13 is a gate rather than a note.
 - **Full-trust in-process plugins** (user's call). Only model that delivers "modify all UI, move everything, control all logic"; no in-process sandbox exists, so none is claimed.
 - **Local directory now, hosted registry later** (user's call). The loader reads a manifest and a source adapter, so nothing in the API assumes a local directory.
 - **Slots + replace/hide/order + layout override** (user's call), with the registry-assembled UI and the default layout as a contribution.
@@ -310,6 +329,7 @@ Subagent routing: phase 1's mechanical seam conversion and the fixtures are free
 - A plugin can add/remove/reorder/replace any listed region, replace the root layout, register a tool that executes in the loop, register a protocol, rewrite an outgoing request, rewrite or drop a streamed chunk, add a command and keybinding, add a settings section, set theme variables, raise a toast, read and write conversations, and write to its own data directory.
 - Disabling a plugin removes every trace of it without a page reload.
 - An invalid manifest, a load fault, a setup fault, a render fault and a middleware fault each leave the app alive and visible.
+- Upgrading from a 0.2.3 install loses nothing and needs no manual step; a corrupted settings blob is preserved and reported, and is never silently replaced by defaults.
 - `bun test`, `bun run lint`, `tsc` and `vite build` are green.
 
 ## Out of scope
