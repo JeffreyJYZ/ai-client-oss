@@ -18,7 +18,15 @@ import {
 } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { Effect, Option } from "effect";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import {
+	type ChangeEvent,
+	createContext,
+	type ReactNode,
+	useContext,
+	useEffect,
+	useRef,
+	useState,
+} from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import {
 	addProfile,
@@ -34,6 +42,7 @@ import {
 import { checkForUpdates, installNow, useUpdates } from "@/state/updates";
 import ConfirmButton from "@/ui/ConfirmButton";
 import { BUTTON, INPUT, LABEL, Section } from "@/ui/kit";
+import Slot from "@/ui/slots/Slot";
 
 /** Only tool the UI exposes; the request body sends it verbatim. */
 const WEB_SEARCH = "web_search_preview";
@@ -41,141 +50,234 @@ const DEFAULT_MAX_RESULTS = 5;
 /** Sentinel for the preset select when no preset matches the provider. */
 const CUSTOM_PRESET = "custom";
 
-export default function Settings() {
+/**
+ * The little bit of state the editor pairs share: the Providers list has to
+ * open the provider editor, the Profiles list the profile editor, and every
+ * mutation clears the transient status line the editors render. Splitting the
+ * `<details>` sections into separate `settings.sections` contributions moves
+ * each pair into two components, so this is the seam that keeps that state in
+ * one place (the shell, {@link SettingsShell}) rather than duplicating it.
+ *
+ * It is a context, not a second store: absent a provider (a plugin replacing
+ * `settings.root`), the sections degrade — the lists still render, the editors
+ * simply never open — instead of crashing.
+ */
+interface EditorState {
+	readonly editingId: string | null;
+	readonly setEditingId: (id: string | null) => void;
+	readonly editingProfileId: string | null;
+	readonly setEditingProfileId: (id: string | null) => void;
+	readonly message: string | null;
+	readonly setMessage: (message: string | null) => void;
+}
+
+const EditorContext = createContext<EditorState | null>(null);
+
+const useEditor = (): EditorState | null => useContext(EditorContext);
+
+/** Holds the editor pair state for the section contributions below it. */
+function EditorProvider({ children }: { readonly children: ReactNode }) {
+	const [editingId, setEditingId] = useState<string | null>(null);
+	const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
+	const [message, setMessage] = useState<string | null>(null);
+	const value: EditorState = {
+		editingId,
+		setEditingId,
+		editingProfileId,
+		setEditingProfileId,
+		message,
+		setMessage,
+	};
+	return (
+		<EditorContext.Provider value={value}>{children}</EditorContext.Provider>
+	);
+}
+
+/**
+ * The Settings page itself, registered at `settings.root`; the sections below
+ * render into the nested `settings.sections` (the `settings.nav` slot is empty
+ * of built-ins — it exists for plugins). Wrapping the sections in
+ * {@link EditorProvider} keeps the page's per-editor state next to the page
+ * chrome, exactly where it lived when this was one component.
+ */
+export function SettingsShell() {
+	return (
+		<div className="flex-1 overflow-y-auto bg-neutral-950 px-4 py-6">
+			<div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
+				<h2 className="text-xs uppercase tracking-widest text-neutral-500">
+					Settings
+				</h2>
+				<EditorProvider>
+					<Slot id="settings.nav" />
+					<Slot id="settings.sections" />
+				</EditorProvider>
+			</div>
+		</div>
+	);
+}
+
+/**
+ * The page's warning banners and the local-endpoint note, registered at
+ * `settings.sections` so a plugin can reorder or hide them like any other
+ * section (spec §4). Each derives its own condition from the settings store.
+ */
+export function SettingsNotices() {
 	const settings = useSettings();
-	const updates = useUpdates();
 	const active = settings.providers.find(
 		(provider) => provider.id === settings.activeProviderId,
 	);
-
-	// `editingId` only gates the edit form; the form always edits the active
-	// provider (Edit/Add select it first), so every change writes to one entry.
-	const [editingId, setEditingId] = useState<string | null>(null);
-	const [editingProfileId, setEditingProfileId] = useState<string | null>(null);
-	const [modelsPending, setModelsPending] = useState(false);
-	const [testPending, setTestPending] = useState(false);
-	const [message, setMessage] = useState<string | null>(null);
-	const [backupStatus, setBackupStatus] = useState<{
-		readonly ok: boolean;
-		readonly text: string;
-	} | null>(null);
-	/**
-	 * Raw text of a stored settings blob that failed to parse, or `null` when
-	 * the store is readable. Non-null shows the preservation banner, which is
-	 * the only place the user learns the file was left alone.
-	 */
-	const [unreadableSettings, setUnreadableSettings] = useState<string | null>(
-		null,
-	);
-	/**
-	 * Raw pre-migration settings blob the composition root captured, or `null`.
-	 * Non-null shows the download control in the Backup section, so the
-	 * pre-upgrade values stay reachable (spec §13).
-	 */
-	const [preMigration, setPreMigration] = useState<string | null>(null);
-	const importInputRef = useRef<HTMLInputElement>(null);
-
-	// This view owns the Updates section: run a fresh check when
-	// it mounts, so the section never shows a stale answer (the
-	// strip's own check may predate it, or have been dismissed).
-	useEffect(() => {
-		if (!isDesktop) return;
-		checkForUpdates();
-	}, []);
-
-	// Re-read the rejection and the pre-migration capture on every render: the
-	// settings store records both during its own (async) hydration, which may
-	// settle after this view mounts. The values stabilise, so this does not loop.
-	useEffect(() => {
-		Effect.runFork(
-			Effect.map(db.rejectedSettings(), (raw) =>
-				setUnreadableSettings(Option.getOrNull(raw)),
-			),
-		);
-		setPreMigration(getPreMigrationCapture());
-	});
-
 	const missingKey =
 		!isLocalEndpoint(active?.baseUrl ?? "") &&
 		(active?.apiKey ?? "").trim() === "";
 	const missingBaseUrl = (active?.baseUrl ?? "").trim() === "";
 
-	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
-		if (active === undefined) return;
-		updateProvider(active.id, patch);
-	};
+	return (
+		<>
+			{active === undefined ? (
+				<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
+					No provider configured — add one below to start sending.
+				</div>
+			) : null}
+			{active !== undefined && missingKey ? (
+				<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
+					No API key set — sending is disabled until you add one below.
+				</div>
+			) : null}
+			{active !== undefined && missingBaseUrl ? (
+				<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
+					No base URL set — sending is disabled until you add one below.
+				</div>
+			) : null}
+			{active !== undefined && isLocalEndpoint(active.baseUrl) ? (
+				<p className="text-xs text-neutral-500">
+					Local endpoint: no API key needed. A browser page still needs the
+					server to allow this origin (e.g. OLLAMA_ORIGINS) — the desktop build
+					has no such limit.
+				</p>
+			) : null}
+		</>
+	);
+}
 
-	// Tools are per-provider: the toggle edits the ACTIVE provider's
-	// `tools`. Enabled = a non-empty tools array; the endpoint's own
-	// search executes it where one exists, and TinyFish's client-side
-	// web_search does so where none does (a key is required).
-	const activeTools = active?.tools ?? [];
-	const searchKind = searchKindFor(active?.baseUrl ?? "");
-	const webSearch = activeTools.length > 0;
-	// A TinyFish key serves search where the endpoint has none, so
-	// it keeps the toggle live on such an endpoint.
-	const tinyfishKey = settings.tinyfishApiKey.trim();
-	const maxNumResults =
-		activeTools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
-		DEFAULT_MAX_RESULTS;
-
-	const setWebSearch = (on: boolean): void => {
-		patchActive({
-			tools: on ? [{ type: WEB_SEARCH, max_num_results: maxNumResults }] : [],
-		});
-	};
-
-	const setFetchToolEnabled = (on: boolean): void => {
-		setSettings({ fetchToolEnabled: on });
-	};
-
-	const setMaxResults = (raw: string): void => {
-		const value = Number.parseInt(raw, 10);
-		if (!Number.isFinite(value)) return;
-		patchActive({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
-	};
+/** The provider list and its "Add provider" control (`settings.sections`). */
+export function ProviderSection() {
+	const settings = useSettings();
+	const editor = useEditor();
 
 	const openEditor = (id: string): void => {
 		selectProvider(id);
-		setEditingId(id);
-		setMessage(null);
+		editor?.setEditingId(id);
+		editor?.setMessage(null);
 	};
 
 	const add = (): void => {
 		const id = addProvider();
-		setEditingId(id);
-		setMessage(null);
+		editor?.setEditingId(id);
+		editor?.setMessage(null);
 	};
 
 	const remove = (id: string): void => {
 		removeProvider(id);
-		if (editingId === id) setEditingId(null);
-		setMessage(null);
+		if (editor?.editingId === id) editor.setEditingId(null);
+		editor?.setMessage(null);
 	};
 
-	const editingProfile = settings.profiles.find(
-		(profile) => profile.id === editingProfileId,
+	return (
+		<Section
+			className="flex flex-col gap-3"
+			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			heading={
+				<>
+					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+						Providers
+					</h3>
+					<button type="button" onClick={add} className={BUTTON}>
+						Add provider
+					</button>
+				</>
+			}
+		>
+			{settings.providers.length === 0 ? (
+				<p className="text-sm text-neutral-500">
+					No providers yet — add one to start.
+				</p>
+			) : (
+				<ul className="flex flex-col gap-2">
+					{settings.providers.map((provider) => {
+						const isActive = provider.id === settings.activeProviderId;
+						return (
+							<li
+								key={provider.id}
+								className={`flex items-center gap-2 rounded-md border px-3 py-2 ${
+									isActive
+										? "border-neutral-500 bg-neutral-900"
+										: "border-neutral-800 bg-neutral-950"
+								}`}
+							>
+								<button
+									type="button"
+									onClick={() => selectProvider(provider.id)}
+									className="flex min-w-0 flex-1 flex-col items-start text-left"
+								>
+									<span className="flex items-center gap-2 truncate text-sm text-neutral-100">
+										{provider.label.trim() !== ""
+											? provider.label
+											: "Untitled provider"}
+										{isActive ? (
+											<span className="text-xs uppercase tracking-widest text-emerald-400">
+												active
+											</span>
+										) : null}
+									</span>
+									<span className="w-full truncate text-xs text-neutral-500">
+										{provider.baseUrl.trim() !== ""
+											? provider.baseUrl
+											: "no base URL"}
+									</span>
+								</button>
+								<button
+									type="button"
+									onClick={() => openEditor(provider.id)}
+									className={BUTTON}
+								>
+									Edit
+								</button>
+								<ConfirmButton
+									label="Remove"
+									confirmLabel="Confirm?"
+									onConfirm={() => remove(provider.id)}
+									className={BUTTON}
+								/>
+							</li>
+						);
+					})}
+				</ul>
+			)}
+		</Section>
 	);
+}
 
-	const patchProfile = (patch: Partial<Omit<Profile, "id">>): void => {
-		if (editingProfile === undefined) return;
-		updateProfile(editingProfile.id, patch);
+/**
+ * The active provider's edit form, registered at `settings.sections` as its own
+ * contribution so a plugin can reorder or hide it independently. It opens when
+ * {@link ProviderSection} sets the shared `editingId`, and edits the active
+ * provider (Edit/Add select it first), so every change writes to one entry.
+ */
+export function ProviderEditor() {
+	const settings = useSettings();
+	const editor = useEditor();
+	const active = settings.providers.find(
+		(provider) => provider.id === settings.activeProviderId,
+	);
+	const [modelsPending, setModelsPending] = useState(false);
+	const [testPending, setTestPending] = useState(false);
+
+	const message = editor?.message ?? null;
+
+	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
+		if (active === undefined) return;
+		updateProvider(active.id, patch);
 	};
-
-	const addProfileEntry = (): void => {
-		setEditingProfileId(addProfile());
-	};
-
-	const removeProfileEntry = (id: string): void => {
-		removeProfile(id);
-		if (editingProfileId === id) setEditingProfileId(null);
-	};
-
-	// Models offered for the profile's chosen provider, from its last fetch.
-	const editingProfileModels =
-		settings.providers.find(
-			(provider) => provider.id === editingProfile?.providerId,
-		)?.models ?? [];
 
 	// Reflect the active preset by matching the provider; anything that does
 	// not match a preset reads as "Custom".
@@ -215,7 +317,7 @@ export default function Settings() {
 	const fetchModels = (): void => {
 		if (active === undefined || !canFetch) return;
 		const id = active.id;
-		setMessage(null);
+		editor?.setMessage(null);
 		setModelsPending(true);
 		Effect.runFork(
 			// `protocol` is a plain string on the schema (a plugin may register
@@ -229,7 +331,7 @@ export default function Settings() {
 				Effect.tap((ids) =>
 					Effect.sync(() => updateProvider(id, { models: ids })),
 				),
-				Effect.catch((error) => Effect.sync(() => setMessage(error))),
+				Effect.catch((error) => Effect.sync(() => editor?.setMessage(error))),
 				Effect.ensuring(Effect.sync(() => setModelsPending(false))),
 			),
 		);
@@ -238,7 +340,7 @@ export default function Settings() {
 	const testConnection = (): void => {
 		if (active === undefined || !canTest) return;
 		const model = active.model;
-		setMessage(null);
+		editor?.setMessage(null);
 		setTestPending(true);
 		Effect.runFork(
 			// Same as `fetchModels`: Task 11's registry replaces the cast.
@@ -248,12 +350,585 @@ export default function Settings() {
 				active.apiKey,
 				model,
 			).pipe(
-				Effect.tap(() => Effect.sync(() => setMessage(`✓ ${model} responded`))),
-				Effect.catch((error) => Effect.sync(() => setMessage(error))),
+				Effect.tap(() =>
+					Effect.sync(() => editor?.setMessage(`✓ ${model} responded`)),
+				),
+				Effect.catch((error) => Effect.sync(() => editor?.setMessage(error))),
 				Effect.ensuring(Effect.sync(() => setTestPending(false))),
 			),
 		);
 	};
+
+	const showEditor = editor?.editingId != null && active !== undefined;
+	if (!showEditor || active === undefined) return null;
+
+	return (
+		<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
+			<p className="text-xs uppercase tracking-widest text-neutral-500">
+				Editing active provider
+			</p>
+			<label className={LABEL}>
+				Label
+				<input
+					type="text"
+					value={active.label}
+					onChange={(event) => patchActive({ label: event.target.value })}
+					placeholder="OpenAI-compatible"
+					className={INPUT}
+				/>
+			</label>
+			<label className={LABEL}>
+				Preset
+				<select
+					value={activePreset}
+					onChange={(event) => selectPreset(event.target.value)}
+					className={INPUT}
+				>
+					{PROVIDER_PRESETS.map((preset) => (
+						<option key={preset.id} value={preset.id}>
+							{preset.label}
+						</option>
+					))}
+					<option value={CUSTOM_PRESET}>Custom</option>
+				</select>
+			</label>
+			<label className={LABEL}>
+				Protocol
+				<select
+					value={active.protocol}
+					onChange={(event) =>
+						patchActive({
+							protocol: event.target.value as ProtocolName,
+						})
+					}
+					className={INPUT}
+				>
+					{protocolNames.map((name) => (
+						<option key={name} value={name}>
+							{name}
+						</option>
+					))}
+				</select>
+			</label>
+			<label className={LABEL}>
+				Base URL
+				<input
+					type="text"
+					value={active.baseUrl}
+					onChange={(event) => patchActive({ baseUrl: event.target.value })}
+					placeholder="https://api.openai.com/v1"
+					className={INPUT}
+				/>
+			</label>
+			<label className={LABEL}>
+				API key
+				<input
+					type="password"
+					autoComplete="off"
+					value={active.apiKey}
+					onChange={(event) => patchActive({ apiKey: event.target.value })}
+					placeholder="sk-…"
+					className={INPUT}
+				/>
+			</label>
+			<label className={LABEL}>
+				Model
+				<input
+					type="text"
+					list="model-suggestions"
+					value={active.model}
+					onChange={(event) => patchActive({ model: event.target.value })}
+					placeholder="gpt-4o-mini"
+					className={INPUT}
+				/>
+			</label>
+			<datalist id="model-suggestions">
+				{active.models.map((id) => (
+					<option key={id} value={id} />
+				))}
+			</datalist>
+			<div className="flex flex-wrap items-center gap-3">
+				<button
+					type="button"
+					onClick={fetchModels}
+					disabled={!canFetch || pending}
+					className={BUTTON}
+				>
+					{modelsPending ? "Fetching…" : "Fetch models"}
+				</button>
+				<button
+					type="button"
+					onClick={testConnection}
+					disabled={!canTest || pending}
+					className={BUTTON}
+				>
+					{testPending ? "Testing…" : "Test connection"}
+				</button>
+				{message !== null ? (
+					<span
+						className={`text-sm ${
+							message.startsWith("✓") ? "text-green-400" : "text-red-400"
+						}`}
+					>
+						{message}
+					</span>
+				) : null}
+			</div>
+		</div>
+	);
+}
+
+/** The profile list and its "Add profile" control (`settings.sections`). */
+export function ProfilesSection() {
+	const settings = useSettings();
+	const editor = useEditor();
+
+	const addProfileEntry = (): void => {
+		editor?.setEditingProfileId(addProfile());
+	};
+
+	const removeProfileEntry = (id: string): void => {
+		removeProfile(id);
+		if (editor?.editingProfileId === id) editor.setEditingProfileId(null);
+	};
+
+	return (
+		<Section
+			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			heading={
+				<>
+					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+						Profiles
+					</h3>
+					<button type="button" onClick={addProfileEntry} className={BUTTON}>
+						Add profile
+					</button>
+				</>
+			}
+		>
+			{settings.profiles.length === 0 ? (
+				<p className="text-sm text-neutral-500">
+					No profiles yet — add one to bundle a provider, model and system
+					prompt.
+				</p>
+			) : (
+				<ul className="flex flex-col gap-2">
+					{settings.profiles.map((profile) => (
+						<li
+							key={profile.id}
+							className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
+						>
+							<span className="flex min-w-0 flex-1 flex-col items-start text-left">
+								<span className="w-full truncate text-sm text-neutral-100">
+									{profile.name.trim() !== ""
+										? profile.name
+										: "Untitled profile"}
+								</span>
+								<span className="w-full truncate text-xs text-neutral-500">
+									{profile.model.trim() !== "" ? profile.model : "no model"}
+								</span>
+							</span>
+							<button
+								type="button"
+								onClick={() => editor?.setEditingProfileId(profile.id)}
+								className={BUTTON}
+							>
+								Edit
+							</button>
+							<ConfirmButton
+								label="Remove"
+								confirmLabel="Confirm?"
+								onConfirm={() => removeProfileEntry(profile.id)}
+								className={BUTTON}
+							/>
+						</li>
+					))}
+				</ul>
+			)}
+		</Section>
+	);
+}
+
+/** The editing profile's form, registered as its own `settings.sections` entry. */
+export function ProfileEditor() {
+	const settings = useSettings();
+	const editor = useEditor();
+
+	const editingProfile = settings.profiles.find(
+		(profile) => profile.id === editor?.editingProfileId,
+	);
+
+	const patchProfile = (patch: Partial<Omit<Profile, "id">>): void => {
+		if (editingProfile === undefined) return;
+		updateProfile(editingProfile.id, patch);
+	};
+
+	// Models offered for the profile's chosen provider, from its last fetch.
+	const editingProfileModels =
+		settings.providers.find(
+			(provider) => provider.id === editingProfile?.providerId,
+		)?.models ?? [];
+
+	if (editingProfile === undefined) return null;
+
+	return (
+		<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
+			<p className="text-xs uppercase tracking-widest text-neutral-500">
+				Editing profile
+			</p>
+			<label className={LABEL}>
+				Name
+				<input
+					type="text"
+					value={editingProfile.name}
+					onChange={(event) => patchProfile({ name: event.target.value })}
+					placeholder="Fast"
+					className={INPUT}
+				/>
+			</label>
+			<label className={LABEL}>
+				Provider
+				<select
+					value={editingProfile.providerId}
+					onChange={(event) => patchProfile({ providerId: event.target.value })}
+					className={INPUT}
+				>
+					<option value="">—</option>
+					{settings.providers.map((provider) => (
+						<option key={provider.id} value={provider.id}>
+							{provider.label.trim() !== ""
+								? provider.label
+								: "Untitled provider"}
+						</option>
+					))}
+				</select>
+			</label>
+			<label className={LABEL}>
+				Model
+				<input
+					type="text"
+					list="profile-model-suggestions"
+					value={editingProfile.model}
+					onChange={(event) => patchProfile({ model: event.target.value })}
+					placeholder="gpt-4o-mini"
+					className={INPUT}
+				/>
+			</label>
+			<datalist id="profile-model-suggestions">
+				{editingProfileModels.map((id) => (
+					<option key={id} value={id} />
+				))}
+			</datalist>
+			<label className={LABEL}>
+				System prompt
+				<textarea
+					rows={4}
+					value={editingProfile.systemPrompt}
+					onChange={(event) =>
+						patchProfile({ systemPrompt: event.target.value })
+					}
+					placeholder="Instructions applied when this profile is picked…"
+					className={INPUT}
+				/>
+			</label>
+		</div>
+	);
+}
+
+/** The web-search / page-fetch / TinyFish block (`settings.sections`). */
+export function WebSearchSection() {
+	const settings = useSettings();
+	const active = settings.providers.find(
+		(provider) => provider.id === settings.activeProviderId,
+	);
+
+	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
+		if (active === undefined) return;
+		updateProvider(active.id, patch);
+	};
+
+	// Tools are per-provider: the toggle edits the ACTIVE provider's
+	// `tools`. Enabled = a non-empty tools array; the endpoint's own
+	// search executes it where one exists, and TinyFish's client-side
+	// web_search does so where none does (a key is required).
+	const activeTools = active?.tools ?? [];
+	const searchKind = searchKindFor(active?.baseUrl ?? "");
+	const webSearch = activeTools.length > 0;
+	// A TinyFish key serves search where the endpoint has none, so
+	// it keeps the toggle live on such an endpoint.
+	const tinyfishKey = settings.tinyfishApiKey.trim();
+	const maxNumResults =
+		activeTools.find((tool) => tool.type === WEB_SEARCH)?.max_num_results ??
+		DEFAULT_MAX_RESULTS;
+
+	const setWebSearch = (on: boolean): void => {
+		patchActive({
+			tools: on ? [{ type: WEB_SEARCH, max_num_results: maxNumResults }] : [],
+		});
+	};
+
+	const setFetchToolEnabled = (on: boolean): void => {
+		setSettings({ fetchToolEnabled: on });
+	};
+
+	const setMaxResults = (raw: string): void => {
+		const value = Number.parseInt(raw, 10);
+		if (!Number.isFinite(value)) return;
+		patchActive({ tools: [{ type: WEB_SEARCH, max_num_results: value }] });
+	};
+
+	return (
+		<Section
+			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			heading={
+				<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
+					Web search
+					<input
+						type="checkbox"
+						checked={webSearch}
+						disabled={
+							active === undefined ||
+							(searchKind === null && tinyfishKey === "")
+						}
+						onChange={(event) => setWebSearch(event.target.checked)}
+						className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
+					/>
+				</label>
+			}
+		>
+			{searchKind === null ? (
+				<p className="text-xs text-neutral-500">
+					This endpoint has no server-side web search
+					{tinyfishKey === ""
+						? "."
+						: " — with a TinyFish key set, search runs through TinyFish (free within its daily allowance)."}
+				</p>
+			) : searchKind === "openrouter" ? (
+				<p className="text-xs text-neutral-500">
+					OpenRouter&apos;s search server tool lets the model decide when to
+					search (billed by OpenRouter).
+				</p>
+			) : searchKind === "anthropic" ? (
+				<p className="text-xs text-neutral-500">
+					Anthropic executes its built-in web_search server tool on its own API
+					(billed by Anthropic).
+				</p>
+			) : (
+				<p className="text-xs text-neutral-500">
+					Applies only to the active provider — OpenAI executes its built-in
+					search tool on its own API.
+				</p>
+			)}
+			{webSearch && searchKind !== null ? (
+				<label className={LABEL}>
+					Max results
+					<input
+						type="number"
+						min={1}
+						value={maxNumResults}
+						onChange={(event) => setMaxResults(event.target.value)}
+						className={INPUT}
+					/>
+				</label>
+			) : null}
+			<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
+				Page fetch
+				<input
+					type="checkbox"
+					checked={settings.fetchToolEnabled}
+					onChange={(event) => setFetchToolEnabled(event.target.checked)}
+					className="h-4 w-4 accent-neutral-300"
+				/>
+			</label>
+			<p className="text-xs text-neutral-500">
+				With this on, every request declares the built-in fetch_url tool, so the
+				model can read a page you link. The desktop app fetches it directly; the
+				browser build is bound by cross-origin rules.
+			</p>
+			<label className={LABEL}>
+				TinyFish API key
+				<input
+					type="password"
+					autoComplete="off"
+					value={settings.tinyfishApiKey}
+					onChange={(event) =>
+						setSettings({ tinyfishApiKey: event.target.value })
+					}
+					placeholder="TinyFish key"
+					className={INPUT}
+				/>
+			</label>
+			<p className="text-xs text-neutral-500">
+				Search and page fetch run through TinyFish while a key is set — free
+				within a daily allowance. The client-side web_search tool is declared
+				where the endpoint has no search of its own, and fetch_url reads through
+				TinyFish first. Get a key at{" "}
+				<a
+					href={TINYFISH_API_KEYS_URL}
+					target="_blank"
+					rel="noreferrer noopener"
+					className="text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
+				>
+					agent.tinyfish.ai/api-keys
+				</a>
+				.
+			</p>
+		</Section>
+	);
+}
+
+/** The durable-memory list and its editor (`settings.sections`, open-closed). */
+export function MemorySection() {
+	const settings = useSettings();
+	const [memoryDraft, setMemoryDraft] = useState("");
+
+	const setMemoriesEnabled = (on: boolean): void => {
+		setSettings({ memoriesEnabled: on });
+	};
+
+	/**
+	 * Add a user-typed note through the same merge as the model path, then
+	 * re-stamp the added note `source: "user"` (the merge stamps its additions
+	 * "model"). Identity, not position, decides what is new: a duplicate adds
+	 * nothing and the cap evicts the oldest.
+	 */
+	const addMemory = (): void => {
+		const text = memoryDraft.trim();
+		if (text === "") return;
+		const existingIds = new Set(settings.memories.map((note) => note.id));
+		const merged: MemoryNote[] = mergeMemories(
+			settings.memories,
+			[text],
+			Date.now(),
+		).map((note) =>
+			existingIds.has(note.id) ? note : { ...note, source: "user" as const },
+		);
+		setSettings({ memories: merged });
+		setMemoryDraft("");
+	};
+
+	const removeMemory = (id: string): void => {
+		setSettings({
+			memories: settings.memories.filter((note) => note.id !== id),
+		});
+	};
+
+	return (
+		<Section
+			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+			summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+			open={false}
+			heading={
+				<>
+					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+						Memory
+					</h3>
+					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
+						Enabled
+						<input
+							type="checkbox"
+							checked={settings.memoriesEnabled}
+							onChange={(event) => setMemoriesEnabled(event.target.checked)}
+							className="h-4 w-4 accent-neutral-300"
+						/>
+					</label>
+				</>
+			}
+		>
+			<p className="text-xs text-neutral-500">
+				One list of durable facts for every chat, sent with each request. The
+				model can save notes in its replies; you can add or remove them here.
+			</p>
+			{settings.memories.length === 0 ? (
+				<p className="text-sm text-neutral-500">No memories yet.</p>
+			) : (
+				<ul className="flex flex-col gap-2">
+					{[...settings.memories].reverse().map((note) => (
+						<li
+							key={note.id}
+							className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
+						>
+							<span className="flex min-w-0 flex-1 flex-col items-start text-left">
+								<span className="w-full text-sm text-neutral-100">
+									{note.text}
+								</span>
+								<span className="w-full truncate text-xs text-neutral-500">
+									{note.source === "model" ? "from the model" : "yours"} ·{" "}
+									{new Date(note.createdAt).toLocaleDateString()}
+								</span>
+							</span>
+							<ConfirmButton
+								label="Delete"
+								confirmLabel="Confirm?"
+								onConfirm={() => removeMemory(note.id)}
+								className={BUTTON}
+							/>
+						</li>
+					))}
+				</ul>
+			)}
+			<form
+				className="flex gap-2"
+				onSubmit={(event) => {
+					event.preventDefault();
+					addMemory();
+				}}
+			>
+				<input
+					type="text"
+					value={memoryDraft}
+					maxLength={MAX_MEMORY_NOTE_LENGTH}
+					onChange={(event) => setMemoryDraft(event.target.value)}
+					placeholder="Remember that…"
+					className={INPUT}
+				/>
+				<button
+					type="submit"
+					disabled={memoryDraft.trim() === ""}
+					className={BUTTON}
+				>
+					Add
+				</button>
+			</form>
+		</Section>
+	);
+}
+
+/** The backup export/import block, with its banners (`settings.sections`). */
+export function BackupSection() {
+	const [backupStatus, setBackupStatus] = useState<{
+		readonly ok: boolean;
+		readonly text: string;
+	} | null>(null);
+	/**
+	 * Raw text of a stored settings blob that failed to parse, or `null` when
+	 * the store is readable. Non-null shows the preservation banner, which is
+	 * the only place the user learns the file was left alone.
+	 */
+	const [unreadableSettings, setUnreadableSettings] = useState<string | null>(
+		null,
+	);
+	/**
+	 * Raw pre-migration settings blob the composition root captured, or `null`.
+	 * Non-null shows the download control in the Backup section, so the
+	 * pre-upgrade values stay reachable (spec §13).
+	 */
+	const [preMigration, setPreMigration] = useState<string | null>(null);
+	const importInputRef = useRef<HTMLInputElement>(null);
+
+	// Re-read the rejection and the pre-migration capture on every render: the
+	// settings store records both during its own (async) hydration, which may
+	// settle after this view mounts. The values stabilise, so this does not loop.
+	useEffect(() => {
+		Effect.runFork(
+			Effect.map(db.rejectedSettings(), (raw) =>
+				setUnreadableSettings(Option.getOrNull(raw)),
+			),
+		);
+		setPreMigration(getPreMigrationCapture());
+	});
 
 	/** Identical bytes for the download and the clipboard copy. */
 	const serializeBackup = (backup: Backup): string =>
@@ -411,755 +1086,199 @@ export default function Settings() {
 		event.target.value = "";
 	};
 
-	const [memoryDraft, setMemoryDraft] = useState("");
-
-	const setMemoriesEnabled = (on: boolean): void => {
-		setSettings({ memoriesEnabled: on });
-	};
-
-	/**
-	 * Add a user-typed note through the same merge as the model path, then
-	 * re-stamp the added note `source: "user"` (the merge stamps its additions
-	 * "model"). Identity, not position, decides what is new: a duplicate adds
-	 * nothing and the cap evicts the oldest.
-	 */
-	const addMemory = (): void => {
-		const text = memoryDraft.trim();
-		if (text === "") return;
-		const existingIds = new Set(settings.memories.map((note) => note.id));
-		const merged: MemoryNote[] = mergeMemories(
-			settings.memories,
-			[text],
-			Date.now(),
-		).map((note) =>
-			existingIds.has(note.id) ? note : { ...note, source: "user" as const },
-		);
-		setSettings({ memories: merged });
-		setMemoryDraft("");
-	};
-
-	const removeMemory = (id: string): void => {
-		setSettings({
-			memories: settings.memories.filter((note) => note.id !== id),
-		});
-	};
-
-	const showEditor = editingId !== null && active !== undefined;
-
 	return (
-		<div className="flex-1 overflow-y-auto bg-neutral-950 px-4 py-6">
-			<div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
-				<h2 className="text-xs uppercase tracking-widest text-neutral-500">
-					Settings
-				</h2>
-				{active === undefined ? (
-					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
-						No provider configured — add one below to start sending.
-					</div>
-				) : null}
-				{active !== undefined && missingKey ? (
-					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
-						No API key set — sending is disabled until you add one below.
-					</div>
-				) : null}
-				{active !== undefined && missingBaseUrl ? (
-					<div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-left text-sm text-amber-300">
-						No base URL set — sending is disabled until you add one below.
-					</div>
-				) : null}
-				{active !== undefined && isLocalEndpoint(active.baseUrl) ? (
-					<p className="text-xs text-neutral-500">
-						Local endpoint: no API key needed. A browser page still needs the
-						server to allow this origin (e.g. OLLAMA_ORIGINS) — the desktop
-						build has no such limit.
-					</p>
-				) : null}
-
-				<Section
-					className="flex flex-col gap-3"
-					summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
-					heading={
-						<>
-							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-								Providers
-							</h3>
-							<button type="button" onClick={add} className={BUTTON}>
-								Add provider
-							</button>
-						</>
-					}
-				>
-					{settings.providers.length === 0 ? (
-						<p className="text-sm text-neutral-500">
-							No providers yet — add one to start.
-						</p>
-					) : (
-						<ul className="flex flex-col gap-2">
-							{settings.providers.map((provider) => {
-								const isActive = provider.id === settings.activeProviderId;
-								return (
-									<li
-										key={provider.id}
-										className={`flex items-center gap-2 rounded-md border px-3 py-2 ${
-											isActive
-												? "border-neutral-500 bg-neutral-900"
-												: "border-neutral-800 bg-neutral-950"
-										}`}
-									>
-										<button
-											type="button"
-											onClick={() => selectProvider(provider.id)}
-											className="flex min-w-0 flex-1 flex-col items-start text-left"
-										>
-											<span className="flex items-center gap-2 truncate text-sm text-neutral-100">
-												{provider.label.trim() !== ""
-													? provider.label
-													: "Untitled provider"}
-												{isActive ? (
-													<span className="text-xs uppercase tracking-widest text-emerald-400">
-														active
-													</span>
-												) : null}
-											</span>
-											<span className="w-full truncate text-xs text-neutral-500">
-												{provider.baseUrl.trim() !== ""
-													? provider.baseUrl
-													: "no base URL"}
-											</span>
-										</button>
-										<button
-											type="button"
-											onClick={() => openEditor(provider.id)}
-											className={BUTTON}
-										>
-											Edit
-										</button>
-										<ConfirmButton
-											label="Remove"
-											confirmLabel="Confirm?"
-											onConfirm={() => remove(provider.id)}
-											className={BUTTON}
-										/>
-									</li>
-								);
-							})}
-						</ul>
-					)}
-				</Section>
-
-				{showEditor && active !== undefined ? (
-					<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
-						<p className="text-xs uppercase tracking-widest text-neutral-500">
-							Editing active provider
-						</p>
-						<label className={LABEL}>
-							Label
-							<input
-								type="text"
-								value={active.label}
-								onChange={(event) => patchActive({ label: event.target.value })}
-								placeholder="OpenAI-compatible"
-								className={INPUT}
-							/>
-						</label>
-						<label className={LABEL}>
-							Preset
-							<select
-								value={activePreset}
-								onChange={(event) => selectPreset(event.target.value)}
-								className={INPUT}
-							>
-								{PROVIDER_PRESETS.map((preset) => (
-									<option key={preset.id} value={preset.id}>
-										{preset.label}
-									</option>
-								))}
-								<option value={CUSTOM_PRESET}>Custom</option>
-							</select>
-						</label>
-						<label className={LABEL}>
-							Protocol
-							<select
-								value={active.protocol}
-								onChange={(event) =>
-									patchActive({
-										protocol: event.target.value as ProtocolName,
-									})
-								}
-								className={INPUT}
-							>
-								{protocolNames.map((name) => (
-									<option key={name} value={name}>
-										{name}
-									</option>
-								))}
-							</select>
-						</label>
-						<label className={LABEL}>
-							Base URL
-							<input
-								type="text"
-								value={active.baseUrl}
-								onChange={(event) =>
-									patchActive({ baseUrl: event.target.value })
-								}
-								placeholder="https://api.openai.com/v1"
-								className={INPUT}
-							/>
-						</label>
-						<label className={LABEL}>
-							API key
-							<input
-								type="password"
-								autoComplete="off"
-								value={active.apiKey}
-								onChange={(event) =>
-									patchActive({ apiKey: event.target.value })
-								}
-								placeholder="sk-…"
-								className={INPUT}
-							/>
-						</label>
-						<label className={LABEL}>
-							Model
-							<input
-								type="text"
-								list="model-suggestions"
-								value={active.model}
-								onChange={(event) => patchActive({ model: event.target.value })}
-								placeholder="gpt-4o-mini"
-								className={INPUT}
-							/>
-						</label>
-						<datalist id="model-suggestions">
-							{active.models.map((id) => (
-								<option key={id} value={id} />
-							))}
-						</datalist>
-						<div className="flex flex-wrap items-center gap-3">
-							<button
-								type="button"
-								onClick={fetchModels}
-								disabled={!canFetch || pending}
-								className={BUTTON}
-							>
-								{modelsPending ? "Fetching…" : "Fetch models"}
-							</button>
-							<button
-								type="button"
-								onClick={testConnection}
-								disabled={!canTest || pending}
-								className={BUTTON}
-							>
-								{testPending ? "Testing…" : "Test connection"}
-							</button>
-							{message !== null ? (
-								<span
-									className={`text-sm ${
-										message.startsWith("✓") ? "text-green-400" : "text-red-400"
-									}`}
-								>
-									{message}
-								</span>
-							) : null}
-						</div>
-					</div>
-				) : null}
-
-				<Section
-					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-					summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
-					heading={
-						<>
-							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-								Profiles
-							</h3>
-							<button
-								type="button"
-								onClick={addProfileEntry}
-								className={BUTTON}
-							>
-								Add profile
-							</button>
-						</>
-					}
-				>
-					{settings.profiles.length === 0 ? (
-						<p className="text-sm text-neutral-500">
-							No profiles yet — add one to bundle a provider, model and system
-							prompt.
-						</p>
-					) : (
-						<ul className="flex flex-col gap-2">
-							{settings.profiles.map((profile) => (
-								<li
-									key={profile.id}
-									className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
-								>
-									<span className="flex min-w-0 flex-1 flex-col items-start text-left">
-										<span className="w-full truncate text-sm text-neutral-100">
-											{profile.name.trim() !== ""
-												? profile.name
-												: "Untitled profile"}
-										</span>
-										<span className="w-full truncate text-xs text-neutral-500">
-											{profile.model.trim() !== "" ? profile.model : "no model"}
-										</span>
-									</span>
-									<button
-										type="button"
-										onClick={() => setEditingProfileId(profile.id)}
-										className={BUTTON}
-									>
-										Edit
-									</button>
-									<ConfirmButton
-										label="Remove"
-										confirmLabel="Confirm?"
-										onConfirm={() => removeProfileEntry(profile.id)}
-										className={BUTTON}
-									/>
-								</li>
-							))}
-						</ul>
-					)}
-				</Section>
-
-				{editingProfile !== undefined ? (
-					<div className="flex flex-col gap-4 rounded-md border border-neutral-800 p-4">
-						<p className="text-xs uppercase tracking-widest text-neutral-500">
-							Editing profile
-						</p>
-						<label className={LABEL}>
-							Name
-							<input
-								type="text"
-								value={editingProfile.name}
-								onChange={(event) => patchProfile({ name: event.target.value })}
-								placeholder="Fast"
-								className={INPUT}
-							/>
-						</label>
-						<label className={LABEL}>
-							Provider
-							<select
-								value={editingProfile.providerId}
-								onChange={(event) =>
-									patchProfile({ providerId: event.target.value })
-								}
-								className={INPUT}
-							>
-								<option value="">—</option>
-								{settings.providers.map((provider) => (
-									<option key={provider.id} value={provider.id}>
-										{provider.label.trim() !== ""
-											? provider.label
-											: "Untitled provider"}
-									</option>
-								))}
-							</select>
-						</label>
-						<label className={LABEL}>
-							Model
-							<input
-								type="text"
-								list="profile-model-suggestions"
-								value={editingProfile.model}
-								onChange={(event) =>
-									patchProfile({ model: event.target.value })
-								}
-								placeholder="gpt-4o-mini"
-								className={INPUT}
-							/>
-						</label>
-						<datalist id="profile-model-suggestions">
-							{editingProfileModels.map((id) => (
-								<option key={id} value={id} />
-							))}
-						</datalist>
-						<label className={LABEL}>
-							System prompt
-							<textarea
-								rows={4}
-								value={editingProfile.systemPrompt}
-								onChange={(event) =>
-									patchProfile({ systemPrompt: event.target.value })
-								}
-								placeholder="Instructions applied when this profile is picked…"
-								className={INPUT}
-							/>
-						</label>
-					</div>
-				) : null}
-
-				<Section
-					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-					summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
-					heading={
-						<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
-							Web search
-							<input
-								type="checkbox"
-								checked={webSearch}
-								disabled={
-									active === undefined ||
-									(searchKind === null && tinyfishKey === "")
-								}
-								onChange={(event) => setWebSearch(event.target.checked)}
-								className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
-							/>
-						</label>
-					}
-				>
-					{searchKind === null ? (
-						<p className="text-xs text-neutral-500">
-							This endpoint has no server-side web search
-							{tinyfishKey === ""
-								? "."
-								: " — with a TinyFish key set, search runs through TinyFish (free within its daily allowance)."}
-						</p>
-					) : searchKind === "openrouter" ? (
-						<p className="text-xs text-neutral-500">
-							OpenRouter&apos;s search server tool lets the model decide when to
-							search (billed by OpenRouter).
-						</p>
-					) : searchKind === "anthropic" ? (
-						<p className="text-xs text-neutral-500">
-							Anthropic executes its built-in web_search server tool on its own
-							API (billed by Anthropic).
-						</p>
-					) : (
-						<p className="text-xs text-neutral-500">
-							Applies only to the active provider — OpenAI executes its built-in
-							search tool on its own API.
-						</p>
-					)}
-					{webSearch && searchKind !== null ? (
-						<label className={LABEL}>
-							Max results
-							<input
-								type="number"
-								min={1}
-								value={maxNumResults}
-								onChange={(event) => setMaxResults(event.target.value)}
-								className={INPUT}
-							/>
-						</label>
-					) : null}
-					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
-						Page fetch
-						<input
-							type="checkbox"
-							checked={settings.fetchToolEnabled}
-							onChange={(event) => setFetchToolEnabled(event.target.checked)}
-							className="h-4 w-4 accent-neutral-300"
-						/>
-					</label>
-					<p className="text-xs text-neutral-500">
-						With this on, every request declares the built-in fetch_url tool, so
-						the model can read a page you link. The desktop app fetches it
-						directly; the browser build is bound by cross-origin rules.
-					</p>
-					<label className={LABEL}>
-						TinyFish API key
-						<input
-							type="password"
-							autoComplete="off"
-							value={settings.tinyfishApiKey}
-							onChange={(event) =>
-								setSettings({ tinyfishApiKey: event.target.value })
-							}
-							placeholder="TinyFish key"
-							className={INPUT}
-						/>
-					</label>
-					<p className="text-xs text-neutral-500">
-						Search and page fetch run through TinyFish while a key is set — free
-						within a daily allowance. The client-side web_search tool is
-						declared where the endpoint has no search of its own, and fetch_url
-						reads through TinyFish first. Get a key at{" "}
-						<a
-							href={TINYFISH_API_KEYS_URL}
-							target="_blank"
-							rel="noreferrer noopener"
-							className="text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
-						>
-							agent.tinyfish.ai/api-keys
-						</a>
-						.
-					</p>
-				</Section>
-				<Section
-					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-					summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
-					open={false}
-					heading={
-						<>
-							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-								Memory
-							</h3>
-							<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
-								Enabled
-								<input
-									type="checkbox"
-									checked={settings.memoriesEnabled}
-									onChange={(event) => setMemoriesEnabled(event.target.checked)}
-									className="h-4 w-4 accent-neutral-300"
-								/>
-							</label>
-						</>
-					}
-				>
-					<p className="text-xs text-neutral-500">
-						One list of durable facts for every chat, sent with each request.
-						The model can save notes in its replies; you can add or remove them
-						here.
-					</p>
-					{settings.memories.length === 0 ? (
-						<p className="text-sm text-neutral-500">No memories yet.</p>
-					) : (
-						<ul className="flex flex-col gap-2">
-							{[...settings.memories].reverse().map((note) => (
-								<li
-									key={note.id}
-									className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
-								>
-									<span className="flex min-w-0 flex-1 flex-col items-start text-left">
-										<span className="w-full text-sm text-neutral-100">
-											{note.text}
-										</span>
-										<span className="w-full truncate text-xs text-neutral-500">
-											{note.source === "model" ? "from the model" : "yours"} ·{" "}
-											{new Date(note.createdAt).toLocaleDateString()}
-										</span>
-									</span>
-									<ConfirmButton
-										label="Delete"
-										confirmLabel="Confirm?"
-										onConfirm={() => removeMemory(note.id)}
-										className={BUTTON}
-									/>
-								</li>
-							))}
-						</ul>
-					)}
-					<form
-						className="flex gap-2"
-						onSubmit={(event) => {
-							event.preventDefault();
-							addMemory();
-						}}
-					>
-						<input
-							type="text"
-							value={memoryDraft}
-							maxLength={MAX_MEMORY_NOTE_LENGTH}
-							onChange={(event) => setMemoryDraft(event.target.value)}
-							placeholder="Remember that…"
-							className={INPUT}
-						/>
+		<Section
+			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+			summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+			heading={
+				<>
+					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+						Backup
+					</h3>
+					<div className="flex gap-2">
+						<button type="button" onClick={exportBackupFile} className={BUTTON}>
+							Export
+						</button>
+						<button type="button" onClick={copyBackupJson} className={BUTTON}>
+							Copy
+						</button>
 						<button
-							type="submit"
-							disabled={memoryDraft.trim() === ""}
+							type="button"
+							onClick={() => importInputRef.current?.click()}
 							className={BUTTON}
 						>
-							Add
+							Import
 						</button>
-					</form>
-				</Section>
-				<Section
-					className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-					summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
-					heading={
-						<>
-							<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-								Backup
-							</h3>
-							<div className="flex gap-2">
-								<button
-									type="button"
-									onClick={exportBackupFile}
-									className={BUTTON}
-								>
-									Export
-								</button>
-								<button
-									type="button"
-									onClick={copyBackupJson}
-									className={BUTTON}
-								>
-									Copy
-								</button>
-								<button
-									type="button"
-									onClick={() => importInputRef.current?.click()}
-									className={BUTTON}
-								>
-									Import
-								</button>
-							</div>
-						</>
-					}
-				>
-					<input
-						ref={importInputRef}
-						type="file"
-						accept="application/json,.json"
-						onChange={onImportFile}
-						className="hidden"
-					/>
-					{unreadableSettings !== null ? (
-						<div className="flex flex-col gap-3 rounded-md border border-red-500/40 bg-red-500/5 p-3">
-							<p className="text-sm text-red-300">
-								Your stored settings could not be read, so the app is running on
-								defaults. The original file has been left untouched and nothing
-								will be written over it until you choose. Download a copy first
-								if you want to keep it, then reset to start fresh.
-							</p>
-							<div className="flex gap-2">
-								<button
-									type="button"
-									onClick={downloadUnreadableSettings}
-									className={BUTTON}
-								>
-									Download settings
-								</button>
-								<ConfirmButton
-									label="Reset settings"
-									confirmLabel="Confirm reset"
-									onConfirm={resetUnreadableSettings}
-								/>
-							</div>
-						</div>
-					) : null}
-					{preMigration !== null ? (
-						<div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
-							<p className="text-sm text-amber-300">
-								Your settings were upgraded, and a copy of the values from
-								before the upgrade was kept. Download it if you want a copy.
-							</p>
-							<button
-								type="button"
-								onClick={downloadPreMigration}
-								className={BUTTON}
-							>
-								Download pre-upgrade settings
-							</button>
-						</div>
-					) : null}
-					<p className="text-xs text-neutral-500">
-						Move settings and conversations between the desktop app and the
-						website as a JSON file. The file contains your API keys — keep it
-						private.
+					</div>
+				</>
+			}
+		>
+			<input
+				ref={importInputRef}
+				type="file"
+				accept="application/json,.json"
+				onChange={onImportFile}
+				className="hidden"
+			/>
+			{unreadableSettings !== null ? (
+				<div className="flex flex-col gap-3 rounded-md border border-red-500/40 bg-red-500/5 p-3">
+					<p className="text-sm text-red-300">
+						Your stored settings could not be read, so the app is running on
+						defaults. The original file has been left untouched and nothing will
+						be written over it until you choose. Download a copy first if you
+						want to keep it, then reset to start fresh.
 					</p>
-					{backupStatus !== null ? (
-						<span
-							className={`text-sm ${
-								backupStatus.ok ? "text-green-400" : "text-red-400"
-							}`}
+					<div className="flex gap-2">
+						<button
+							type="button"
+							onClick={downloadUnreadableSettings}
+							className={BUTTON}
 						>
-							{backupStatus.text}
-						</span>
-					) : null}
-				</Section>
-				{isDesktop ? (
-					<Section
-						className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-						summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
-						heading={
-							<>
-								<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-									Updates
-								</h3>
-								<button
-									type="button"
-									onClick={checkForUpdates}
-									disabled={
-										updates.phase === "checking" ||
-										updates.phase === "downloading"
-									}
-									className={BUTTON}
-								>
-									Check for updates
-								</button>
-							</>
-						}
+							Download settings
+						</button>
+						<ConfirmButton
+							label="Reset settings"
+							confirmLabel="Confirm reset"
+							onConfirm={resetUnreadableSettings}
+						/>
+					</div>
+				</div>
+			) : null}
+			{preMigration !== null ? (
+				<div className="flex flex-col gap-3 rounded-md border border-amber-500/40 bg-amber-500/5 p-3">
+					<p className="text-sm text-amber-300">
+						Your settings were upgraded, and a copy of the values from before
+						the upgrade was kept. Download it if you want a copy.
+					</p>
+					<button
+						type="button"
+						onClick={downloadPreMigration}
+						className={BUTTON}
 					>
-						{updates.running !== null ? (
-							<p className="text-xs text-neutral-500">
-								Running version {updates.running}
-							</p>
-						) : null}
-						{updates.phase === "checking" ? (
-							<p className="text-xs text-neutral-500">Checking for updates…</p>
-						) : null}
-						{updates.phase === "current" ? (
-							<p className="text-sm text-neutral-500">
-								You are on the latest version.
-							</p>
-						) : null}
-						{(updates.phase === "available" ||
-							updates.phase === "downloading") &&
-						updates.offer !== null ? (
-							<div className="flex flex-col gap-3">
-								<p className="text-sm text-neutral-500">
-									Version {updates.offer.version} is available.
-								</p>
-								{updates.offer.kind === "updater" ? (
-									<button
-										type="button"
-										onClick={installNow}
-										disabled={updates.phase === "downloading"}
-										className={BUTTON}
-									>
-										Update now
-									</button>
-								) : (
-									<a
-										href={LATEST_RELEASE_URL}
-										target="_blank"
-										rel="noreferrer noopener"
-										className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
-									>
-										Open the release page
-									</a>
-								)}
-								{updates.phase === "downloading" ? (
-									<p className="text-xs text-neutral-500">
-										{updates.percent === null
-											? "Downloading… (size unknown)"
-											: `Downloading… ${updates.percent}%`}
-									</p>
-								) : null}
-							</div>
-						) : null}
-						{updates.phase === "failed" ? (
-							<div className="flex flex-col gap-3">
-								<span className="text-sm text-red-400">
-									{updates.message ?? "Update check failed."}
-								</span>
-								<div className="flex items-center gap-3">
-									<a
-										href={LATEST_RELEASE_URL}
-										target="_blank"
-										rel="noreferrer noopener"
-										className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
-									>
-										Open the release page
-									</a>
-									<button
-										type="button"
-										onClick={checkForUpdates}
-										className={BUTTON}
-									>
-										Retry
-									</button>
-								</div>
-							</div>
-						) : null}
-					</Section>
-				) : null}
-			</div>
-		</div>
+						Download pre-upgrade settings
+					</button>
+				</div>
+			) : null}
+			<p className="text-xs text-neutral-500">
+				Move settings and conversations between the desktop app and the website
+				as a JSON file. The file contains your API keys — keep it private.
+			</p>
+			{backupStatus !== null ? (
+				<span
+					className={`text-sm ${
+						backupStatus.ok ? "text-green-400" : "text-red-400"
+					}`}
+				>
+					{backupStatus.text}
+				</span>
+			) : null}
+		</Section>
+	);
+}
+
+/** The desktop-only updater block (`settings.sections`). */
+export function UpdatesSection() {
+	const updates = useUpdates();
+
+	// This view owns the Updates section: run a fresh check when
+	// it mounts, so the section never shows a stale answer (the
+	// strip's own check may predate it, or have been dismissed).
+	useEffect(() => {
+		if (!isDesktop) return;
+		checkForUpdates();
+	}, []);
+
+	if (!isDesktop) return null;
+
+	return (
+		<Section
+			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
+			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			heading={
+				<>
+					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
+						Updates
+					</h3>
+					<button
+						type="button"
+						onClick={checkForUpdates}
+						disabled={
+							updates.phase === "checking" || updates.phase === "downloading"
+						}
+						className={BUTTON}
+					>
+						Check for updates
+					</button>
+				</>
+			}
+		>
+			{updates.running !== null ? (
+				<p className="text-xs text-neutral-500">
+					Running version {updates.running}
+				</p>
+			) : null}
+			{updates.phase === "checking" ? (
+				<p className="text-xs text-neutral-500">Checking for updates…</p>
+			) : null}
+			{updates.phase === "current" ? (
+				<p className="text-sm text-neutral-500">
+					You are on the latest version.
+				</p>
+			) : null}
+			{(updates.phase === "available" || updates.phase === "downloading") &&
+			updates.offer !== null ? (
+				<div className="flex flex-col gap-3">
+					<p className="text-sm text-neutral-500">
+						Version {updates.offer.version} is available.
+					</p>
+					{updates.offer.kind === "updater" ? (
+						<button
+							type="button"
+							onClick={installNow}
+							disabled={updates.phase === "downloading"}
+							className={BUTTON}
+						>
+							Update now
+						</button>
+					) : (
+						<a
+							href={LATEST_RELEASE_URL}
+							target="_blank"
+							rel="noreferrer noopener"
+							className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
+						>
+							Open the release page
+						</a>
+					)}
+					{updates.phase === "downloading" ? (
+						<p className="text-xs text-neutral-500">
+							{updates.percent === null
+								? "Downloading… (size unknown)"
+								: `Downloading… ${updates.percent}%`}
+						</p>
+					) : null}
+				</div>
+			) : null}
+			{updates.phase === "failed" ? (
+				<div className="flex flex-col gap-3">
+					<span className="text-sm text-red-400">
+						{updates.message ?? "Update check failed."}
+					</span>
+					<div className="flex items-center gap-3">
+						<a
+							href={LATEST_RELEASE_URL}
+							target="_blank"
+							rel="noreferrer noopener"
+							className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
+						>
+							Open the release page
+						</a>
+						<button type="button" onClick={checkForUpdates} className={BUTTON}>
+							Retry
+						</button>
+					</div>
+				</div>
+			) : null}
+		</Section>
 	);
 }

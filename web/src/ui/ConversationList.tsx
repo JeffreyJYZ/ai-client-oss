@@ -7,13 +7,46 @@ import {
 	selectConversation,
 	useChat,
 } from "@/state/chat";
+import { setView } from "@/state/ui";
 import ConfirmButton from "@/ui/ConfirmButton";
+import Slot from "@/ui/slots/Slot";
 
-export default function ConversationList({
-	onOpenChat,
-}: {
-	onOpenChat?: () => void;
-}) {
+/**
+ * Leaving Settings for a chat is what App.tsx's old `onOpenChat` prop did
+ * (`() => setShowSettings(false)`); the shell's view state is now a store, so a
+ * contribution flips it directly (spec §4 — a contribution cannot reach its
+ * host component's state).
+ */
+const openChat = (): void => setView("chat");
+
+/**
+ * The sidebar's "+ New" action, registered at `app.sidebar.actions` so a plugin
+ * can reorder, hide or replace the controls in the sidebar's heading row.
+ */
+export function NewChatButton() {
+	return (
+		<button
+			type="button"
+			onClick={() => {
+				newConversation();
+				openChat();
+			}}
+			className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+		>
+			+ New
+		</button>
+	);
+}
+
+/**
+ * The conversation sidebar, registered at `app.sidebar`. It is the `<aside>`
+ * the old `ConversationList` rendered — container, heading row and rows — with
+ * the heading row's controls moved into the nested `app.sidebar.actions` slot
+ * (its built-in contribution is {@link NewChatButton}). The rows, rename and
+ * delete stay here: a per-row slot would need an id `ids.ts` does not carry
+ * this phase, so the list is one contribution whose contents are its own.
+ */
+export function ConversationList() {
 	const { conversations, activeId } = useChat();
 	const [editingId, setEditingId] = useState<string | null>(null);
 	const [draft, setDraft] = useState("");
@@ -40,16 +73,7 @@ export default function ConversationList({
 				<span className="text-xs uppercase tracking-widest text-neutral-500">
 					Chats
 				</span>
-				<button
-					type="button"
-					onClick={() => {
-						newConversation();
-						onOpenChat?.();
-					}}
-					className="rounded-md border border-neutral-700 px-2 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
-				>
-					+ New
-				</button>
+				<Slot id="app.sidebar.actions" />
 			</div>
 			<div className="flex-1 overflow-y-auto px-2 pb-2">
 				{ordered.map((conversation) => {
@@ -76,7 +100,7 @@ export default function ConversationList({
 									type="button"
 									onClick={() => {
 										selectConversation(conversation.id);
-										onOpenChat?.();
+										openChat();
 									}}
 									onDoubleClick={() => startRename(conversation)}
 									title={conversation.title}
