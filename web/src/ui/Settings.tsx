@@ -18,13 +18,7 @@ import {
 } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { Effect, Option } from "effect";
-import {
-	type ChangeEvent,
-	type ReactNode,
-	useEffect,
-	useRef,
-	useState,
-} from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import {
 	addProfile,
@@ -39,55 +33,13 @@ import {
 } from "@/state/settings";
 import { checkForUpdates, installNow, useUpdates } from "@/state/updates";
 import ConfirmButton from "@/ui/ConfirmButton";
-
-const INPUT =
-	"rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-left text-sm text-neutral-100 placeholder:text-neutral-600 focus:border-neutral-500 focus:outline-none";
-
-const LABEL =
-	"flex flex-col gap-1 text-xs uppercase tracking-widest text-neutral-500";
-
-const BUTTON =
-	"rounded-md border border-neutral-700 bg-neutral-800 px-3 py-2 text-xs font-medium text-neutral-200 transition-colors hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40";
+import { BUTTON, INPUT, LABEL, Section } from "@/ui/kit";
 
 /** Only tool the UI exposes; the request body sends it verbatim. */
 const WEB_SEARCH = "web_search_preview";
 const DEFAULT_MAX_RESULTS = 5;
 /** Sentinel for the preset select when no preset matches the provider. */
 const CUSTOM_PRESET = "custom";
-
-/**
- * A foldable settings section: the summary carries the section's
- * heading row (its `<h3>` and controls), the children its content.
- * Open by default — a fold that starts closed would hide content
- * the user never chose to hide.
- */
-function Section({
-	className,
-	summaryClassName,
-	heading,
-	children,
-	open = true,
-}: {
-	readonly className: string;
-	readonly summaryClassName: string;
-	readonly heading: ReactNode;
-	readonly children: ReactNode;
-	readonly open?: boolean;
-}) {
-	return (
-		<details className={className} open={open}>
-			{/* A control in the heading row (a checkbox, a button) keeps its
-			    own activation and does not fold the section: a click on one
-			    makes it the event's activation target, so the summary's toggle
-			    never runs. Do not add an onClick that calls preventDefault to
-			    "protect" the control: that cancels the control's own action
-			    too and leaves a heading checkbox untickable (browser-verified
-			    in both cases). */}
-			<summary className={summaryClassName}>{heading}</summary>
-			{children}
-		</details>
-	);
-}
 
 export default function Settings() {
 	const settings = useSettings();

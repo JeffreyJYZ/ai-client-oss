@@ -4,9 +4,7 @@ import { Effect } from "effect";
 import { type ChangeEvent, type KeyboardEvent, useRef, useState } from "react";
 import { send, stop, useChat } from "@/state/chat";
 import { useSettings } from "@/state/settings";
-
-const BUTTON =
-	"shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40";
+import { BUTTON_PLAIN } from "@/ui/kit";
 
 /** A pending attachment plus a stable key for React (and for removal). */
 interface PendingAttachment {
@@ -174,7 +172,7 @@ export default function Composer() {
 						onClick={() => fileInputRef.current?.click()}
 						disabled={attachDisabled}
 						aria-label="Attach files"
-						className={`${BUTTON} border border-neutral-700 text-neutral-300 hover:bg-neutral-800`}
+						className={`${BUTTON_PLAIN} border border-neutral-700 text-neutral-300 hover:bg-neutral-800`}
 					>
 						<svg
 							aria-hidden="true"
@@ -209,7 +207,7 @@ export default function Composer() {
 						<button
 							type="button"
 							onClick={stop}
-							className={`${BUTTON} bg-red-600 text-white hover:bg-red-500`}
+							className={`${BUTTON_PLAIN} bg-red-600 text-white hover:bg-red-500`}
 						>
 							Stop
 						</button>
@@ -218,7 +216,7 @@ export default function Composer() {
 							type="button"
 							onClick={submit}
 							disabled={disabled}
-							className={`${BUTTON} bg-neutral-200 text-neutral-900 hover:bg-white`}
+							className={`${BUTTON_PLAIN} bg-neutral-200 text-neutral-900 hover:bg-white`}
 						>
 							Send
 						</button>
