@@ -170,6 +170,34 @@ describe("confirm", () => {
 			}),
 		);
 	});
+
+	test("a confirm under a provided scope is dropped when the scope closes (unload)", async () => {
+		const scope = makeScope();
+		await run(
+			Effect.gen(function* () {
+				// The awaiting fiber is forked into the *program*, not into
+				// `scope` — the shape `runtime.runFork(host.notify.confirm(…))`
+				// has, where the fiber is the host's and only the scope is the
+				// plugin's. `ensuring` cannot see that unload, so the scope
+				// finalizer is the half that drops this request.
+				const waiter = yield* Effect.forkChild(
+					Effect.provideService(
+						confirm({ text: "scoped" }),
+						Scope.Scope,
+						scope,
+					),
+				);
+				yield* Effect.yieldNow;
+				expect(modalTitles()).toEqual(["Confirm"]);
+
+				yield* Scope.close(scope, Exit.void);
+
+				expect(modalTitles()).toEqual([]);
+				// The requestor is answered rather than left awaiting.
+				expect(yield* Fiber.join(waiter)).toBe(false);
+			}),
+		);
+	});
 });
 
 describe("modal", () => {

@@ -26,13 +26,25 @@ export default function Modal() {
 
 	return (
 		<div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+			{/* A real button, so click-away-to-cancel needs no a11y suppression.
+			    `tabIndex={-1}` keeps it out of the tab ring: Tab reaches the
+			    dialog's own controls instead of the full-screen backdrop first. */}
 			<button
 				type="button"
+				tabIndex={-1}
 				aria-label="Dismiss dialog"
 				onClick={() => resolveModal(head.id, false)}
 				className="absolute inset-0 cursor-default bg-black/60"
 			/>
+			{/* `key` is the request id, so a new head is a new dialog *instance*.
+			    React would otherwise reuse this subtree, and a `ConfirmButton`
+			    left armed on the previous request would arrive armed — one click
+			    would confirm the next dialog, defeating the two-step guarantee
+			    `ui/ConfirmButton` exists to provide. A head removed without a
+			    pointer or blur event (a requestor's `ensuring` resolving a queued
+			    head) is exactly that case. */}
 			<div
+				key={head.id}
 				role="dialog"
 				aria-label={head.title}
 				className="relative w-full max-w-md rounded-lg border border-neutral-700 bg-neutral-900 p-4 shadow-2xl"

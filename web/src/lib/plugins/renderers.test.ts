@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { Contribution, Disposable, Host } from "@lib/plugins/host";
 import { makeRendererRegistry, registerRenderer } from "@lib/plugins/renderers";
+import { Logger } from "effect";
 import type { ComponentType } from "react";
 import { resolveComponent } from "@/ui/slots/useContribution";
 
@@ -86,12 +87,29 @@ describe("registerRenderer", () => {
 		]);
 	});
 
-	test("an unknown kind is refused, not registered", () => {
+	test("a refusal is silent when the caller provides a logger", () => {
 		const { entries, host } = record();
+		// The expected `PluginFault` goes to this logger, not to stdout — the
+		// same seam `themes.test.ts` uses, so the refusal is assertable without
+		// noise (a synchronous registration has no ambient logger to inherit).
+		const silent = Logger.make(() => {});
 		registerRenderer(
 			host,
 			"not-a-renderer" as unknown as Parameters<typeof registerRenderer>[1],
 			override,
+			{ logger: silent },
+		);
+		expect(entries).toEqual([]);
+	});
+
+	test("a registration whose component is not a function is refused", () => {
+		const { entries, host } = record();
+		const silent = Logger.make(() => {});
+		registerRenderer(
+			host,
+			"markdown",
+			"not a component" as unknown as ComponentType<Record<string, unknown>>,
+			{ logger: silent },
 		);
 		expect(entries).toEqual([]);
 	});
@@ -100,5 +118,15 @@ describe("registerRenderer", () => {
 		const { entries, host } = record();
 		makeRendererRegistry(host).register("reasoning", override);
 		expect(entries.map((entry) => entry.id)).toEqual(["reasoning"]);
+	});
+
+	test("makeRendererRegistry carries its options to every registration", () => {
+		const { entries, host } = record();
+		const silent = Logger.make(() => {});
+		makeRendererRegistry(host, { logger: silent }).register(
+			"nope" as unknown as Parameters<typeof registerRenderer>[1],
+			override,
+		);
+		expect(entries).toEqual([]);
 	});
 });

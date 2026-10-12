@@ -1,6 +1,6 @@
 import { PluginFault } from "@lib/plugins/errors";
 import type { Disposable, Host } from "@lib/plugins/host";
-import { Effect } from "effect";
+import { Effect, Logger } from "effect";
 import type { ComponentType } from "react";
 import { z } from "zod";
 
@@ -46,10 +46,33 @@ const overridePriority = 1;
 /** An inert handle for a refused registration; disposing it is a no-op. */
 const noopDisposable: Disposable = { dispose: () => {} };
 
-/** A refused registration is a logged `PluginFault`, never a throw (spec §9). */
-const warn = (detail: string): void => {
-	Effect.runSync(Effect.logWarning(new PluginFault({ detail })));
+/**
+ * A refused registration is a logged `PluginFault`, never a throw (spec §9).
+ *
+ * The warning is an Effect, so the logger it goes to is the caller's choice:
+ * `logger` replaces the app's default for this one message, the same seam
+ * `themes.test.ts` provides (`Effect.provide(effect, Logger.layer([…]))`). That
+ * is what lets a test assert a refusal without an un-silenceable `WARN` on
+ * stdout — a synchronous registration has no ambient logger to inherit, so it
+ * has to be passed.
+ */
+const warn = (
+	detail: string,
+	logger: Logger.Logger<unknown, unknown> | undefined,
+): void => {
+	const warning = Effect.logWarning(new PluginFault({ detail }));
+	Effect.runSync(
+		logger === undefined
+			? warning
+			: Effect.provide(warning, Logger.layer([logger])),
+	);
 };
+
+/** Optional seams for {@link registerRenderer}. */
+export interface RegisterRendererOptions {
+	/** Where a refused registration is logged; the app's default logger when omitted. */
+	readonly logger?: Logger.Logger<unknown, unknown>;
+}
 
 /**
  * Register `component` as the override for `kind` through `host` (spec §5). The
@@ -62,17 +85,20 @@ export const registerRenderer = (
 	host: Host,
 	kind: RendererKind,
 	component: ComponentType<Record<string, unknown>>,
+	options?: RegisterRendererOptions,
 ): Disposable => {
 	const parsed = rendererKindSchema.safeParse(kind);
 	if (!parsed.success) {
 		warn(
 			`renderers.register: "${String(kind)}" is not a renderer kind (${rendererKinds.join(", ")}); the override was refused`,
+			options?.logger,
 		);
 		return noopDisposable;
 	}
 	if (typeof component !== "function") {
 		warn(
 			`renderers.register: the "${parsed.data}" override is not a component; it was refused`,
+			options?.logger,
 		);
 		return noopDisposable;
 	}
@@ -96,8 +122,13 @@ export interface RendererRegistry {
  * The renderer registry bound to one plugin's `host`, the shape
  * `host.renderers` takes (spec §2). A thin typing of {@link registerRenderer}:
  * registering through it is registering a contribution, so ownership and
- * disposal are the registry's own.
+ * disposal are the registry's own. `options` (a logger, typically) is applied
+ * to every registration made through the returned object.
  */
-export const makeRendererRegistry = (host: Host): RendererRegistry => ({
-	register: (kind, component) => registerRenderer(host, kind, component),
+export const makeRendererRegistry = (
+	host: Host,
+	options?: RegisterRendererOptions,
+): RendererRegistry => ({
+	register: (kind, component) =>
+		registerRenderer(host, kind, component, options),
 });

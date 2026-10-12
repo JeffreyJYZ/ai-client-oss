@@ -286,6 +286,19 @@ export const confirm = (options: ConfirmOptions): Effect.Effect<boolean> =>
 			text: parsed.data.text,
 			deferred,
 		});
+		// The same scope finalizer `toast` and `modal` register, so a confirm run
+		// with a provided `Scope` is dropped on unload even when its awaiting
+		// fiber is not owned by that scope — e.g.
+		// `runtime.runFork(host.notify.confirm(...))`, where the fiber is the
+		// host's and only the scope is the plugin's. `ensuring` below still
+		// covers the interrupted or cancelled requestor that had no scope.
+		const scope = yield* Effect.serviceOption(Scope.Scope);
+		if (Option.isSome(scope)) {
+			yield* Scope.addFinalizer(
+				scope.value,
+				Effect.sync(() => resolveModal(id, false)),
+			);
+		}
 		// `ensuring` runs on every exit — the answer, a cancellation or an
 		// unload. It removes a request the user never answered, so a cancelled
 		// requestor cannot leave the queue (and the UI) waiting on a Deferred

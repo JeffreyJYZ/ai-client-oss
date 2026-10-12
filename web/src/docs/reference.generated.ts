@@ -451,7 +451,7 @@ export const reference: DocReference = {
 					"name": "PipelineStageMap",
 					"kind": "type",
 					"signature": "export type PipelineStageMap = { readonly [K in PipelineStageKind]: ( input: PipelineInputMap[K], meta: PipelineMeta, ) => Effect.Effect<PipelineOutputMap[K]>; };",
-					"description": "One stage contract per kind (spec §5). The error channel is `never`: a contract is success-only, and a stage that misbehaves is caught and skipped by {@link guard} rather than surfacing as a failure.",
+					"description": "One stage contract per kind (spec §5).",
 					"members": []
 				},
 				{
@@ -475,24 +475,41 @@ export const reference: DocReference = {
 					]
 				},
 				{
-					"name": "run",
+					"name": "PipelineRunner",
+					"kind": "interface",
+					"signature": "export interface PipelineRunner<K extends PipelineStageKind> { readonly kind: K; readonly run: ( input: PipelineInputMap[K], ) => Effect.Effect<PipelineOutputMap[K]>; }",
+					"description": "A stage kind resolved against the registry once, so a caller that runs the same kind many times — `onChunk` per streamed chunk, `onToolCall` per call — pays the registry read, filter and sort a single time.",
+					"members": [
+						"kind",
+						"run"
+					]
+				},
+				{
+					"name": "stageRunner",
 					"kind": "const",
-					"signature": "export const run = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): Effect.Effect<PipelineOutputMap[K], never, HostServices> => …",
-					"description": "Run every stage of `kind` over `input`, in resolution order. Reads the registry each call, so a stage registered or disposed mid-session takes effect on the next turn, and skips any stage disabled by an earlier fault.",
+					"signature": "export const stageRunner = <K extends PipelineStageKind>(kind: K, meta: PipelineMeta): Effect.Effect<PipelineRunner<K>, never, HostServices> => …",
+					"description": "Resolve every stage of `kind` now, in order, returning a runner that folds `input` through them. Reads the registry once, so a stage registered or disposed mid-turn takes effect on the next resolution, and skips any stage disabled by an earlier fault.",
 					"members": []
 				},
 				{
-					"name": "runSync",
+					"name": "run",
 					"kind": "const",
-					"signature": "export const runSync = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): PipelineOutputMap[K] => …",
-					"description": "{@link run} read synchronously off the app's one runtime.",
+					"signature": "export const run = <K extends PipelineStageKind>(kind: K, input: PipelineInputMap[K], meta: PipelineMeta): Effect.Effect<PipelineOutputMap[K], never, HostServices> => …",
+					"description": "Run every stage of `kind` over `input`, in resolution order. A one-shot convenience over {@link stageRunner} for the sites that run a kind once; a loop should hold a {@link stageRunner} instead.",
+					"members": []
+				},
+				{
+					"name": "composeTurnBody",
+					"kind": "const",
+					"signature": "export const composeTurnBody = <Send>(build: (send: Send, ctx: SendCtx) => unknown, base: Send, ctx: SendCtx, meta: PipelineMeta): Effect.Effect<unknown, never, HostServices> => …",
+					"description": "Compose a turn's one outgoing body: the provider's own `buildRequest` over `base`, then `transformBody` over the built body (spec §5).",
 					"members": []
 				},
 				{
 					"name": "ResolvedToolCall",
 					"kind": "interface",
 					"signature": "export interface ResolvedToolCall { readonly call: ToolCallData; readonly execute: boolean; }",
-					"description": "Project an `onToolCall` decision onto the call the loop acts on (spec §5). A declined call is still returned — never dropped — so the loop always appends a matching result and the replayed body carries no `tool_call` without one. A rewrite keeps the original `id`/`key` for that correlation.",
+					"description": "The call an `onToolCall` decision resolves to, and whether it executes.",
 					"members": [
 						"call",
 						"execute"
@@ -502,7 +519,7 @@ export const reference: DocReference = {
 					"name": "resolveToolCall",
 					"kind": "const",
 					"signature": "export const resolveToolCall = (call: ToolCallData, decision: ToolCallDecision): ResolvedToolCall => …",
-					"description": "",
+					"description": "Project an `onToolCall` decision onto the call the loop acts on (spec §5). A declined call is still returned — never dropped — so the loop always appends a matching result and the replayed body carries no `tool_call` without one. A rewrite keeps the original `id`/`key` for that correlation.",
 					"members": []
 				}
 			]
@@ -950,9 +967,18 @@ export const reference: DocReference = {
 					"members": []
 				},
 				{
+					"name": "RegisterRendererOptions",
+					"kind": "interface",
+					"signature": "export interface RegisterRendererOptions { /** Where a refused registration is logged; the app's default logger when omitted. */ readonly logger?: Logger.Logger<unknown, unknown>; }",
+					"description": "Optional seams for {@link registerRenderer}.",
+					"members": [
+						"logger"
+					]
+				},
+				{
 					"name": "registerRenderer",
 					"kind": "const",
-					"signature": "export const registerRenderer = (host: Host, kind: RendererKind, component: ComponentType<Record<string, unknown>>): Disposable => …",
+					"signature": "export const registerRenderer = (host: Host, kind: RendererKind, component: ComponentType<Record<string, unknown>>, options?: RegisterRendererOptions): Disposable => …",
 					"description": "Register `component` as the override for `kind` through `host` (spec §5). The entry lands in the `ui` registry at `chat.message` — the region the built-in renderers already declare — so `ui/Message.tsx`'s `useComponent(\"ui.markdown\")` resolves it on the next render, and disposing the returned handle restores the built-in.",
 					"members": []
 				},
@@ -968,8 +994,8 @@ export const reference: DocReference = {
 				{
 					"name": "makeRendererRegistry",
 					"kind": "const",
-					"signature": "export const makeRendererRegistry = (host: Host): RendererRegistry => …",
-					"description": "The renderer registry bound to one plugin's `host`, the shape `host.renderers` takes (spec §2). A thin typing of {@link registerRenderer}: registering through it is registering a contribution, so ownership and disposal are the registry's own.",
+					"signature": "export const makeRendererRegistry = (host: Host, options?: RegisterRendererOptions): RendererRegistry => …",
+					"description": "The renderer registry bound to one plugin's `host`, the shape `host.renderers` takes (spec §2). A thin typing of {@link registerRenderer}: registering through it is registering a contribution, so ownership and disposal are the registry's own. `options` (a logger, typically) is applied to every registration made through the returned object.",
 					"members": []
 				}
 			]
