@@ -1,0 +1,57 @@
+{
+	"providers": [
+		{
+			"id": "provider-default",
+			"label": "OpenRouter",
+			"protocol": "chatcompletions",
+			"baseUrl": "https://openrouter.ai/api/v1",
+			"apiKey": "fixture-openrouter-key-not-real",
+			"model": "anthropic/claude-sonnet-4.5",
+			"models": [
+				"anthropic/claude-sonnet-4.5",
+				"openai/gpt-5",
+				"google/gemini-3-pro"
+			],
+			"tools": [{ "type": "web_search_preview", "max_num_results": 5 }]
+		},
+		{
+			"id": "provider-local",
+			"label": "Local llama.cpp",
+			"protocol": "chatcompletions",
+			"baseUrl": "http://127.0.0.1:8080/v1",
+			"apiKey": "",
+			"model": "qwen3-coder-30b-a3b",
+			"models": ["qwen3-coder-30b-a3b"],
+			"tools": []
+		}
+	],
+	"activeProviderId": "provider-default",
+	"profiles": [
+		{
+			"id": "profile-review",
+			"name": "Code review",
+			"providerId": "provider-default",
+			"model": "anthropic/claude-sonnet-4.5",
+			"systemPrompt": "You are a terse reviewer. One line per finding."
+		}
+	],
+	"memories": [
+		{
+			"id": "mem-prefs",
+			"text": "User prefers bun over npm and tabs at indentWidth 4.",
+			"createdAt": 1759900000000,
+			"source": "user"
+		},
+		{
+			"id": "mem-repo",
+			"text": "The repo's web commands run from web/.",
+			"createdAt": 1759950000000,
+			"source": "model"
+		}
+	],
+	"memoriesEnabled": true,
+	"fetchToolEnabled": true,
+	"tinyfishApiKey": "fixture-tinyfish-key-not-real",
+	"dismissedInstallNote": true,
+	"dismissedUpdateVersion": "0.2.3"
+}

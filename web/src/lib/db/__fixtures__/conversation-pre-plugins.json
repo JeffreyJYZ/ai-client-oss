@@ -1,0 +1,31 @@
+{
+	"id": "conv-3f6a9c2e",
+	"title": "Why is the release build failing?",
+	"systemPrompt": "Answer with the shortest correct explanation.",
+	"messages": [
+		{
+			"id": "msg-user-1",
+			"role": "user",
+			"text": "Why does the release build fail on Windows but not locally?",
+			"markers": []
+		},
+		{
+			"id": "msg-assistant-1",
+			"role": "assistant",
+			"text": "Because GitHub's Windows runner checks out CRLF, so Biome diffs every line.",
+			"markers": [
+				{ "at": 0, "line": "tool: read .gitattributes" },
+				{ "at": 72, "line": "search: core.autocrlf" }
+			],
+			"reasoning": "The symptom is platform-specific; the usual cause is line endings."
+		},
+		{
+			"id": "msg-user-2",
+			"role": "user",
+			"text": "Fix it.",
+			"markers": []
+		}
+	],
+	"createdAt": 1759900000000,
+	"updatedAt": 1759903600000
+}

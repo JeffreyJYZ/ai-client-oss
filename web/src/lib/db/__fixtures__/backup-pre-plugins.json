@@ -1,0 +1,94 @@
+{
+	"version": 1,
+	"exportedAt": "2026-09-30T12:00:00.000Z",
+	"settings": {
+		"providers": [
+			{
+				"id": "provider-default",
+				"label": "OpenRouter",
+				"protocol": "chatcompletions",
+				"baseUrl": "https://openrouter.ai/api/v1",
+				"apiKey": "fixture-openrouter-key-not-real",
+				"model": "anthropic/claude-sonnet-4.5",
+				"models": [
+					"anthropic/claude-sonnet-4.5",
+					"openai/gpt-5",
+					"google/gemini-3-pro"
+				],
+				"tools": [{ "type": "web_search_preview", "max_num_results": 5 }]
+			},
+			{
+				"id": "provider-local",
+				"label": "Local llama.cpp",
+				"protocol": "chatcompletions",
+				"baseUrl": "http://127.0.0.1:8080/v1",
+				"apiKey": "",
+				"model": "qwen3-coder-30b-a3b",
+				"models": ["qwen3-coder-30b-a3b"],
+				"tools": []
+			}
+		],
+		"activeProviderId": "provider-default",
+		"profiles": [
+			{
+				"id": "profile-review",
+				"name": "Code review",
+				"providerId": "provider-default",
+				"model": "anthropic/claude-sonnet-4.5",
+				"systemPrompt": "You are a terse reviewer. One line per finding."
+			}
+		],
+		"memories": [
+			{
+				"id": "mem-prefs",
+				"text": "User prefers bun over npm and tabs at indentWidth 4.",
+				"createdAt": 1759900000000,
+				"source": "user"
+			},
+			{
+				"id": "mem-repo",
+				"text": "The repo's web commands run from web/.",
+				"createdAt": 1759950000000,
+				"source": "model"
+			}
+		],
+		"memoriesEnabled": true,
+		"fetchToolEnabled": true,
+		"tinyfishApiKey": "fixture-tinyfish-key-not-real",
+		"dismissedInstallNote": true,
+		"dismissedUpdateVersion": "0.2.3"
+	},
+	"conversations": [
+		{
+			"id": "conv-3f6a9c2e",
+			"title": "Why is the release build failing?",
+			"systemPrompt": "Answer with the shortest correct explanation.",
+			"messages": [
+				{
+					"id": "msg-user-1",
+					"role": "user",
+					"text": "Why does the release build fail on Windows but not locally?",
+					"markers": []
+				},
+				{
+					"id": "msg-assistant-1",
+					"role": "assistant",
+					"text": "Because GitHub's Windows runner checks out CRLF, so Biome diffs every line.",
+					"markers": [
+						{ "at": 0, "line": "tool: read .gitattributes" },
+						{ "at": 72, "line": "search: core.autocrlf" }
+					],
+					"reasoning": "The symptom is platform-specific; the usual cause is line endings."
+				},
+				{
+					"id": "msg-user-2",
+					"role": "user",
+					"text": "Fix it.",
+					"markers": []
+				}
+			],
+			"createdAt": 1759900000000,
+			"updatedAt": 1759903600000
+		}
+	]
+}
