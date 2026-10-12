@@ -190,3 +190,78 @@ describe("providers registry", () => {
 		expect(() => handle.dispose()).not.toThrow();
 	});
 });
+
+describe("protocol registration and send isolation (spec §9)", () => {
+	/** The fake protocol with its `send` overridden, for one focused probe. */
+	const withSend = (send: Provider<FakeBody>["send"]): Provider<FakeBody> => ({
+		...fakeProvider,
+		send,
+	});
+
+	test("a protocol whose send is not callable is refused with a PluginFault", async () => {
+		const s = services();
+		const logged = spyOn(console, "log");
+		registerProvider(
+			host(s, "acme.protocols"),
+			"acme.nosend",
+			withSend(undefined as unknown as Provider<FakeBody>["send"]),
+			"acme.protocols",
+		);
+		const calls = logged.mock.calls.flat();
+		logged.mockRestore();
+
+		expect(calls.some((value) => value instanceof PluginFault)).toBe(true);
+		expect(await runWith(listProtocols(), s)).not.toContain("acme.nosend");
+	});
+
+	test("a send that throws is isolated into the string channel with a PluginFault", async () => {
+		const s = services();
+		registerProvider(
+			host(s, "acme.protocols"),
+			"acme.throw",
+			withSend(() => {
+				throw new Error("boom");
+			}),
+			"acme.protocols",
+		);
+		const logged = spyOn(console, "log");
+		const exit = await runWith(Effect.exit(SendMsg("acme.throw", ctx())), s);
+		const calls = logged.mock.calls.flat();
+		logged.mockRestore();
+
+		// A typed `string` failure, never a defect: `findErrorOption` finds it.
+		expect(Exit.isFailure(exit)).toBe(true);
+		if (Exit.isFailure(exit)) {
+			expect(Option.isSome(Cause.findErrorOption(exit.cause))).toBe(true);
+		}
+		expect(calls.some((value) => value instanceof PluginFault)).toBe(true);
+	});
+
+	test("a send whose stream defects is isolated into the string channel with a PluginFault", async () => {
+		const s = services();
+		registerProvider(
+			host(s, "acme.protocols"),
+			"acme.die",
+			withSend(() => Effect.succeed(Stream.die(new Error("stream boom")))),
+			"acme.protocols",
+		);
+		const logged = spyOn(console, "log");
+		const exit = await runWith(
+			Effect.gen(function* () {
+				const stream = yield* SendMsg("acme.die", ctx());
+				return yield* Effect.exit(Stream.runCollect(stream));
+			}),
+			s,
+		);
+		const calls = logged.mock.calls.flat();
+		logged.mockRestore();
+
+		// The defect is turned into the same graceful `string` failure every
+		// other turn failure takes, and it is logged.
+		expect(Exit.isFailure(exit)).toBe(true);
+		if (Exit.isFailure(exit)) {
+			expect(Option.isSome(Cause.findErrorOption(exit.cause))).toBe(true);
+		}
+		expect(calls.some((value) => value instanceof PluginFault)).toBe(true);
+	});
+});

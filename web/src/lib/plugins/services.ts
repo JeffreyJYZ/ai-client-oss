@@ -6,7 +6,7 @@ import {
 } from "@lib/plugins/manifest";
 import type { Disposable } from "@lib/plugins/registry";
 import type { AttachmentPart } from "@lib/providers/types";
-import { Cause, Effect, Option, PubSub, Stream } from "effect";
+import { Cause, Deferred, Effect, Option, PubSub, Scope, Stream } from "effect";
 import type { ChatSnapshot } from "@/state/chat";
 import {
 	getSettings,
@@ -258,15 +258,49 @@ export const publishChatSnapshot = (snapshot: ChatSnapshot): void => {
 	PubSub.publishUnsafe(chatChanges, snapshot);
 };
 
-/** The chat service bound to the registered store (spec §2's `host.chat`). */
-export const makeChatService = (): ChatService => {
+/**
+ * The snapshot stream bound to one plugin's `Scope` (spec §3). A bare
+ * `Stream.fromPubSub` subscription would outlive the plugin that made it — the
+ * property `notify` and `storage` already honour on unload — so the stream is
+ * interrupted when the scope closes, ending the subscriber's loop.
+ * `Stream.interruptWhen` is consumer-transparent: the plugin just runs the
+ * stream and it ends on unload. A scope already closed at construction runs the
+ * finalizer immediately, so the stream is born interrupted — no trace.
+ */
+const scopedChanges = (scope: Scope.Scope): Stream.Stream<ChatSnapshot> => {
+	const unloaded = Effect.runSync(Deferred.make<void>());
+	Effect.runSync(
+		Effect.provideService(
+			Scope.addFinalizer(
+				scope,
+				Effect.sync(() => {
+					Deferred.doneUnsafe(unloaded, Effect.void);
+				}),
+			),
+			Scope.Scope,
+			scope,
+		),
+	);
+	return Stream.fromPubSub(chatChanges).pipe(
+		Stream.interruptWhen(Deferred.await(unloaded)),
+	);
+};
+
+/**
+ * The chat service bound to the registered store (spec §2's `host.chat`), and
+ * — given the plugin's `Scope` — with `changes` tied to that scope's lifetime.
+ */
+export const makeChatService = (scope?: Scope.Scope): ChatService => {
 	const run = (use: (store: ChatStore) => void): Effect.Effect<void> =>
 		Effect.sync(() => {
 			if (chatStore !== undefined) use(chatStore);
 		});
 	return {
 		snapshot: () => chatStore?.snapshot() ?? emptyChat,
-		changes: Stream.fromPubSub(chatChanges),
+		changes:
+			scope === undefined
+				? Stream.fromPubSub(chatChanges)
+				: scopedChanges(scope),
 		send: (msg, parts = []) => run((store) => store.send(msg, parts)),
 		stop: () => run((store) => store.stop()),
 		newConversation: () => run((store) => store.newConversation()),

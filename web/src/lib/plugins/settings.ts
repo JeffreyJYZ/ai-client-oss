@@ -1,4 +1,4 @@
-import type { Disposable, Host } from "@lib/plugins/host";
+import type { Disposable, HostUiView } from "@lib/plugins/host";
 import { type ComponentType, createElement } from "react";
 import { Section } from "@/ui/kit";
 
@@ -70,11 +70,11 @@ const withChrome = (
 	};
 
 /**
- * The settings registry over one host (spec §5). Registration is a slot
+ * The settings registry over one host view (spec §5). Registration is a slot
  * contribution: `settings.sections` is already rendered by `SettingsShell` and
  * resolved by the slot machinery, so no new rendering path exists here.
  */
-export const makeSettingsRegistry = (host: Host): SettingsRegistry => ({
+export const makeSettingsRegistry = (host: HostUiView): SettingsRegistry => ({
 	registerSection: (section) =>
 		host.ui.register({
 			id: section.id,

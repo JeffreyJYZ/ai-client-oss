@@ -215,10 +215,19 @@ export const reference: DocReference = {
 					"members": []
 				},
 				{
+					"name": "HostUiView",
+					"kind": "interface",
+					"signature": "export interface HostUiView { readonly ui: HostRegistry<Contribution>; }",
+					"description": "The one `Host` member the typed `settings` and `renderers` registries read. Their factories take this, not the whole `Host`, so a partial view cannot hide a future read of another member from the compiler: if a factory grows a second read, that read fails at `tsc`, not at runtime in the app.",
+					"members": [
+						"ui"
+					]
+				},
+				{
 					"name": "makeHost",
 					"kind": "const",
 					"signature": "export const makeHost = (services: HostServicesShape, pluginId: string, scope: Scope.Scope): Host => …",
-					"description": "The `Host` a plugin's `setup` receives (spec §2). Built per plugin from the shared service plus that plugin's `pluginId` and `Scope`, so every registration is owned by the plugin and collected when its scope closes, and the version a plugin reads is the one the boot resolved. `settings` and `renderers` are typed views whose factory reads only `host.ui`; the full `Host` literal does not exist until it is assembled, so they are built from a view carrying that one member.",
+					"description": "The `Host` a plugin's `setup` receives (spec §2). Built per plugin from the shared service plus that plugin's `pluginId` and `Scope`, so every registration is owned by the plugin and collected when its scope closes, and the version a plugin reads is the one the boot resolved. `settings` and `renderers` are typed views whose factory reads only `host.ui`; the full `Host` literal does not exist until it is assembled, so they are built from a {@link HostUiView} carrying that one member — the type, not a comment, keeps the constraint.",
 					"members": []
 				},
 				{
@@ -767,7 +776,7 @@ export const reference: DocReference = {
 				{
 					"name": "registerRenderer",
 					"kind": "const",
-					"signature": "export const registerRenderer = (host: Host, kind: RendererKind, component: ComponentType<Record<string, unknown>>, options?: RegisterRendererOptions): Disposable => …",
+					"signature": "export const registerRenderer = (host: HostUiView, kind: RendererKind, component: ComponentType<Record<string, unknown>>, options?: RegisterRendererOptions): Disposable => …",
 					"description": "Register `component` as the override for `kind` through `host` (spec §5). The entry lands in the `ui` registry at `chat.message` — the region the built-in renderers already declare — so `ui/Message.tsx`'s `useComponent(\"ui.markdown\")` resolves it on the next render, and disposing the returned handle restores the built-in.",
 					"members": []
 				},
@@ -783,7 +792,7 @@ export const reference: DocReference = {
 				{
 					"name": "makeRendererRegistry",
 					"kind": "const",
-					"signature": "export const makeRendererRegistry = (host: Host, options?: RegisterRendererOptions): RendererRegistry => …",
+					"signature": "export const makeRendererRegistry = (host: HostUiView, options?: RegisterRendererOptions): RendererRegistry => …",
 					"description": "The renderer registry bound to one plugin's `host`, the shape `host.renderers` takes (spec §2). A thin typing of {@link registerRenderer}: registering through it is registering a contribution, so ownership and disposal are the registry's own. `options` (a logger, typically) is applied to every registration made through the returned object.",
 					"members": []
 				},
@@ -868,8 +877,8 @@ export const reference: DocReference = {
 				{
 					"name": "makeChatService",
 					"kind": "const",
-					"signature": "export const makeChatService = (): ChatService => …",
-					"description": "The chat service bound to the registered store (spec §2's `host.chat`).",
+					"signature": "export const makeChatService = (scope?: Scope.Scope): ChatService => …",
+					"description": "The chat service bound to the registered store (spec §2's `host.chat`), and — given the plugin's `Scope` — with `changes` tied to that scope's lifetime.",
 					"members": []
 				},
 				{
@@ -939,8 +948,8 @@ export const reference: DocReference = {
 				{
 					"name": "makeSettingsRegistry",
 					"kind": "const",
-					"signature": "export const makeSettingsRegistry = (host: Host): SettingsRegistry => …",
-					"description": "The settings registry over one host (spec §5). Registration is a slot contribution: `settings.sections` is already rendered by `SettingsShell` and resolved by the slot machinery, so no new rendering path exists here.",
+					"signature": "export const makeSettingsRegistry = (host: HostUiView): SettingsRegistry => …",
+					"description": "The settings registry over one host view (spec §5). Registration is a slot contribution: `settings.sections` is already rendered by `SettingsShell` and resolved by the slot machinery, so no new rendering path exists here.",
 					"members": []
 				},
 				{

@@ -1,5 +1,5 @@
 import { PluginFault } from "@lib/plugins/errors";
-import type { Disposable, Host } from "@lib/plugins/host";
+import type { Disposable, HostUiView } from "@lib/plugins/host";
 import { Effect, Logger } from "effect";
 import type { ComponentType } from "react";
 import { z } from "zod";
@@ -82,7 +82,7 @@ export interface RegisterRendererOptions {
  * built-in.
  */
 export const registerRenderer = (
-	host: Host,
+	host: HostUiView,
 	kind: RendererKind,
 	component: ComponentType<Record<string, unknown>>,
 	options?: RegisterRendererOptions,
@@ -126,7 +126,7 @@ export interface RendererRegistry {
  * to every registration made through the returned object.
  */
 export const makeRendererRegistry = (
-	host: Host,
+	host: HostUiView,
 	options?: RegisterRendererOptions,
 ): RendererRegistry => ({
 	register: (kind, component) =>

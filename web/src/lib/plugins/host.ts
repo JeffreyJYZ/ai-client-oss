@@ -272,6 +272,16 @@ const makeContributionRegistry = (
 });
 
 /**
+ * The one `Host` member the typed `settings` and `renderers` registries read.
+ * Their factories take this, not the whole `Host`, so a partial view cannot
+ * hide a future read of another member from the compiler: if a factory grows a
+ * second read, that read fails at `tsc`, not at runtime in the app.
+ */
+export interface HostUiView {
+	readonly ui: HostRegistry<Contribution>;
+}
+
+/**
  * The `Host` a plugin's `setup` receives (spec §2). Built per plugin from the
  * shared service plus that plugin's `pluginId` and `Scope`, so every
  * registration is owned by the plugin and collected when its scope closes, and
@@ -279,7 +289,8 @@ const makeContributionRegistry = (
  *
  * `settings` and `renderers` are typed views whose factory reads only
  * `host.ui`; the full `Host` literal does not exist until it is assembled, so
- * they are built from a view carrying that one member.
+ * they are built from a {@link HostUiView} carrying that one member — the type,
+ * not a comment, keeps the constraint.
  */
 export const makeHost = (
 	services: HostServicesShape,
@@ -287,7 +298,7 @@ export const makeHost = (
 	scope: Scope.Scope,
 ): Host => {
 	const ui = makeContributionRegistry(services.ui, pluginId, scope);
-	const uiView = { ui } as Host;
+	const uiView: HostUiView = { ui };
 	return {
 		version: services.version,
 		ui,
@@ -301,7 +312,7 @@ export const makeHost = (
 		pipeline: makeHostRegistry(services.pipeline, pluginId, scope),
 		renderers: makeRendererRegistry(uiView),
 		themes: makeHostRegistry(services.themes, pluginId, scope),
-		chat: makeChatService(),
+		chat: makeChatService(scope),
 		db,
 		storage: makeScopedStorage(pluginId),
 		notify: makeNotifyService(scope),

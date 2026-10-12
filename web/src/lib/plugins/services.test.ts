@@ -7,19 +7,30 @@ import {
 	type HostServicesShape,
 	makeHost,
 } from "@lib/plugins/host";
+import { PLUGIN_DATA_MAX_BYTES } from "@lib/plugins/manifest";
 import { registerProvider, requireProvider } from "@lib/plugins/providers";
 import {
 	type ChatSnapshot,
 	type ChatStore,
 	makeChatService,
 	makeScopedStorage,
+	publishChatSnapshot,
 	publishHostEvent,
 	registerChatStore,
 } from "@lib/plugins/services";
 import { executeTool, registerTool, type Tool } from "@lib/plugins/tools";
 import { testModel } from "@lib/providers/models";
 import type { Provider, SendCtx, ToolCallData } from "@lib/providers/types";
-import { Cause, Effect, Exit, Option, Scope, Stream } from "effect";
+import {
+	Cause,
+	Duration,
+	Effect,
+	Exit,
+	Fiber,
+	Option,
+	Scope,
+	Stream,
+} from "effect";
 import { z } from "zod";
 import { getSettings } from "@/state/settings";
 
@@ -324,5 +335,58 @@ describe("provider resolution and probe shape (obligations 5, 6)", () => {
 		// The probe body is the protocol's own `buildRequest` output, never a
 		// hardcoded chat-completions body.
 		expect(seen).toEqual([{ probe: "m1" }]);
+	});
+});
+
+describe("the per-plugin data cap", () => {
+	test("a write within the cap lands", () => {
+		const storage = makeScopedStorage("test.cap.ok");
+		Effect.runSync(storage.set("k", "small"));
+		expect(Effect.runSync(storage.get("k"))).toEqual(Option.some("small"));
+	});
+
+	test("a write past the cap is refused, nothing stored, a PluginFault logged", () => {
+		const storage = makeScopedStorage("test.cap.big");
+		Effect.runSync(storage.set("k", "ok"));
+		const logged = spyOn(console, "log");
+		Effect.runSync(storage.set("big", "x".repeat(PLUGIN_DATA_MAX_BYTES + 1)));
+		const calls = logged.mock.calls.flat();
+		logged.mockRestore();
+
+		// The caller's `set` completes; the oversized value is simply not
+		// stored (the cap is a guard, not a schema constraint), and the
+		// refusal is a logged PluginFault naming the plugin.
+		expect(calls.some((value) => value instanceof PluginFault)).toBe(true);
+		expect(Option.isNone(Effect.runSync(storage.get("big")))).toBe(true);
+		expect(Effect.runSync(storage.get("k"))).toEqual(Option.some("ok"));
+	});
+});
+
+describe("host.chat.changes is bound to the plugin scope", () => {
+	test("a subscription stops when the plugin unloads", async () => {
+		const sc = scope();
+		const h = makeHost(services(), "test.changes", sc);
+		const seen: ChatSnapshot[] = [];
+		const fiber = Effect.runFork(
+			Stream.runForEach(h.chat.changes, (snap) =>
+				Effect.sync(() => {
+					seen.push(snap);
+				}),
+			),
+		);
+
+		await Effect.runPromise(Effect.sleep(Duration.millis(10)));
+		publishChatSnapshot({ ...emptySnapshot(), activeId: "after-open" });
+		await Effect.runPromise(Effect.sleep(Duration.millis(10)));
+		expect(seen.some((snap) => snap.activeId === "after-open")).toBe(true);
+
+		// Unload is the scope closing; the subscription goes with the plugin.
+		Effect.runSync(Scope.close(sc, Exit.void));
+		await Effect.runPromise(Effect.sleep(Duration.millis(10)));
+		publishChatSnapshot({ ...emptySnapshot(), activeId: "after-close" });
+		await Effect.runPromise(Effect.sleep(Duration.millis(10)));
+
+		expect(seen.some((snap) => snap.activeId === "after-close")).toBe(false);
+		Effect.runSync(Fiber.interrupt(fiber));
 	});
 });

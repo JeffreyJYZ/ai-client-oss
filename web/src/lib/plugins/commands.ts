@@ -23,9 +23,9 @@ import { z } from "zod";
  * Storage is the host's own `commands` registry (`HostServices`), so a command
  * registered here is owned and disposed by the registering plugin's `Scope` —
  * the same lifetime every other contribution has. The binding index is derived
- * from the entries themselves rather than mirrored into `HostServices.keybindings`:
- * a command carries its own keybinding, and one source of truth is what keeps
- * "later wins" true for both rules without a second table to keep in step.
+ * from the entries themselves rather than held in a second registry: a command
+ * carries its own keybinding, and one source of truth is what keeps "later wins"
+ * true for both rules without a second table to keep in step.
  */
 
 /**
