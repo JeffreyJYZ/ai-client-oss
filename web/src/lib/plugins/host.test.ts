@@ -3,12 +3,13 @@ import { PluginFault } from "@lib/plugins/errors";
 import {
 	type Host,
 	HostLayer,
-	type HostRegistries,
 	HostServices,
+	type HostServicesShape,
 	makeHost,
 	pluginApiVersion,
 } from "@lib/plugins/host";
 import type { SlotId } from "@lib/plugins/ids";
+import appPackage from "@root/package.json";
 import { Effect, Exit, Scope } from "effect";
 import type { ComponentType } from "react";
 
@@ -16,7 +17,7 @@ import type { ComponentType } from "react";
  * The registries the layer builds. A fresh set per test: registrations are the
  * subject, so a shared `HostServices` would leak entries between tests.
  */
-const services = (): HostRegistries =>
+const services = (): HostServicesShape =>
 	Effect.runSync(HostServices.pipe(Effect.provide(HostLayer)));
 
 const scope = (): Scope.Closeable => Effect.runSync(Scope.make());
@@ -145,7 +146,11 @@ describe("makeHost", () => {
 		const host: Host = makeHost(registries, "p1", scope());
 
 		expect(host.version.api).toBe(pluginApiVersion);
-		expect(Object.keys(registries).sort()).toEqual([
+		expect(
+			Object.keys(registries)
+				.filter((key) => key !== "version")
+				.sort(),
+		).toEqual([
 			"commands",
 			"keybindings",
 			"pipeline",
@@ -158,5 +163,27 @@ describe("makeHost", () => {
 		]);
 		expect(registries.ui).not.toBe(registries.tools);
 		expect(registries.commands).not.toBe(registries.keybindings);
+	});
+
+	test("reports the build's real, non-empty app version", () => {
+		const registries = services();
+		const host = makeHost(registries, "p1", scope());
+
+		// This run has no Tauri shell (`isDesktop` is false), so it exercises
+		// the web path: the app version must be the real one from
+		// `package.json`, never a placeholder like `""`.
+		expect(host.version.app).not.toBe("");
+		expect(host.version.app).toBe(appPackage.version);
+	});
+
+	test("takes the app version from the service, not a constant in makeHost", () => {
+		const registries = services();
+		const host = makeHost(
+			{ ...registries, version: { app: "9.9.9", api: "0.1" } },
+			"p1",
+			scope(),
+		);
+
+		expect(host.version).toEqual({ app: "9.9.9", api: "0.1" });
 	});
 });

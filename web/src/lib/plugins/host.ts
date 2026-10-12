@@ -1,3 +1,4 @@
+import { isDesktop } from "@lib/platform";
 import { PluginFault } from "@lib/plugins/errors";
 import { type SlotId, slotIdSchema } from "@lib/plugins/ids";
 import {
@@ -6,6 +7,8 @@ import {
 	type Registry,
 	type RegistryEntry,
 } from "@lib/plugins/registry";
+import { runningVersion } from "@lib/updates";
+import appPackage from "@root/package.json";
 import { Context, Effect, Layer, Scope, type Stream } from "effect";
 import type { ComponentType } from "react";
 
@@ -16,6 +19,15 @@ import type { ComponentType } from "react";
  * told to rebuild rather than run against an API it never saw.
  */
 export const pluginApiVersion = "0.1";
+
+/**
+ * The build's own version (spec §10) — the value `engines.app` is checked
+ * against. `bump-version.ts` keeps `package.json` in lockstep with
+ * `tauri.conf.json`, so this is a true version in every environment: the
+ * browser bundle, the desktop shell, and tests. It is read rather than
+ * inlined so the field can never go stale against the released build.
+ */
+export const buildAppVersion: string = appPackage.version;
 
 /** The handle every registration already returns (spec §2). */
 export type { Disposable };
@@ -83,12 +95,20 @@ export interface Host {
 }
 
 /**
- * One registry per kind (spec §3), created once in `HostLayer`'s construction
- * so the whole app shares one collection per kind. `keybindings` is held here,
- * not on `Host`: a command carries its own keybinding, so the global key
- * handler reads this registry while plugins register through `commands`.
+ * What `HostServices` provides: the versions the host reports, plus one
+ * registry per kind (spec §3). Registries are created once in `HostLayer`'s
+ * construction, so the whole app shares one collection per kind. `keybindings`
+ * is held here, not on `Host`: a command carries its own keybinding, so the
+ * global key handler reads this registry while plugins register through
+ * `commands`.
+ *
+ * The app version is host data, not a registry — it is resolved once at boot
+ * (`runtime.ts` builds this layer), which is the only place with the async
+ * Tauri read in hand, and carried here so `makeHost` can report it without a
+ * parameter no later task could fill.
  */
-export interface HostRegistries {
+export interface HostServicesShape {
+	readonly version: { readonly app: string; readonly api: string };
 	readonly ui: Registry<Contribution>;
 	readonly tools: Registry<RegistryEntry>;
 	readonly providers: Registry<RegistryEntry>;
@@ -100,11 +120,23 @@ export interface HostRegistries {
 	readonly themes: Registry<RegistryEntry>;
 }
 
-/** The host service (spec §3): the registries, provided once at boot. */
+/** The host service (spec §3): the versions and the registries, provided once at boot. */
 export class HostServices extends Context.Service<
 	HostServices,
-	HostRegistries
+	HostServicesShape
 >()("HostServices") {}
+
+/**
+ * The running app version, resolved once at boot (spec §3/§10). Desktop asks
+ * the Tauri shell (the same read the update check uses); the web build has no
+ * shell to ask, and a failed shell read is no reason to report nothing, so
+ * both fall back to the build's own version. Either way the field holds a true
+ * version — never an empty string the loader would fail to parse.
+ */
+const resolveAppVersion = (): Effect.Effect<string> =>
+	isDesktop
+		? runningVersion().pipe(Effect.catch(() => Effect.succeed(buildAppVersion)))
+		: Effect.succeed(buildAppVersion);
 
 /** An inert handle for a refused registration; disposing it is a no-op. */
 const noopDisposable: Disposable = { dispose: () => {} };
@@ -175,38 +207,37 @@ const makeContributionRegistry = (
 
 /**
  * The `Host` a plugin's `setup` receives (spec §2). Built per plugin from the
- * shared registries plus that plugin's `pluginId` and `Scope`, so every
- * registration is owned by the plugin and collected when its scope closes.
+ * shared service plus that plugin's `pluginId` and `Scope`, so every
+ * registration is owned by the plugin and collected when its scope closes, and
+ * the version a plugin reads is the one the boot resolved.
  */
 export const makeHost = (
-	registries: HostRegistries,
+	services: HostServicesShape,
 	pluginId: string,
 	scope: Scope.Scope,
 ): Host => ({
-	// The app version comes from Tauri's asynchronous `getVersion()`, which a
-	// synchronous host cannot read — and the web build has no shell to ask, the
-	// same reason `state/updates.ts` folds a failed version read to `null`. An
-	// empty value is unparsable, and the loader's `engines.app` check treats an
-	// unparsable bound as a warning, never a refusal.
-	version: { app: "", api: pluginApiVersion },
-	ui: makeContributionRegistry(registries.ui, pluginId, scope),
-	commands: makeHostRegistry(registries.commands, pluginId, scope),
-	settings: makeHostRegistry(registries.settings, pluginId, scope),
-	tools: makeHostRegistry(registries.tools, pluginId, scope),
-	providers: makeHostRegistry(registries.providers, pluginId, scope),
-	pipeline: makeHostRegistry(registries.pipeline, pluginId, scope),
-	renderers: makeHostRegistry(registries.renderers, pluginId, scope),
-	themes: makeHostRegistry(registries.themes, pluginId, scope),
+	version: services.version,
+	ui: makeContributionRegistry(services.ui, pluginId, scope),
+	commands: makeHostRegistry(services.commands, pluginId, scope),
+	settings: makeHostRegistry(services.settings, pluginId, scope),
+	tools: makeHostRegistry(services.tools, pluginId, scope),
+	providers: makeHostRegistry(services.providers, pluginId, scope),
+	pipeline: makeHostRegistry(services.pipeline, pluginId, scope),
+	renderers: makeHostRegistry(services.renderers, pluginId, scope),
+	themes: makeHostRegistry(services.themes, pluginId, scope),
 });
 
 /**
- * The host service layer (spec §3): every registry is created here, once, so
- * the runtime that consumes this layer is the one place registries come from.
+ * The host service layer (spec §3): the app version is resolved here, once,
+ * and every registry is created here, once, so the runtime that consumes this
+ * layer is the one place registries come from.
  */
 export const HostLayer: Layer.Layer<HostServices> = Layer.effect(
 	HostServices,
 	Effect.gen(function* () {
+		const app = yield* resolveAppVersion();
 		return {
+			version: { app, api: pluginApiVersion },
 			ui: yield* makeRegistry<Contribution>("ui"),
 			tools: yield* makeRegistry<RegistryEntry>("tools"),
 			providers: yield* makeRegistry<RegistryEntry>("providers"),
@@ -216,6 +247,6 @@ export const HostLayer: Layer.Layer<HostServices> = Layer.effect(
 			settings: yield* makeRegistry<RegistryEntry>("settings"),
 			renderers: yield* makeRegistry<RegistryEntry>("renderers"),
 			themes: yield* makeRegistry<RegistryEntry>("themes"),
-		} satisfies HostRegistries;
+		} satisfies HostServicesShape;
 	}),
 );
