@@ -10,6 +10,8 @@
  */
 :root {
 	--docs-bg: #0a0a0a;
+	--docs-selection-bg: #1d4ed8;
+	--docs-selection-fg: #f5f5f5;
 	--docs-panel: rgb(23 23 23 / 70%);
 	--docs-panel-soft: rgb(23 23 23 / 50%);
 	--docs-panel-solid: #171717;
@@ -37,6 +39,8 @@
 @media (prefers-color-scheme: light) {
 	:root {
 		--docs-bg: #ffffff;
+		--docs-selection-bg: #bfdbfe;
+		--docs-selection-fg: #0a0a0a;
 		--docs-panel: #fafafa;
 		--docs-panel-soft: #f5f5f5;
 		--docs-panel-solid: #f5f5f5;
@@ -76,6 +80,6 @@ pre,
 }
 
 ::selection {
-	background-color: var(--docs-link);
-	color: var(--docs-bg);
+	background-color: var(--docs-selection-bg);
+	color: var(--docs-selection-fg);
 }

@@ -4,7 +4,9 @@
  * It extracts the public surface from the modules the app actually ships (see
  * `web/src/docs/entries.ts` for the entry list) and writes it to
  * `web/src/docs/reference.generated.ts`, which `web/src/docs/reference.test.ts`
- * then holds to the source. Nothing in the output is hand-written: every
+ * holds to the source for its coverage *and* for the registry values it derives
+ * from source (see the note at the end of this comment for what it deliberately
+ * does not do). Nothing in the output is hand-written: every
  * export, the slot map, the manifest fields and the event names are read out of
  * the source text, so the page cannot drift from the API.
  *
