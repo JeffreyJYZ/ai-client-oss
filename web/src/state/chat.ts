@@ -1,16 +1,16 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
-import { fetchUrlText } from "@lib/fetch";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
+import { runtime } from "@lib/plugins/runtime";
+import { executeTool } from "@lib/plugins/tools";
 import { type ProtocolName, protocolNames, providers } from "@lib/providers";
-import { searchKindFor, WEB_SEARCH_NAME } from "@lib/providers/presets";
+import { searchKindFor } from "@lib/providers/presets";
 import type {
 	AttachmentPart,
 	Chunk,
 	SendCtx,
 	ToolCallData,
 } from "@lib/providers/types";
-import { searchResultCount, searchWeb } from "@lib/tinyfish";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
 import { getActiveProvider, getSettings, setSettings } from "./settings";
@@ -173,9 +173,6 @@ const persistConversationById = (id: string): void => {
 const toolMarker = (name: string): string =>
 	/search/i.test(name) ? "🔍 searched the web" : `🔧 ${name}`;
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-	typeof value === "object" && value !== null;
-
 /**
  * The answer text of the accumulation: the model's own
  * words, memory blocks stripped. Markers never enter
@@ -331,172 +328,6 @@ const finalize = (
 	refresh();
 	persistConversationById(conversationId);
 };
-
-/**
- * One executed tool call: the text returned to the
- * model (the page, the search results, or a failure
- * sentence) and the marker line the transcript shows
- * for it.
- */
-interface ToolOutcome {
-	readonly result: string;
-	readonly marker: string;
-	readonly failed: boolean;
-	/** The call's arguments, parsed; the loop validated them. */
-	readonly input: unknown;
-}
-
-/** The transcript marker for a failed fetch. */
-const fetchFailedMarker = (sentence: string): string =>
-	`🔗 fetch failed: ${sentence}`;
-
-/** The transcript marker for a failed search. */
-const searchFailedMarker = (sentence: string): string =>
-	`🔍 search failed: ${sentence}`;
-
-/**
- * The call's arguments parsed to a value, or `null` when
- * they are not JSON at all — a parse failure is `null`
- * here, not a failed effect: the call still runs, and
- * fails, as a missing argument.
- */
-const parseArguments = (call: ToolCallData): Effect.Effect<unknown> =>
-	Effect.orElseSucceed(
-		Effect.try({
-			try: () => JSON.parse(call.args) as unknown,
-			catch: () => "arguments were not JSON",
-		}),
-		() => null,
-	);
-
-/**
- * Execute one `fetch_url` call: parse its arguments, fetch the
- * URL's page as text, and render both outcomes as strings — a
- * missing or non-string `url` is a failed result (a sentence, no
- * fetch attempted), never an exception out of the loop. The fetch
- * runs inside the calling fiber, so `stop` interrupts a fetch in
- * flight.
- */
-const runFetch = (
-	call: ToolCallData,
-	tinyfishApiKey: string,
-): Effect.Effect<ToolOutcome> =>
-	Effect.gen(function* () {
-		const parsed = yield* parseArguments(call);
-		const url = isRecord(parsed) ? parsed.url : undefined;
-		if (typeof url !== "string" || url.trim() === "") {
-			const sentence = `${call.name} was called without a URL.`;
-			return {
-				result: sentence,
-				marker: fetchFailedMarker(sentence),
-				failed: true,
-				input: parsed,
-			};
-		}
-		// The fetch's failure channel is the sentence the transcript
-		// shows; either way the outcome is a string for the model.
-		const outcome = yield* Effect.catch(
-			Effect.map(fetchUrlText(url, tinyfishApiKey), (page) => ({
-				ok: true as const,
-				page,
-			})),
-			(sentence) => Effect.succeed({ ok: false as const, sentence }),
-		);
-		if (!outcome.ok) {
-			return {
-				result: outcome.sentence,
-				marker: fetchFailedMarker(outcome.sentence),
-				failed: true,
-				input: parsed,
-			};
-		}
-		const host = yield* Effect.orElseSucceed(
-			Effect.try({
-				try: () => new URL(url).host,
-				catch: () => "not a URL",
-			}),
-			() => url,
-		);
-		return {
-			result: outcome.page,
-			marker: `🔗 fetched ${host} (${outcome.page.length.toLocaleString()} chars)`,
-			failed: false,
-			input: parsed,
-		};
-	});
-
-/**
- * Execute one `web_search` call: parse its arguments, search
- * through TinyFish, and render both outcomes as strings — a
- * missing or non-string `query` is a failed result (a sentence,
- * no search attempted), never an exception out of the loop. The
- * search runs inside the calling fiber, so `stop` interrupts it.
- */
-const runSearch = (
-	call: ToolCallData,
-	tinyfishApiKey: string,
-): Effect.Effect<ToolOutcome> =>
-	Effect.gen(function* () {
-		const parsed = yield* parseArguments(call);
-		const query = isRecord(parsed) ? parsed.query : undefined;
-		if (typeof query !== "string" || query.trim() === "") {
-			const sentence = `${call.name} was called without a query.`;
-			return {
-				result: sentence,
-				marker: searchFailedMarker(sentence),
-				failed: true,
-				input: parsed,
-			};
-		}
-		// The search's failure channel is the sentence the
-		// transcript shows; either way the outcome is a string
-		// for the model.
-		const outcome = yield* Effect.catch(
-			Effect.map(searchWeb(query.trim(), tinyfishApiKey), (text) => ({
-				ok: true as const,
-				text,
-			})),
-			(sentence) => Effect.succeed({ ok: false as const, sentence }),
-		);
-		if (!outcome.ok) {
-			return {
-				result: outcome.sentence,
-				marker: searchFailedMarker(outcome.sentence),
-				failed: true,
-				input: parsed,
-			};
-		}
-		// The count is structural — the compact text is
-		// one blank-line-separated block per hit — so the
-		// marker can say how many results came back.
-		const count = searchResultCount(outcome.text);
-		return {
-			result: outcome.text,
-			marker: `🔍 searched the web: ${count.toLocaleString()} result${
-				count === 1 ? "" : "s"
-			}`,
-			failed: false,
-			input: parsed,
-		};
-	});
-
-/**
- * Execute one tool call, dispatched by the tool's name:
- * `web_search` searches the web through TinyFish;
- * `fetch_url` reads a page. The loop declares only these
- * two tools, so a name the model hallucinates falls
- * through to the fetch — it fails there as a missing URL
- * (a sentence), never an exception out of the loop,
- * exactly as an undeclared name behaved before the
- * search tool existed.
- */
-const runTool = (
-	call: ToolCallData,
-	tinyfishApiKey: string,
-): Effect.Effect<ToolOutcome> =>
-	call.name === WEB_SEARCH_NAME
-		? runSearch(call, tinyfishApiKey)
-		: runFetch(call, tinyfishApiKey);
 
 export const getChat = (): ChatSnapshot => state;
 
@@ -707,7 +538,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			if (room <= 0) return;
 			for (const call of roundCalls.slice(0, room)) {
 				executed += 1;
-				const outcome = yield* runTool(call, tinyfishApiKey);
+				// The registry owns dispatch and the two built-ins' argument
+				// reading; a name no tool answers to is a failed outcome with a
+				// sentence, never an exception out of the loop.
+				const outcome = yield* executeTool(call.name, call);
 				appendMarker(conversationId, assistantId, outcome.marker, raw);
 				wire = appendToolResult(
 					wire,
@@ -731,7 +565,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	// On success, seed the next turn with the reply appended so the model sees
 	// its own prior answer (`[user, assistant, user]`, not `[user, user]`).
-	activeFiber = Effect.runFork(
+	// The turn forks on the subsystem's runtime, not a throwaway one: tool
+	// execution resolves through the host's `tools` registry, which lives in
+	// `HostServices`.
+	activeFiber = runtime.runFork(
 		Effect.exit(
 			run.pipe(
 				Effect.onExit((exit) =>
