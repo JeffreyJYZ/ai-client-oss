@@ -668,3 +668,28 @@ Tests to pin: a corrupt blob makes `getSettings()` return defaults **and** leave
 **Review Focus.** 1 → T4 (setup fault, timeout) and T5 (`ContributionBoundary`), asserted again in T18's browser proof. 2 → T6–T9 browser proofs plus T18's "with plugins disabled, byte-identical". 3 → T2 duplicate id, T10 tool name, T11 protocol name. 4 → T0.1 (refused write, stored text intact), T0.2 (per-field tolerance), T0.3 (frozen fixtures + the downgrade assertion), T1 `Settings` decode, T11 stored unknown protocol. 5 → T12 fail-open, veto plus result, chunk drop with a terminating stream.
 
 **Proportion.** The plan gives signatures, file lists and test names; only three steps carry a body. Phases are sequential and each ends green and shippable — T0.1–T0.3 make the data guarantee true before anything touches the schema, T1–T4 produce a tested subsystem, T5–T9 make the UI registry-assembled with no behaviour change, T10–T16 make every logic seam real, T17–T19 make plugins installable, T20–T21 make them native and reloadable, T22 ships it.
+
+## Phase 5 — Docs site
+
+**Added 2026-10-12 at the user's request, mid-run** — a documentation deliverable, not part of the spec's §-map, which is why it sits outside the Self-Review above. Two of the user's constraints shape it: it must **update as the work progresses**, and the **plugin API reference is the most important part**. So the reference is *generated from the shipped types* and a test enforces that no public export goes undocumented — the docs cannot drift because nobody types the API twice. The constraint that makes it a task at all: the web build has **no router**, and Vercel serves `index.html` for `/` only.
+
+### Task 23: `/docs` site with a generated plugin API reference
+
+**Files:**
+- Create: `web/docs/index.html` (the second Vite entry), `web/src/docs/**` (curated pages and the reference renderer), `scripts/build-docs.ts` (the generator), `web/src/docs/reference.test.ts` (the coverage gate)
+- Modify: `web/vite.config.ts` (the extra build entry), `web/package.json` (`docs` script; `build` runs it first, so a deploy can never ship a stale reference)
+- Test: `bun test` for the coverage gate, plus a browser proof on the built site
+
+**Interfaces:**
+- Produces: a deployed `/docs/` — a multi-page Vite entry emitting `dist/docs/index.html`, which Vercel serves at `/docs/` with no router and no new runtime dependency; `bun run docs` regenerates the reference from source.
+- Consumes: the shipped plugin surface — `host.ts`, `manifest.ts`, `ids.ts`, and as they land `tools.ts`, `providers.ts`, `pipeline.ts`, `commands.ts`, `themes.ts`, `notify.ts`, `renderers.ts`, `settings.ts`, and `sdk.ts` (Task 17). The generator reads those modules; it must never hardcode a signature.
+
+- [ ] **Step 1: Write the failing test** — `reference.test.ts`: every exported symbol of every module in the generator's entry list appears in its output, and a module added to the list with an undocumented export fails the test. This is the mechanism that makes "it updates as everything progresses" true rather than aspirational.
+- [ ] **Step 2: Run it and watch it fail.**
+- [ ] **Step 3: Implement the generator** — `scripts/build-docs.ts` extracts the public surface (from `web/src/lib/plugins/sdk.ts` once Task 17 lands, else the module list above), plus the slot map from `slotIds` and the manifest fields from its zod schema, and renders the reference. The API section is **output, never prose**.
+- [ ] **Step 4: Build the page** — `web/docs/index.html` plus curated user pages (what it is, install/desktop, providers, plugins and the **honest** trust model, data and backup), dark-mode-first, linking `web/plugins/README.md` once Task 19 lands and degrading gracefully before then. The capability table must state plainly what is enforced and what is consent-only — never describe a capability as a sandbox.
+- [ ] **Step 5: Wire the build** — the extra Vite entry; a `docs` script; `build` runs `docs` first so every deploy regenerates the reference from the source it was built from.
+- [ ] **Step 6: Browser proof** — load `/docs/` from a production build, assert the reference renders every registry and the slot map, the nav works, and dark mode is correct.
+- [ ] **Step 7: Commit** — `docs(site): /docs page and a generated plugin API reference`
+
+---

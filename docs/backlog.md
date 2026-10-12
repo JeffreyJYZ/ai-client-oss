@@ -4,6 +4,8 @@ Queued work, not yet planned. Each item states what was asked and the constraint
 
 ## `/docs` on the website — all app documentation in one place
 
+**Status: scheduled 2026-10-12 while this entry was still open — now Phase 5 / Task 23 in `docs/superpowers/plans/2026-10-12-plugin-system.md`, which is the source of truth for it.** Everything below stays as the constraint analysis that shaped the task. **Two requirements the user added when scheduling it:** the page must *update as the work progresses*, and the **plugin API reference is its most important part** — which is why Task 23 **generates** the reference from the shipped types and gates it with a coverage test, instead of writing signatures by hand.
+
 **Asked for:** 2026-10-12 (user, while the plugin-system branch was running). A `/docs` route on the website holding the app's documentation.
 
 **What already exists:** the website is the same `web/` frontend, built by Vite and deployed to Vercel (project `ai-client-oss-site`, team `jeffreys-projects-b51c8adf`, Git-connected to `main`, Root Directory `web`). The Tauri desktop build is the same app; `isDesktop` (`web/src/lib/platform.ts`) is what distinguishes them, and the web build shows the "Download desktop app" link (`web/src/constants/app.ts`-adjacent, see `web/src/constants/links.ts`).
