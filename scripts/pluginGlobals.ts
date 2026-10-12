@@ -74,29 +74,8 @@ export const hostGlobalModules = (config: HostGlobalModules): Plugin => ({
 });
 
 /**
- * The bare specifiers an emitted chunk still imports — the build-time twin of
- * the loader's no-imports check (`web/src/lib/plugins/moduleImport.ts`). The
- * preset fails the build on a non-empty result, so the contract is enforced
- * where the violation is introduced rather than when a user loads the plugin.
- * Line-anchored, so a `from "…"` inside a string or comment is not a match.
+ * The chunk no-imports check (spec §6) now lives in `web/src/lib/build/bareImports.ts`
+ * — inside the gate that typechecks, lints and tests it. `build-plugins.ts`
+ * imports `bareImports` from there; this preset keeps only the virtual-module
+ * machinery, which needs the build's own resolver.
  */
-const FROM_IMPORT = /^[ \t]*(?:import|export)\b[^\n]*?\bfrom\s*["']([^"']+)["']/gm;
-const SIDE_EFFECT_IMPORT = /^[ \t]*import\s*["']([^"']+)["']/gm;
-
-const isBareSpecifier = (specifier: string): boolean =>
-	!specifier.startsWith(".") &&
-	!specifier.startsWith("/") &&
-	!/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(specifier);
-
-export const bareImports = (code: string): readonly string[] => {
-	const found: string[] = [];
-	for (const pattern of [FROM_IMPORT, SIDE_EFFECT_IMPORT]) {
-		for (const match of code.matchAll(pattern)) {
-			const specifier = match[1];
-			if (specifier !== undefined && isBareSpecifier(specifier)) {
-				found.push(specifier);
-			}
-		}
-	}
-	return found;
-};

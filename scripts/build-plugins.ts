@@ -28,8 +28,9 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { bareImports } from "../web/src/lib/build/bareImports";
 import { hostGlobalNames } from "../web/src/lib/plugins/globals";
-import { bareImports, hostGlobalModules, reactExportNames } from "./pluginGlobals";
+import { hostGlobalModules, reactExportNames } from "./pluginGlobals";
 
 const webRoot = fileURLToPath(new URL("../web", import.meta.url));
 const pluginsRoot = join(webRoot, "plugins");
