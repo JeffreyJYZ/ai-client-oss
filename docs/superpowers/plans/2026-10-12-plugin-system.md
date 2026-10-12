@@ -288,6 +288,8 @@ Tests to pin: a corrupt blob makes `getSettings()` return defaults **and** leave
 
 ## Phase 1 — UI seams
 
+**Dispatch note (user approved parallel dispatch, 2026-10-12):** T6–T9 each rewrite a *different* component area — shell/layout, transcript, composer, settings+sidebar — and can run as four concurrent implementers once T5's slot primitives land. The plan as originally written has all four modifying one file, `web/src/lib/plugins/builtin/ui.ts`, which would serialise them or clobber. So split the built-in registrations **per area** in T5 (`builtin/shell.ts`, `builtin/transcript.ts`, `builtin/composer.ts`, `builtin/settings.ts`, all merged by `builtin/index.ts`), and give each task exactly one of those plus its own component files. Same rule as every multi-writer situation in this plan: one writer per file, stage by explicit path.
+
 ### Task 5: Slot primitives, resolver, React bridge, kit and error boundary
 
 **Files:**
