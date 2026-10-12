@@ -3,6 +3,15 @@ import type { Backup } from "@lib/backup";
 import backupJson from "@lib/db/__fixtures__/backup-pre-plugins.json";
 import conversationJson from "@lib/db/__fixtures__/conversation-pre-plugins.json";
 import settingsJson from "@lib/db/__fixtures__/settings-pre-plugins.json";
+import {
+	clearInvokeCalls,
+	fakeInvoke,
+	installStorage,
+	invokeCalls,
+	setOutcome,
+	setStoredSettings,
+	storedSettings,
+} from "@lib/db/__test-support__/fake-invoke";
 import { DATA_VERSION, migrations } from "@lib/db/migrate";
 import { readSettings } from "@lib/db/read";
 import {
@@ -11,8 +20,8 @@ import {
 	REJECTED_SETTINGS_MESSAGE,
 	Settings,
 } from "@lib/db/types";
-import { SETTINGS_KEY, web } from "@lib/db/web";
-import { Effect, Result } from "effect";
+import { web } from "@lib/db/web";
+import { Effect } from "effect";
 import { z } from "zod";
 
 /** The 0.2.3 settings shape: nine keys, before the additive plugin fields. */
@@ -47,35 +56,19 @@ const backupFixture = backupJson as Backup;
 const run = <A>(effect: Effect.Effect<A, string>): Promise<A> =>
 	Effect.runPromise(effect);
 
-/** The five-hour-run outcome, flattened so the test never names an effect type. */
-const setOutcome = (
-	result: Result.Result<void, string>,
-): { readonly ok: boolean; readonly error?: string } =>
-	Result.isSuccess(result)
-		? { ok: true }
-		: { ok: false, error: result.failure };
-
-/** A `localStorage` stand-in that records writes and exposes the raw value. */
-const installStorage = (initial: string | null) => {
-	const map = new Map<string, string>();
-	if (initial !== null) map.set(SETTINGS_KEY, initial);
-	let writes = 0;
-	(globalThis as { localStorage?: Storage }).localStorage = {
-		getItem: (key: string): string | null => map.get(key) ?? null,
-		setItem: (key: string, value: string): void => {
-			writes += 1;
-			map.set(key, value);
-		},
-		removeItem: (key: string): void => {
-			map.delete(key);
-		},
-		clear: (): void => map.clear(),
-		key: (): string | null => null,
-		get length(): number {
-			return map.size;
-		},
-	} as unknown as Storage;
-	return { raw: () => map.get(SETTINGS_KEY) ?? null, writes: () => writes };
+/**
+ * The frozen fixture's own keys taken from `settings`, so a later *additive*
+ * `Settings` key cannot fail a test that is about *not losing* data — the key
+ * set comes from the fixture, never from a hardcoded list of new keys.
+ */
+const prePluginsSubstance = (settings: Settings): Partial<Settings> => {
+	const substance: Partial<Settings> = {};
+	for (const key of Object.keys(settingsFixture)) {
+		(substance as Record<string, unknown>)[key] = (
+			settings as Record<string, unknown>
+		)[key];
+	}
+	return substance;
 };
 
 /**
@@ -170,11 +163,10 @@ describe("the pre-plugin settings blob reads under the current schema", () => {
 			settingsFixture.dismissedUpdateVersion,
 		);
 
-		// Nothing the old blob carried was dropped: the parsed object minus the
-		// three new keys is exactly the fixture.
-		const { dataVersion, pluginsEnabled, plugins, ...substance } = settings;
-		expect(substance).toEqual(settingsFixture);
-		expect(dataVersion).toBe(DATA_VERSION);
+		// Nothing the old blob carried was dropped: every key the frozen fixture
+		// has survives with its value (keys added since are ignored on purpose).
+		expect(prePluginsSubstance(settings)).toEqual(settingsFixture);
+		expect(settings.dataVersion).toBe(DATA_VERSION);
 	});
 
 	test("the pre-plugin conversation fixture parses unchanged", () => {
@@ -200,9 +192,7 @@ describe("the pre-plugin settings blob reads under the current schema", () => {
 		// No `dataVersion` on disk: the zod default lifts the blob to the
 		// current version, and the substance is byte-for-byte the fixture.
 		expect(withoutField.settings.dataVersion).toBe(DATA_VERSION);
-		const { dataVersion, pluginsEnabled, plugins, ...substance } =
-			withoutField.settings;
-		expect(substance).toEqual(settingsFixture);
+		expect(prePluginsSubstance(withoutField.settings)).toEqual(settingsFixture);
 
 		// An explicit `dataVersion: 0` with an empty registry has nothing to
 		// migrate, so its version is left as stored — nothing changes (spec
@@ -214,13 +204,7 @@ describe("the pre-plugin settings blob reads under the current schema", () => {
 		expect(atZero.kind).toBe("ok");
 		if (atZero.kind !== "ok") return;
 		expect(atZero.settings.dataVersion).toBe(0);
-		const {
-			dataVersion: _zeroed,
-			pluginsEnabled: _zeroPluginsEnabled,
-			plugins: _zeroPlugins,
-			...zeroSubstance
-		} = atZero.settings;
-		expect(zeroSubstance).toEqual(settingsFixture);
+		expect(prePluginsSubstance(atZero.settings)).toEqual(settingsFixture);
 	});
 });
 
@@ -248,15 +232,19 @@ describe("the current schema round-trips the three additions", () => {
 describe("the downgrade hazard is fixed, not described", () => {
 	test("a plugin protocol fails the frozen 0.2.3 protocol enum", () => {
 		const parsed = JSON.parse(JSON.stringify(augmentedBlob));
-		// The old build's enum cannot name a plugin protocol: whole-object
-		// failure, which in 0.2.3 was a default-and-wipe.
+		// The old build's enum cannot name a plugin protocol: a whole-object
+		// failure — the class a 0.2.3 build defaulted past, which the safety
+		// net asserted below is what stops the wipe.
 		expect(legacySettingsShape.safeParse(parsed).success).toBe(false);
 		// The current schema accepts the same blob — the widening is additive.
 		expect(Settings.safeParse(parsed).success).toBe(true);
 	});
 
 	test("an unparseable stored blob is preserved and writes refuse", async () => {
-		// A whole-object parse failure — the class the 0.2.3 downgrade produces.
+		// A *different* blob from the plugin-protocol one above: the current
+		// schema accepts that blob (the widening is the point), so the only way
+		// to reach the safety net here is a whole-object failure the schema
+		// cannot tolerate — the class a 0.2.3 downgrade produces.
 		const unreadable = JSON.stringify({
 			...settingsFixture,
 			providers: [{ ...settingsFixture.providers[0], id: 1 }],
@@ -281,53 +269,53 @@ describe("the downgrade hazard is fixed, not described", () => {
 	});
 });
 
-// The backup fixture imports through the app's real import path. `@lib/db`
-// picks its adapter once per process (from `isDesktop`), and another test file
-// imports it first, so inject the desktop adapter for this file: stub the Tauri
-// `invoke` and mock `@lib/db` to hand `@lib/backup` that adapter. No filesystem
-// is touched.
-const invokeCalls: string[] = [];
-let storedSettings: string | null = null;
-const fakeInvoke = mock((command: string, args?: Record<string, unknown>) => {
-	invokeCalls.push(command);
-	if (command === "db_get_settings") return Promise.resolve(storedSettings);
-	if (command === "db_set_settings") {
-		storedSettings = String(args?.json ?? "");
-		return Promise.resolve(null);
-	}
-	return Promise.resolve(null);
-});
+// The backup fixture: validated with `backupSchema` (the app's import shape),
+// then driven through the desktop adapter directly. `@lib/db` picks its adapter
+// once per process from `isDesktop`, so the composed `db` is not used here, and
+// only the third-party Tauri `invoke` is mocked (shared with `safety.test.ts`).
 mock.module("@tauri-apps/api/core", () => ({ invoke: fakeInvoke }));
 
 const { tauri } = await import("@lib/db/tauri");
-mock.module("@lib/db", () => ({ db: tauri }));
+const { backupSchema } = await import("@lib/backup");
 
-const { importBackup } = await import("@lib/backup");
-
-describe("the pre-plugin backup imports", () => {
+describe("the pre-plugin backup fixture", () => {
 	beforeEach(async () => {
-		storedSettings = null;
-		invokeCalls.length = 0;
+		setStoredSettings(null);
+		clearInvokeCalls();
 		await run(web.resetRejectedSettings());
 		await run(tauri.resetRejectedSettings());
 	});
 
-	test("the BACKUP_VERSION-1 envelope imports through importBackup", async () => {
-		const result = await run(importBackup(backupFixture));
-		expect(result).toEqual({
-			conversations: backupFixture.conversations.length,
-		});
+	test("the BACKUP_VERSION-1 envelope validates with real values intact", () => {
+		const parsed = backupSchema.safeParse(backupFixture);
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) return;
+
+		expect(parsed.data.settings.providers[0]?.apiKey).toBe(
+			backupFixture.settings.providers[0].apiKey,
+		);
+		expect(parsed.data.settings.memories).toHaveLength(2);
+		expect(parsed.data.conversations).toHaveLength(
+			backupFixture.conversations.length,
+		);
+	});
+
+	test("its parsed payload writes through the desktop adapter", async () => {
+		const parsed = backupSchema.safeParse(backupFixture);
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) return;
+
+		await run(tauri.setSettings(parsed.data.settings));
+		await run(tauri.upsertConversation(parsed.data.conversations[0]));
+
 		expect(invokeCalls).toContain("db_set_settings");
 		expect(invokeCalls).toContain("db_upsert_conversation");
 
-		const written = JSON.parse(String(storedSettings));
+		const written = JSON.parse(String(storedSettings()));
 		expect(written.providers[0].apiKey).toBe(
 			backupFixture.settings.providers[0].apiKey,
 		);
 		expect(written.memories).toHaveLength(2);
 		expect(written.dataVersion).toBe(DATA_VERSION);
-
-		// Reset the shared module-level `rejected` cell the adapter keeps.
-		await run(web.resetRejectedSettings());
 	});
 });

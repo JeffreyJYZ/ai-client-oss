@@ -1,59 +1,27 @@
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+	clearInvokeCalls,
+	fakeInvoke,
+	installStorage,
+	invokeCalls,
+	type SetOutcome,
+	setOutcome,
+	setStoredSettings,
+	storedSettings,
+} from "@lib/db/__test-support__/fake-invoke";
 import type { Db } from "@lib/db/types";
 import {
 	REJECTED_SETTINGS_MESSAGE,
 	type Settings,
 	settingsDefaults,
 } from "@lib/db/types";
-import { SETTINGS_KEY, web } from "@lib/db/web";
-import { Effect, Option, Result } from "effect";
+import { web } from "@lib/db/web";
+import { Effect, Option } from "effect";
 
 /** Valid JSON that does not satisfy `Settings` (a provider's `id` is not a string). */
 const SCHEMA_INVALID = JSON.stringify({ providers: [{ id: 1 }] });
 /** Not JSON at all. */
 const UNPARSEABLE = '{"providers":';
-
-/** A `localStorage` stand-in that records writes and exposes the raw value. */
-const makeStorage = (initial: string | null) => {
-	const map = new Map<string, string>();
-	if (initial !== null) map.set(SETTINGS_KEY, initial);
-	let writes = 0;
-	const storage = {
-		getItem: (key: string): string | null => map.get(key) ?? null,
-		setItem: (key: string, value: string): void => {
-			writes += 1;
-			map.set(key, value);
-		},
-		removeItem: (key: string): void => {
-			map.delete(key);
-		},
-		clear: (): void => map.clear(),
-		key: (): string | null => null,
-		get length(): number {
-			return map.size;
-		},
-	};
-	return {
-		storage: storage as unknown as Storage,
-		raw: (): string | null => map.get(SETTINGS_KEY) ?? null,
-		writes: (): number => writes,
-	};
-};
-
-/** Every Tauri command the adapter invoked, in order. */
-const invokeCalls: string[] = [];
-/** The raw string `db_get_settings` returns and `db_set_settings` stores. */
-let stored: string | null = null;
-
-const fakeInvoke = mock((command: string, args?: Record<string, unknown>) => {
-	invokeCalls.push(command);
-	if (command === "db_get_settings") return Promise.resolve(stored);
-	if (command === "db_set_settings") {
-		stored = String(args?.json ?? "");
-		return Promise.resolve(null);
-	}
-	return Promise.resolve(null);
-});
 
 mock.module("@tauri-apps/api/core", () => ({ invoke: fakeInvoke }));
 
@@ -79,12 +47,6 @@ interface Access {
 	readonly writes: () => number;
 }
 
-/** Outcome of `setSettings`, flattened so the test never names an effect type. */
-interface SetOutcome {
-	readonly ok: boolean;
-	readonly error?: string;
-}
-
 /** The contract both adapters must satisfy, parameterised by storage. */
 interface Harness {
 	readonly label: string;
@@ -95,34 +57,25 @@ interface Harness {
 	set(patch: Partial<Settings>): Promise<SetOutcome>;
 }
 
-const outcome = (result: Result.Result<void, string>): SetOutcome =>
-	Result.isSuccess(result)
-		? { ok: true }
-		: { ok: false, error: result.failure };
-
 const webHarness: Harness = {
 	label: "web",
-	install(initial) {
-		const s = makeStorage(initial);
-		(globalThis as { localStorage?: Storage }).localStorage = s.storage;
-		return { raw: s.raw, writes: s.writes };
-	},
+	install: (initial) => installStorage(initial),
 	get: () => Effect.runPromise(web.getSettings()),
 	rejected: () => Effect.runPromise(web.rejectedSettings()),
 	reset: () => Effect.runPromise(web.resetRejectedSettings()),
 	set: (patch) =>
 		Effect.runPromise(
-			Effect.map(Effect.result(web.setSettings(patch)), outcome),
+			Effect.map(Effect.result(web.setSettings(patch)), setOutcome),
 		),
 };
 
 const tauriHarness: Harness = {
 	label: "tauri",
 	install(initial) {
-		stored = initial;
-		invokeCalls.length = 0;
+		setStoredSettings(initial);
+		clearInvokeCalls();
 		return {
-			raw: () => stored,
+			raw: () => storedSettings(),
 			writes: () => invokeCalls.filter((c) => c === "db_set_settings").length,
 		};
 	},
@@ -131,7 +84,7 @@ const tauriHarness: Harness = {
 	reset: () => Effect.runPromise(tauri.resetRejectedSettings()),
 	set: (patch) =>
 		Effect.runPromise(
-			Effect.map(Effect.result(tauri.setSettings(patch)), outcome),
+			Effect.map(Effect.result(tauri.setSettings(patch)), setOutcome),
 		),
 };
 
