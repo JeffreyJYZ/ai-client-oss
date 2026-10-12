@@ -48,8 +48,13 @@ const resolveOrder = <E extends RegistryEntry>(
 	list
 		.map((entry, index) => ({ entry, index }))
 		.sort((a, b) => {
-			const order = (a.entry.order ?? Infinity) - (b.entry.order ?? Infinity);
-			if (order !== 0) return order;
+			// Do NOT subtract these: `Infinity - Infinity` is NaN, and `NaN !== 0`
+			// is true, so a subtraction here returns NaN and the engine treats the
+			// pair as equal — silently skipping the priority tiebreak below for
+			// every pair of entries that set no `order` (Task 12 found it).
+			const aOrder = a.entry.order ?? Number.POSITIVE_INFINITY;
+			const bOrder = b.entry.order ?? Number.POSITIVE_INFINITY;
+			if (aOrder !== bOrder) return aOrder < bOrder ? -1 : 1;
 			const priority = (b.entry.priority ?? 0) - (a.entry.priority ?? 0);
 			if (priority !== 0) return priority;
 			return a.index - b.index;

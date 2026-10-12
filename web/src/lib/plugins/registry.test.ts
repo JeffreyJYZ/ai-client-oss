@@ -55,6 +55,28 @@ describe("registry", () => {
 		]);
 	});
 
+	// The case a subtraction-based comparator gets wrong, and the reason the
+	// test above did not catch it: with no explicit `order` *both* sides are
+	// `Infinity`, so `Infinity - Infinity` is `NaN`, `NaN !== 0` is true, and the
+	// comparator returns NaN — which the engine reads as "equal", so the priority
+	// tiebreak below it is never reached and the pair stays in registration
+	// order. A plugin overriding an unordered contribution by priority silently
+	// did nothing until Task 12's review found this.
+	test("priority decides between entries that set no order at all", async () => {
+		const r = await run(
+			makeRegistry<{
+				id: string;
+				owner: string;
+				order?: number;
+				priority?: number;
+			}>("t"),
+		);
+		await run(r.add({ id: "low", owner: "p1", priority: 1 }));
+		await run(r.add({ id: "high", owner: "p1", priority: 9 }));
+		await run(r.add({ id: "plain", owner: "p1" }));
+		expect(idsOf(await run(r.entries()))).toEqual(["high", "low", "plain"]);
+	});
+
 	test("a duplicate id replaces in place and logs a PluginFault, never duplicates", async () => {
 		const r = await run(makeRegistry<BasicEntry>("t"));
 		const stale = await run(r.add({ id: "a", owner: "p1" }));
