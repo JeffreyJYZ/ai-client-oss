@@ -12,7 +12,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 ## Search
 
-- **`rg` (or the `grep` tool), always scoped to a path — never a bare `grep -r`.** The shell's `grep` alias excludes `.git` and VCS dirs but **not** `node_modules`, which is the bulk of this tree, so an unscoped recursive grep walks every dependency and returns their matches as if they were yours. Scope it (`rg <pat> web/src`) or exclude the tree (`rg -g '!node_modules' <pat> .`).
+- **`rg`, always scoped to a path — never `grep`.** Neither a bare `grep -r` nor the `grep` tool: the shell's `grep` alias excludes `.git` and VCS dirs but **not** `node_modules`, the bulk of this tree, so an unscoped recursive grep walks every dependency and returns their matches as if they were yours. Scope it (`rg <pat> web/src`) or exclude the tree (`rg -g '!node_modules' <pat> .`).
 
 ## Fonts
 
