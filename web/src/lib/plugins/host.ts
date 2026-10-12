@@ -1,15 +1,44 @@
+import { type Db, db } from "@lib/db";
 import { isDesktop } from "@lib/platform";
 import { PluginFault } from "@lib/plugins/errors";
-import { type SlotId, slotIdSchema } from "@lib/plugins/ids";
+import { type HostEvent, type SlotId, slotIdSchema } from "@lib/plugins/ids";
+import { makeNotifyService, type NotifyService } from "@lib/plugins/notify";
 import {
 	type Disposable,
 	makeRegistry,
 	type Registry,
 	type RegistryEntry,
 } from "@lib/plugins/registry";
+import {
+	makeRendererRegistry,
+	type RendererRegistry,
+} from "@lib/plugins/renderers";
+import {
+	type ChatService,
+	type Logger,
+	makeChatService,
+	makeLogger,
+	makeScopedStorage,
+	type NativeHandle,
+	nativeHandle,
+	type ScopedStorage,
+	subscribeHostEvent,
+} from "@lib/plugins/services";
+import {
+	makeSettingsRegistry,
+	type SettingsRegistry,
+} from "@lib/plugins/settings";
+import { makeToolRegistry, type ToolRegistry } from "@lib/plugins/tools";
 import { runningVersion } from "@lib/updates";
 import appPackage from "@root/package.json";
-import { Context, Effect, Layer, Scope, type Stream } from "effect";
+import {
+	Context,
+	Effect,
+	Layer,
+	type Option,
+	Scope,
+	type Stream,
+} from "effect";
 import type { ComponentType } from "react";
 
 /**
@@ -76,31 +105,54 @@ export interface HostRegistry<E extends RegistryEntry> {
  * something returns a `Disposable`, whose removal is attached to that plugin's
  * `Scope` — closing the scope is unload, so a disabled plugin leaves no trace.
  *
- * Only the synchronous registries live here. The service members a plugin
- * calls for behaviour (`chat`, `db`, `storage`, `notify`, `native`, `log`,
- * `on`) are populated by Task 16; they are deliberately absent rather than
- * stubbed, so nothing can be called that does nothing.
+ * Two kinds of member live here, deliberately split by signature. The
+ * **synchronous registries** (`ui`, `commands`, `settings`, `tools`,
+ * `providers`, `pipeline`, `renderers`, `themes`) register now and read as
+ * Effects/Streams. The **services** a plugin calls for behaviour (`chat`, `db`,
+ * `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface,
+ * populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is
+ * the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with
+ * the plugin's `Scope`.
  */
 export interface Host {
 	/** The app and plugin-API versions a plugin is checked against (spec §10). */
 	readonly version: { readonly app: string; readonly api: string };
 	readonly ui: HostRegistry<Contribution>;
 	readonly commands: HostRegistry<RegistryEntry>;
-	readonly settings: HostRegistry<RegistryEntry>;
-	readonly tools: HostRegistry<RegistryEntry>;
+	readonly settings: SettingsRegistry;
+	readonly tools: ToolRegistry;
 	readonly providers: HostRegistry<RegistryEntry>;
 	readonly pipeline: HostRegistry<RegistryEntry>;
-	readonly renderers: HostRegistry<RegistryEntry>;
+	readonly renderers: RendererRegistry;
 	readonly themes: HostRegistry<RegistryEntry>;
+	/** The chat store, read and driven (spec §5). */
+	readonly chat: ChatService;
+	/** The app's own settings/conversation adapter (spec §5). */
+	readonly db: Db;
+	/** This plugin's key/value store, persisted into its `data` (spec §5). */
+	readonly storage: ScopedStorage;
+	/** Toasts, banners, confirms and modals rendered by the host (spec §5). */
+	readonly notify: NotifyService;
+	/** The desktop bridge, absent until Task 20 (spec §7). */
+	readonly native: Option.Option<NativeHandle>;
+	/** Scoped logging (spec §2). */
+	readonly log: Logger;
+	/** Subscribe to a host event; the handler stops when the plugin unloads. */
+	readonly on: (
+		event: HostEvent,
+		handler: (payload: unknown) => void,
+	) => Disposable;
 }
 
 /**
  * What `HostServices` provides: the versions the host reports, plus one
  * registry per kind (spec §3). Registries are created once in `HostLayer`'s
- * construction, so the whole app shares one collection per kind. `keybindings`
- * is held here, not on `Host`: a command carries its own keybinding, so the
- * global key handler reads this registry while plugins register through
- * `commands`.
+ * construction, so the whole app shares one collection per kind. The service
+ * members that carry no per-plugin state (`chat`, `db`, `storage`, `on`, `log`,
+ * `native`) are not held here — they live in `services.ts` and are bound per
+ * plugin in `makeHost`. Neither `keybindings` nor `renderers` is a registry: a
+ * command carries its own keybinding (`commands.ts` is the source of truth),
+ * and a renderer is a `ui` contribution resolved through `useComponent`.
  *
  * The app version is host data, not a registry — it is resolved once at boot
  * (`runtime.ts` builds this layer), which is the only place with the async
@@ -114,9 +166,7 @@ export interface HostServicesShape {
 	readonly providers: Registry<RegistryEntry>;
 	readonly pipeline: Registry<RegistryEntry>;
 	readonly commands: Registry<RegistryEntry>;
-	readonly keybindings: Registry<RegistryEntry>;
 	readonly settings: Registry<RegistryEntry>;
-	readonly renderers: Registry<RegistryEntry>;
 	readonly themes: Registry<RegistryEntry>;
 }
 
@@ -157,6 +207,22 @@ const attach = <E extends RegistryEntry>(
 	Effect.runSync(
 		Effect.provideService(registry.add(entry), Scope.Scope, scope),
 	);
+
+/**
+ * Attach `dispose` to the plugin's `Scope` for a handle that is not a registry
+ * entry — an event subscription. The same `runSync` pairing as {@link attach}:
+ * no interruption point sits between the subscription and its disposal, so
+ * unload cannot miss it.
+ */
+const onUnload = (scope: Scope.Scope, dispose: () => void): void => {
+	Effect.runSync(
+		Effect.provideService(
+			Scope.addFinalizer(scope, Effect.sync(dispose)),
+			Scope.Scope,
+			scope,
+		),
+	);
+};
 
 /**
  * A registration refused for a bad value is a logged `PluginFault`, never a
@@ -210,22 +276,44 @@ const makeContributionRegistry = (
  * shared service plus that plugin's `pluginId` and `Scope`, so every
  * registration is owned by the plugin and collected when its scope closes, and
  * the version a plugin reads is the one the boot resolved.
+ *
+ * `settings` and `renderers` are typed views whose factory reads only
+ * `host.ui`; the full `Host` literal does not exist until it is assembled, so
+ * they are built from a view carrying that one member.
  */
 export const makeHost = (
 	services: HostServicesShape,
 	pluginId: string,
 	scope: Scope.Scope,
-): Host => ({
-	version: services.version,
-	ui: makeContributionRegistry(services.ui, pluginId, scope),
-	commands: makeHostRegistry(services.commands, pluginId, scope),
-	settings: makeHostRegistry(services.settings, pluginId, scope),
-	tools: makeHostRegistry(services.tools, pluginId, scope),
-	providers: makeHostRegistry(services.providers, pluginId, scope),
-	pipeline: makeHostRegistry(services.pipeline, pluginId, scope),
-	renderers: makeHostRegistry(services.renderers, pluginId, scope),
-	themes: makeHostRegistry(services.themes, pluginId, scope),
-});
+): Host => {
+	const ui = makeContributionRegistry(services.ui, pluginId, scope);
+	const uiView = { ui } as Host;
+	return {
+		version: services.version,
+		ui,
+		commands: makeHostRegistry(services.commands, pluginId, scope),
+		settings: makeSettingsRegistry(uiView),
+		tools: makeToolRegistry(
+			makeHostRegistry(services.tools, pluginId, scope),
+			pluginId,
+		),
+		providers: makeHostRegistry(services.providers, pluginId, scope),
+		pipeline: makeHostRegistry(services.pipeline, pluginId, scope),
+		renderers: makeRendererRegistry(uiView),
+		themes: makeHostRegistry(services.themes, pluginId, scope),
+		chat: makeChatService(),
+		db,
+		storage: makeScopedStorage(pluginId),
+		notify: makeNotifyService(scope),
+		native: nativeHandle,
+		log: makeLogger(pluginId),
+		on: (event, handler) => {
+			const handle = subscribeHostEvent(event, handler, pluginId);
+			onUnload(scope, handle.dispose);
+			return handle;
+		},
+	};
+};
 
 /**
  * The host service layer (spec §3): the app version is resolved here, once,
@@ -243,9 +331,7 @@ export const HostLayer: Layer.Layer<HostServices> = Layer.effect(
 			providers: yield* makeRegistry<RegistryEntry>("providers"),
 			pipeline: yield* makeRegistry<RegistryEntry>("pipeline"),
 			commands: yield* makeRegistry<RegistryEntry>("commands"),
-			keybindings: yield* makeRegistry<RegistryEntry>("keybindings"),
 			settings: yield* makeRegistry<RegistryEntry>("settings"),
-			renderers: yield* makeRegistry<RegistryEntry>("renderers"),
 			themes: yield* makeRegistry<RegistryEntry>("themes"),
 		} satisfies HostServicesShape;
 	}),

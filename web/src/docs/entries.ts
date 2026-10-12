@@ -95,6 +95,12 @@ export const surfaceModules: readonly SurfaceModule[] = [
 		label: "Settings sections",
 		summary: "Plugin-contributed sections on the Settings page.",
 	},
+	{
+		path: "src/lib/plugins/services.ts",
+		label: "Host services",
+		summary:
+			"Chat, scoped storage, the event bus, logging and the native stub — the behaviour a plugin calls.",
+	},
 ];
 
 /** The author guide Task 19 adds; linked once it exists. */

@@ -32,10 +32,9 @@ export interface SettingsSection {
 }
 
 /**
- * The service `host.settings` will expose once Task 16 populates the host's
- * typed services (spec §5). **Today nothing reaches this through the host** —
- * `host.settings` is still the raw `HostRegistry`, so this module is the seam,
- * not yet the surface a plugin can call.
+ * The service `host.settings` exposes (spec §5): registering a section is a
+ * `settings.sections` contribution, so it renders, reorders and hides exactly
+ * like a built-in's and is owned and disposed by the plugin's `Scope`.
  */
 export interface SettingsRegistry {
 	readonly registerSection: (section: SettingsSection) => Disposable;

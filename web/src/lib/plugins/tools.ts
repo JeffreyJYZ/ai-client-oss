@@ -1,10 +1,9 @@
 import { PluginFault } from "@lib/plugins/errors";
-import { type Host, HostServices } from "@lib/plugins/host";
+import { type Host, type HostRegistry, HostServices } from "@lib/plugins/host";
 import type { Disposable, RegistryEntry } from "@lib/plugins/registry";
 import type { ToolCallData } from "@lib/providers/types";
-import { Effect, Option } from "effect";
+import { Cause, Effect, Option, type Stream } from "effect";
 import { z } from "zod";
-import { getSettings } from "@/state/settings";
 
 /**
  * The tool registry (spec §5). A tool is a **declaration** — the name,
@@ -83,23 +82,40 @@ const refuse = (detail: string, pluginId?: string): void => {
 };
 
 /**
- * Register `tool` through `host`, first wins (spec §5). Built-ins register at
- * boot, before any plugin loads, so a plugin's same-name tool is refused with a
- * `PluginFault` and the built-in stays the one that resolves — a plugin cannot
- * silently displace a name the model already knows. `pluginId` names the
- * refusing plugin in that fault; the built-in registrar omits it, since it
- * registers first and can never collide.
- *
- * The declaration is validated here because the value is plugin-supplied: a
- * malformed declaration is refused rather than stored and serialized.
+ * The tool registry a plugin reaches as `host.tools` (spec §2/§5). `register`
+ * is the **first-wins door**: built-ins register at boot, before any plugin
+ * loads, so a plugin's same-name tool is refused with a `PluginFault` and the
+ * built-in stays the one that resolves — a plugin cannot silently displace a
+ * name the model already knows. Reads stay Effects/Streams because the model
+ * loop and React drive them.
  */
-export const registerTool = (
-	host: Host,
+export interface ToolRegistry {
+	register(tool: Tool, pluginId?: string): Disposable;
+	readonly entries: () => Effect.Effect<readonly ToolEntry[]>;
+	readonly ownedBy: (owner: string) => Effect.Effect<readonly ToolEntry[]>;
+	readonly changes: Stream.Stream<readonly ToolEntry[]>;
+}
+
+/**
+ * The registry stores `ToolEntry`s, but `HostServices.tools` is typed as the
+ * bare `RegistryEntry` (Task 3 left the non-`ui` kinds untyped). Only
+ * {@link addTool} writes tools, so the narrowing is sound.
+ */
+const asToolEntry = (entry: RegistryEntry): ToolEntry => entry as ToolEntry;
+
+/**
+ * Validate `tool` and add it first-wins through `registry` (spec §5). The
+ * declaration is validated because it is plugin-supplied and is serialized to
+ * the model; `execute` is checked for callability because the loop invokes it —
+ * a malformed tool is refused here rather than stored and defected on later.
+ */
+const addTool = (
+	registry: HostRegistry<ToolEntry>,
 	tool: Tool,
 	pluginId?: string,
 ): Disposable => {
 	// Read defensively: the caller is untyped JavaScript at this boundary.
-	const declared = tool.declaration as { readonly name?: unknown } | undefined;
+	const declared = tool?.declaration as { readonly name?: unknown } | undefined;
 	const declaration = toolDeclarationSchema.safeParse(declared);
 	if (!declaration.success) {
 		refuse(
@@ -108,8 +124,15 @@ export const registerTool = (
 		);
 		return noopDisposable;
 	}
+	if (typeof tool.execute !== "function") {
+		refuse(
+			`the tool "${declaration.data.name}" has no callable execute; it was refused`,
+			pluginId,
+		);
+		return noopDisposable;
+	}
 	const name = declaration.data.name;
-	const taken = Effect.runSync(host.tools.entries()).some(
+	const taken = Effect.runSync(registry.entries()).some(
 		(entry) => entry.id === name,
 	);
 	if (taken) {
@@ -119,20 +142,45 @@ export const registerTool = (
 		);
 		return noopDisposable;
 	}
-	const entry: Omit<ToolEntry, "owner"> = {
+	return registry.register({
 		id: name,
 		declaration: declaration.data,
 		execute: tool.execute,
-	};
-	return host.tools.register(entry);
+	});
 };
 
 /**
- * The registry stores `ToolEntry`s, but `HostServices.tools` is typed as the
- * bare `RegistryEntry` (Task 3 left the non-`ui` kinds untyped). Only
- * `registerTool` writes tools, so the narrowing is sound.
+ * The typed `tools` registry bound to one plugin (spec §2's `host.tools`).
+ * Registering through it is the same first-wins path `registerTool` uses, so
+ * the public member and the registry agree — calling `host.tools.register`
+ * directly cannot shadow a built-in.
  */
-const asToolEntry = (entry: RegistryEntry): ToolEntry => entry as ToolEntry;
+export const makeToolRegistry = (
+	registry: HostRegistry<RegistryEntry>,
+	pluginId: string,
+): ToolRegistry => {
+	// The registry holds `ToolEntry`s; only `addTool` writes them, so reading it
+	// at that shape (rather than mapping every read back through `asToolEntry`)
+	// is sound.
+	const tools = registry as unknown as HostRegistry<ToolEntry>;
+	return {
+		register: (tool, label) => addTool(tools, tool, label ?? pluginId),
+		entries: tools.entries,
+		ownedBy: tools.ownedBy,
+		changes: tools.changes,
+	};
+};
+
+/**
+ * Register `tool` through `host`, first wins (spec §5) — the shared seam the
+ * built-ins and `host.tools.register` behind it use. `pluginId` is an optional
+ * override for the refusal's label; the host stamps ownership either way.
+ */
+export const registerTool = (
+	host: Host,
+	tool: Tool,
+	pluginId?: string,
+): Disposable => host.tools.register(tool, pluginId);
 
 /** The registered tool called `name`, or `none`. */
 export const resolveTool = (
@@ -165,14 +213,16 @@ const parseArguments = (call: ToolCallData): Effect.Effect<unknown> =>
 const unknownToolMarker = (name: string, sentence: string): string =>
 	`🔧 ${name} failed: ${sentence}`;
 
-/**
- * The turn context an execution runs in when the caller supplies none: the
- * user's TinyFish key, the one turn-scoped value the built-ins read. The loop
- * relies on this default; a test (or a future chat service) passes its own.
- */
-const ambientExecCtx = (): ToolExecCtx => ({
-	tinyfishApiKey: getSettings().tinyfishApiKey,
-});
+/** The failed outcome a faulty executor is reported as (spec §9). */
+const faultOutcome = (name: string, input: unknown): ToolOutcome => {
+	const sentence = `The tool ${name} failed unexpectedly.`;
+	return {
+		result: sentence,
+		marker: `🔧 ${name} failed unexpectedly`,
+		failed: true,
+		input,
+	};
+};
 
 /**
  * Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown
@@ -180,11 +230,21 @@ const ambientExecCtx = (): ToolExecCtx => ({
  * there were two tools and no registry; with a registry a miss is its own case
  * and fails with its own sentence. The invariant is preserved — a string result
  * either way, never an exception out of the loop.
+ *
+ * The execution is **failure-isolated** (spec §9): a third-party tool whose
+ * `execute` throws, or returns a failed/defected effect, is a logged
+ * `PluginFault` and a failed `ToolOutcome` — never a defect that takes the
+ * turn down. An interruption is re-raised, so a stopped turn stays a stop.
+ *
+ * `ctx` defaults to an empty context: the turn-scoped values (the TinyFish key)
+ * are the caller's to pass, and the loop passes the turn's own context. The
+ * default exists only so a caller that needs nothing (`executeTool(name, call)`)
+ * need not build one.
  */
 export const executeTool = (
 	name: string,
 	call: ToolCallData,
-	ctx: ToolExecCtx = ambientExecCtx(),
+	ctx: ToolExecCtx = {},
 ): Effect.Effect<ToolOutcome, never, HostServices> =>
 	Effect.gen(function* () {
 		const input = yield* parseArguments(call);
@@ -198,5 +258,18 @@ export const executeTool = (
 				input,
 			};
 		}
-		return yield* tool.value.execute(input, ctx);
+		return yield* Effect.suspend(() => tool.value.execute(input, ctx)).pipe(
+			Effect.catchCause((cause) =>
+				Cause.hasInterrupts(cause)
+					? Effect.failCause(cause)
+					: Effect.andThen(
+							Effect.logWarning(
+								new PluginFault({
+									detail: `the tool "${name}" faulted: ${Cause.pretty(cause)}`,
+								}),
+							),
+							Effect.succeed(faultOutcome(name, input)),
+						),
+			),
+		);
 	});

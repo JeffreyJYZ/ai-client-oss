@@ -216,7 +216,20 @@ describe("loadPlugin", () => {
 								slot: "not.a.slot" as unknown as SlotId,
 								component: component(),
 							});
-							host.tools.register({ id: "tool" });
+							host.tools.register({
+								declaration: {
+									name: "tool",
+									description: "d",
+									parameters: {},
+								},
+								execute: () =>
+									Effect.succeed({
+										result: "",
+										marker: "",
+										failed: false,
+										input: null,
+									}),
+							});
 						},
 					}),
 				}),
@@ -388,7 +401,20 @@ describe("unloadPlugin", () => {
 								slot: "app.banner",
 								component: component(),
 							});
-							host.tools.register({ id: "t1" });
+							host.tools.register({
+								declaration: {
+									name: "t1",
+									description: "d",
+									parameters: {},
+								},
+								execute: () =>
+									Effect.succeed({
+										result: "",
+										marker: "",
+										failed: false,
+										input: null,
+									}),
+							});
 						},
 					}),
 				}),

@@ -19,6 +19,7 @@ export * from "./notify";
 export * from "./pipeline";
 export * from "./providers";
 export * from "./renderers";
+export * from "./services";
 export * from "./settings";
 export * from "./themes";
 export * from "./tools";

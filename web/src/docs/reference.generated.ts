@@ -170,7 +170,7 @@ export const reference: DocReference = {
 				{
 					"name": "Host",
 					"kind": "interface",
-					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; readonly ui: HostRegistry<Contribution>; readonly commands: HostRegistry<RegistryEntry>; readonly settings: HostRegistry<RegistryEntry>; readonly tools: HostRegistry<RegistryEntry>; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: HostRegistry<RegistryEntry>; readonly themes: HostRegistry<RegistryEntry>; }",
+					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; readonly ui: HostRegistry<Contribution>; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; readonly themes: HostRegistry<RegistryEntry>; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, absent until Task 20 (spec §7). */ readonly native: Option.Option<NativeHandle>; /** Scoped logging (spec §2). */ readonly log: Logger; /** Subscribe to a host event; the handler stops when the plugin unloads. */ readonly on: ( event: HostEvent, handler: (payload: unknown) => void, ) => Disposable; }",
 					"description": "The surface a plugin is compiled against (spec §2).",
 					"members": [
 						"version",
@@ -181,13 +181,20 @@ export const reference: DocReference = {
 						"providers",
 						"pipeline",
 						"renderers",
-						"themes"
+						"themes",
+						"chat",
+						"db",
+						"storage",
+						"notify",
+						"native",
+						"log",
+						"on"
 					]
 				},
 				{
 					"name": "HostServicesShape",
 					"kind": "interface",
-					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly keybindings: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly renderers: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; }",
+					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; }",
 					"description": "What `HostServices` provides: the versions the host reports, plus one registry per kind (spec §3).",
 					"members": [
 						"version",
@@ -196,9 +203,7 @@ export const reference: DocReference = {
 						"providers",
 						"pipeline",
 						"commands",
-						"keybindings",
 						"settings",
-						"renderers",
 						"themes"
 					]
 				},
@@ -213,7 +218,7 @@ export const reference: DocReference = {
 					"name": "makeHost",
 					"kind": "const",
 					"signature": "export const makeHost = (services: HostServicesShape, pluginId: string, scope: Scope.Scope): Host => …",
-					"description": "The `Host` a plugin's `setup` receives (spec §2). Built per plugin from the shared service plus that plugin's `pluginId` and `Scope`, so every registration is owned by the plugin and collected when its scope closes, and the version a plugin reads is the one the boot resolved.",
+					"description": "The `Host` a plugin's `setup` receives (spec §2).",
 					"members": []
 				},
 				{
@@ -533,7 +538,7 @@ export const reference: DocReference = {
 					"name": "makeNotifyService",
 					"kind": "const",
 					"signature": "export const makeNotifyService = (scope?: Scope.Scope): NotifyService => …",
-					"description": "Build the notification calls bound to one plugin's `Scope`, the shape `host.notify` takes (spec §2). `toast`/`banner`/`modal` are synchronous because a plugin's `setup` is synchronous; each runs its primitive on the subsystem's one runtime, so the scope it is given is the scope that owns the presentation. `confirm` stays an `Effect` because it answers.",
+					"description": "Build the notification calls bound to one plugin's `Scope`, the shape `host.notify` takes (spec §2).",
 					"members": []
 				},
 				{
@@ -629,7 +634,7 @@ export const reference: DocReference = {
 					"name": "PipelineRunner",
 					"kind": "interface",
 					"signature": "export interface PipelineRunner<K extends PipelineStageKind> { readonly kind: K; readonly run: ( input: PipelineInputMap[K], ) => Effect.Effect<PipelineOutputMap[K]>; }",
-					"description": "A stage kind resolved against the registry once, so a caller that runs the same kind many times — `onChunk` per streamed chunk, `onToolCall` per call — pays the registry read, filter and sort a single time.",
+					"description": "A stage kind resolved against the registry once, so a caller that runs the same kind many times — `onChunk` per streamed chunk, `onToolCall` per call — pays the registry read, filter and sort a single time. The disabled set is still read **per call** (below), so a stage disabled by its own fault is skipped from then on within the same runner, not only at the next resolution.",
 					"members": [
 						"kind",
 						"run"
@@ -639,7 +644,7 @@ export const reference: DocReference = {
 					"name": "stageRunner",
 					"kind": "const",
 					"signature": "export const stageRunner = <K extends PipelineStageKind>(kind: K, meta: PipelineMeta): Effect.Effect<PipelineRunner<K>, never, HostServices> => …",
-					"description": "Resolve every stage of `kind` now, in order, returning a runner that folds `input` through them. Reads the registry once, so a stage registered or disposed mid-turn takes effect on the next resolution, and skips any stage disabled by an earlier fault.",
+					"description": "Resolve every stage of `kind` now, in order, returning a runner that folds `input` through the live ones. Reads the registry once, so a stage registered or disposed mid-turn takes effect on the next resolution.",
 					"members": []
 				},
 				{
@@ -716,6 +721,13 @@ export const reference: DocReference = {
 					"members": []
 				},
 				{
+					"name": "requireProvider",
+					"kind": "const",
+					"signature": "export const requireProvider = (protocol: string): Effect.Effect<AnyProvider, string, HostServices> => …",
+					"description": "Resolve a protocol or fail with one readable sentence (spec §5). This is the **single** resolve-or-fail seam: `SendMsg` and the models helpers both call it, so the failure sentence cannot drift into two spellings, and a name no protocol answers to is a failed turn rather than a `TypeError` on an absent provider.",
+					"members": []
+				},
+				{
 					"name": "protocolNames",
 					"kind": "const",
 					"signature": "export const protocolNames = (): readonly string[] => …",
@@ -776,6 +788,133 @@ export const reference: DocReference = {
 					"members": []
 				},
 				{
+					"name": "ScopedStorage",
+					"kind": "interface",
+					"signature": "export interface ScopedStorage { readonly get: (key: string) => Effect.Effect<Option.Option<unknown>>; readonly set: (key: string, value: unknown) => Effect.Effect<void>; readonly delete: (key: string) => Effect.Effect<void>; readonly keys: () => Effect.Effect<readonly string[]>; }",
+					"description": "Per-plugin key/value storage (spec §5), persisted inside `Settings.plugins[].data` so it rides the existing backup and needs no `lib/backup.ts` change. `set`/`delete` write through the store's existing `setSettings` patch path, which is the one write seam the rest of the app uses. A plugin never names another plugin: the id is bound at construction.",
+					"members": [
+						"get",
+						"set",
+						"delete",
+						"keys"
+					]
+				},
+				{
+					"name": "makeScopedStorage",
+					"kind": "const",
+					"signature": "export const makeScopedStorage = (pluginId: string): ScopedStorage => …",
+					"description": "The storage service bound to one plugin's id (spec §2's `host.storage`).",
+					"members": []
+				},
+				{
+					"name": "subscribeHostEvent",
+					"kind": "const",
+					"signature": "export const subscribeHostEvent = (event: HostEvent, handler: (payload: unknown) => void, pluginId?: string): Disposable => …",
+					"description": "Subscribe `handler` to `event` (spec §3's `PubSub` bus, exposed as `host.on`). The returned handle stops exactly this subscription; the host attaches its disposal to the plugin's `Scope`, so unload drops the handler. An unknown event name or a non-function handler is refused as a logged `PluginFault` — a plugin is untyped at this boundary.",
+					"members": []
+				},
+				{
+					"name": "publishHostEvent",
+					"kind": "const",
+					"signature": "export const publishHostEvent = (event: HostEvent, payload: unknown): void => …",
+					"description": "Publish one event to every current subscriber (spec §9). This is the synchronous seam `state/chat.ts` and the stores call on every turn; each handler runs in its own isolated step, so a handler that throws is a logged `PluginFault` and the remaining handlers still see the event.",
+					"members": []
+				},
+				{
+					"name": "ChatStore",
+					"kind": "interface",
+					"signature": "export interface ChatStore { readonly snapshot: () => ChatSnapshot; readonly send: (msg: string, parts: readonly AttachmentPart[]) => void; readonly stop: () => void; readonly newConversation: () => void; readonly select: (id: string) => void; readonly rename: (id: string, title: string) => void; readonly remove: (id: string) => void; }",
+					"description": "The chat store this module reads and drives (spec §5). The app's own store (`state/chat.ts`) registers it at module load; see this file's header for why the registration is an inversion rather than an import.",
+					"members": [
+						"snapshot",
+						"send",
+						"stop",
+						"newConversation",
+						"select",
+						"rename",
+						"remove"
+					]
+				},
+				{
+					"name": "registerChatStore",
+					"kind": "const",
+					"signature": "export const registerChatStore = (store: ChatStore): void => …",
+					"description": "Point the chat service at the app's chat store. Called once, at load.",
+					"members": []
+				},
+				{
+					"name": "ChatService",
+					"kind": "interface",
+					"signature": "export interface ChatService { readonly snapshot: () => ChatSnapshot; readonly changes: Stream.Stream<ChatSnapshot>; readonly send: ( msg: string, parts?: readonly AttachmentPart[], ) => Effect.Effect<void>; readonly stop: () => Effect.Effect<void>; readonly newConversation: () => Effect.Effect<void>; readonly select: (id: string) => Effect.Effect<void>; readonly rename: (id: string, title: string) => Effect.Effect<void>; readonly delete: (id: string) => Effect.Effect<void>; }",
+					"description": "The chat service a plugin reads and drives (spec §2's `host.chat`). Reads are synchronous (a snapshot), mutations return `Effect`s (spec §2: the sync/Effect split is visible in the signature), and `changes` is the `Stream` a plugin subscribes to.",
+					"members": [
+						"snapshot",
+						"changes",
+						"send",
+						"stop",
+						"newConversation",
+						"select",
+						"rename",
+						"delete"
+					]
+				},
+				{
+					"name": "publishChatSnapshot",
+					"kind": "const",
+					"signature": "export const publishChatSnapshot = (snapshot: ChatSnapshot): void => …",
+					"description": "Push a snapshot to every `host.chat.changes` subscriber, synchronously.",
+					"members": []
+				},
+				{
+					"name": "makeChatService",
+					"kind": "const",
+					"signature": "export const makeChatService = (): ChatService => …",
+					"description": "The chat service bound to the registered store (spec §2's `host.chat`).",
+					"members": []
+				},
+				{
+					"name": "Logger",
+					"kind": "interface",
+					"signature": "export interface Logger { readonly info: (message: string) => void; readonly warn: (message: string) => void; readonly error: (message: string) => void; readonly debug: (message: string) => void; }",
+					"description": "The logging surface a plugin gets as `host.log` (spec §2).",
+					"members": [
+						"info",
+						"warn",
+						"error",
+						"debug"
+					]
+				},
+				{
+					"name": "makeLogger",
+					"kind": "const",
+					"signature": "export const makeLogger = (pluginId?: string): Logger => …",
+					"description": "The logger bound to one plugin, so its lines name it in the console.",
+					"members": []
+				},
+				{
+					"name": "NativeHandle",
+					"kind": "interface",
+					"signature": "export interface NativeHandle { /** Absolute path of the plugin's scoped data directory (spec §7). */ readonly dataDir: string; }",
+					"description": "The desktop-only native surface (spec §7): the scoped data directory and the file commands the Tauri bridge exposes. Task 20 supplies a real handle; until then `host.native` is `Option.none()`, so a plugin checks the `Option` rather than calling a method that silently does nothing.",
+					"members": [
+						"dataDir"
+					]
+				},
+				{
+					"name": "nativeHandle",
+					"kind": "const",
+					"signature": "export const nativeHandle: Option.Option<NativeHandle>;",
+					"description": "The native handle, absent until the desktop bridge lands (Task 20).",
+					"members": []
+				},
+				{
+					"name": "ChatSnapshot",
+					"kind": "re-export",
+					"signature": "export type { ChatSnapshot };",
+					"description": "",
+					"members": []
+				},
+				{
 					"name": "SettingsSection",
 					"kind": "interface",
 					"signature": "export interface SettingsSection { readonly id: string; /** The section's heading; the kit renders it in the foldable summary row. */ readonly title: string; /** Sort key within `settings.sections`; absent sorts after ordered entries. */ readonly order?: number; /** Registered but not rendered (spec §4's `hidden`), exactly as for a built-in. */ readonly hidden?: boolean; readonly component: ComponentType<Record<string, unknown>>; }",
@@ -792,7 +931,7 @@ export const reference: DocReference = {
 					"name": "SettingsRegistry",
 					"kind": "interface",
 					"signature": "export interface SettingsRegistry { readonly registerSection: (section: SettingsSection) => Disposable; }",
-					"description": "The service `host.settings` will expose once Task 16 populates the host's typed services (spec §5). **Today nothing reaches this through the host** — `host.settings` is still the raw `HostRegistry`, so this module is the seam, not yet the surface a plugin can call.",
+					"description": "The service `host.settings` exposes (spec §5): registering a section is a `settings.sections` contribution, so it renders, reorders and hides exactly like a built-in's and is owned and disposed by the plugin's `Scope`.",
 					"members": [
 						"registerSection"
 					]
@@ -935,10 +1074,29 @@ export const reference: DocReference = {
 					"members": []
 				},
 				{
+					"name": "ToolRegistry",
+					"kind": "interface",
+					"signature": "export interface ToolRegistry { register(tool: Tool, pluginId?: string): Disposable; readonly entries: () => Effect.Effect<readonly ToolEntry[]>; readonly ownedBy: (owner: string) => Effect.Effect<readonly ToolEntry[]>; readonly changes: Stream.Stream<readonly ToolEntry[]>; }",
+					"description": "The tool registry a plugin reaches as `host.tools` (spec §2/§5).",
+					"members": [
+						"register",
+						"entries",
+						"ownedBy",
+						"changes"
+					]
+				},
+				{
+					"name": "makeToolRegistry",
+					"kind": "const",
+					"signature": "export const makeToolRegistry = (registry: HostRegistry<RegistryEntry>, pluginId: string): ToolRegistry => …",
+					"description": "The typed `tools` registry bound to one plugin (spec §2's `host.tools`). Registering through it is the same first-wins path `registerTool` uses, so the public member and the registry agree — calling `host.tools.register` directly cannot shadow a built-in.",
+					"members": []
+				},
+				{
 					"name": "registerTool",
 					"kind": "const",
 					"signature": "export const registerTool = (host: Host, tool: Tool, pluginId?: string): Disposable => …",
-					"description": "Register `tool` through `host`, first wins (spec §5).",
+					"description": "Register `tool` through `host`, first wins (spec §5) — the shared seam the built-ins and `host.tools.register` behind it use. `pluginId` is an optional override for the refusal's label; the host stamps ownership either way.",
 					"members": []
 				},
 				{
@@ -951,8 +1109,8 @@ export const reference: DocReference = {
 				{
 					"name": "executeTool",
 					"kind": "const",
-					"signature": "export const executeTool = (name: string, call: ToolCallData, ctx: ToolExecCtx = ambientExecCtx()): Effect.Effect<ToolOutcome, never, HostServices> => …",
-					"description": "Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown name used to fall through into the fetch path, which existed only because there were two tools and no registry; with a registry a miss is its own case and fails with its own sentence. The invariant is preserved — a string result either way, never an exception out of the loop.",
+					"signature": "export const executeTool = (name: string, call: ToolCallData, ctx: ToolExecCtx = {}): Effect.Effect<ToolOutcome, never, HostServices> => …",
+					"description": "Execute one tool call (spec §5).",
 					"members": []
 				}
 			]

@@ -1,27 +1,11 @@
 import type { HostServices } from "@lib/plugins/host";
-import { type AnyProvider, resolveProvider } from "@lib/plugins/providers";
-import { Effect, Option } from "effect";
+import { requireProvider } from "@lib/plugins/providers";
+import type { SendCtx } from "@lib/providers/types";
+import { Effect } from "effect";
 
 interface ModelsPayload {
 	readonly data?: readonly { readonly id?: unknown }[];
 }
-
-/**
- * The endpoint helpers resolve their protocol through the registry (spec §5),
- * so a protocol a plugin registered gets its own headers and path. An unknown
- * name fails with the same sentence `SendMsg` uses — never a `TypeError` on an
- * absent provider.
- */
-const requireProvider = (
-	protocol: string,
-): Effect.Effect<AnyProvider, string, HostServices> =>
-	Effect.gen(function* () {
-		const provider = yield* resolveProvider(protocol);
-		if (Option.isNone(provider)) {
-			return yield* Effect.fail(`unknown protocol: ${protocol}`);
-		}
-		return provider.value;
-	});
 
 /**
  * `GET ${baseUrl}/models` — the OpenAI list endpoint (`baseUrl` carries the
@@ -66,11 +50,13 @@ export const listModels = (
 	});
 
 /**
- * `POST ${baseUrl}${endpoint}` with a 1-token-capped body
- * (`max_output_tokens`/`max_tokens: 1`), a real generation that proves the
- * selected model answers. The response stream is never read — a 2xx is enough,
- * so the body is cancelled to release the connection. A non-2xx response or a
- * transport failure becomes the `string` error channel.
+ * `POST ${baseUrl}${endpoint}` with a real generation that proves the selected
+ * model answers. The probe body is **the protocol's own request shape**, built
+ * by its own `buildRequest` from its template — never a hardcoded
+ * chat-completions body, which mis-shaped every protocol but `responses` now
+ * that protocols are runtime data. The response stream is never read — a 2xx is
+ * enough, so the body is cancelled to release the connection. A non-2xx
+ * response or a transport failure becomes the `string` error channel.
  */
 export const testModel = (
 	protocol: string,
@@ -82,22 +68,29 @@ export const testModel = (
 		const provider = yield* requireProvider(protocol);
 		const headers: Record<string, string> = provider.headers(apiKey);
 
-		const body =
-			protocol === "responses"
-				? { model, input: "ping", stream: true, max_output_tokens: 1 }
-				: {
-						model,
-						messages: [{ role: "user", content: "ping" }],
-						stream: true,
-						max_tokens: 1,
-					};
+		// The protocol builds its own minimal probe. `buildRequest` is
+		// plugin-supplied, so a throw is turned into the `string` channel here
+		// rather than escaping as a defect.
+		const probe = yield* Effect.try({
+			try: () =>
+				provider.buildRequest(provider.template, {
+					msg: "ping",
+					prev: provider.template,
+					apiUrl: baseUrl,
+					apiKey,
+					model,
+					fetchTool: false,
+				} satisfies SendCtx),
+			catch: (cause) =>
+				`the "${protocol}" protocol could not build a test request: ${String(cause)}`,
+		});
 
 		const response = yield* Effect.tryPromise({
 			try: () =>
 				fetch(`${baseUrl}${provider.endpoint}`, {
 					method: "POST",
 					headers,
-					body: JSON.stringify(body),
+					body: JSON.stringify(probe),
 				}),
 			catch: (cause) => String(cause),
 		});

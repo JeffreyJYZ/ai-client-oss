@@ -1,5 +1,4 @@
 import { PluginFault } from "@lib/plugins/errors";
-import { runtime } from "@lib/plugins/runtime";
 import {
 	Deferred,
 	Duration,
@@ -344,8 +343,10 @@ export interface NotifyService {
  * Build the notification calls bound to one plugin's `Scope`, the shape
  * `host.notify` takes (spec §2). `toast`/`banner`/`modal` are synchronous
  * because a plugin's `setup` is synchronous; each runs its primitive on the
- * subsystem's one runtime, so the scope it is given is the scope that owns the
- * presentation. `confirm` stays an `Effect` because it answers.
+ * default Effect runtime — the primitives resolve no host service, so they need
+ * no context from the subsystem runtime (and importing that runtime here would
+ * close a module cycle with `host.ts`, which builds it). `confirm` stays an
+ * `Effect` because it answers.
  */
 export const makeNotifyService = (scope?: Scope.Scope): NotifyService => {
 	const owned = <A, E>(effect: Effect.Effect<A, E>): Effect.Effect<A, E> =>
@@ -354,13 +355,13 @@ export const makeNotifyService = (scope?: Scope.Scope): NotifyService => {
 			: Effect.provideService(effect, Scope.Scope, scope);
 	return {
 		toast: (options) => {
-			runtime.runFork(owned(toast(options)));
+			Effect.runFork(owned(toast(options)));
 		},
 		banner: (options) => {
-			runtime.runFork(owned(banner(options)));
+			Effect.runFork(owned(banner(options)));
 		},
 		modal: (options) => {
-			runtime.runFork(owned(modal(options)));
+			Effect.runFork(owned(modal(options)));
 		},
 		confirm: (options) => owned(confirm(options)),
 	};

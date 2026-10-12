@@ -80,6 +80,13 @@ export const registerProvider = (
 		);
 		return noopDisposable;
 	}
+	if (typeof provider?.send !== "function") {
+		refuse(
+			`the protocol "${named}" has no callable \`send\`; it was refused`,
+			pluginId,
+		);
+		return noopDisposable;
+	}
 	const entry: Omit<ProviderEntry, "owner"> = { id: named, ...provider };
 	return host.providers.register(entry);
 };
@@ -138,6 +145,24 @@ export const listProtocols = (): Effect.Effect<
  */
 export const resolveProviderSync = (name: string): Option.Option<AnyProvider> =>
 	runtime.runSync(resolveProvider(name));
+
+/**
+ * Resolve a protocol or fail with one readable sentence (spec §5). This is the
+ * **single** resolve-or-fail seam: `SendMsg` and the models helpers both call
+ * it, so the failure sentence cannot drift into two spellings, and a name no
+ * protocol answers to is a failed turn rather than a `TypeError` on an absent
+ * provider.
+ */
+export const requireProvider = (
+	protocol: string,
+): Effect.Effect<AnyProvider, string, HostServices> =>
+	Effect.gen(function* () {
+		const provider = yield* resolveProvider(protocol);
+		if (Option.isNone(provider)) {
+			return yield* Effect.fail(`unknown protocol: ${protocol}`);
+		}
+		return provider.value;
+	});
 
 /** The registered protocol names, read synchronously (see {@link resolveProviderSync}). */
 export const protocolNames = (): readonly string[] =>

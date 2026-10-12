@@ -9,8 +9,9 @@ import {
 	pluginApiVersion,
 } from "@lib/plugins/host";
 import type { SlotId } from "@lib/plugins/ids";
+import { clearOverlay, getOverlaySnapshot } from "@lib/plugins/notify";
 import appPackage from "@root/package.json";
-import { Effect, Exit, Scope } from "effect";
+import { Duration, Effect, Exit, Scope } from "effect";
 import type { ComponentType } from "react";
 
 /**
@@ -28,6 +29,13 @@ const contribution = (id: string, slot: SlotId = "app.header") => ({
 	id,
 	slot,
 	component: component(),
+});
+
+/** A minimal tool, so the typed `host.tools.register` is exercised directly. */
+const tool = (name: string) => ({
+	declaration: { name, description: "d", parameters: { type: "object" } },
+	execute: () =>
+		Effect.succeed({ result: "ok", marker: "m", failed: false, input: null }),
 });
 
 const ids = (entries: readonly { readonly id: string }[]): string[] =>
@@ -83,11 +91,15 @@ describe("makeHost", () => {
 		const handles = [
 			host.ui.register(contribution("u")),
 			host.commands.register({ id: "cmd" }),
-			host.settings.register({ id: "section" }),
-			host.tools.register({ id: "tool" }),
+			host.settings.registerSection({
+				id: "section",
+				title: "Section",
+				component: component(),
+			}),
+			host.tools.register(tool("tool")),
 			host.providers.register({ id: "provider" }),
 			host.pipeline.register({ id: "stage" }),
-			host.renderers.register({ id: "renderer" }),
+			host.renderers.register("markdown", component()),
 			host.themes.register({ id: "theme" }),
 		];
 
@@ -102,7 +114,8 @@ describe("makeHost", () => {
 		for (const handle of handles) handle.dispose();
 		expect(Effect.runSync(registries.commands.entries())).toEqual([]);
 		expect(Effect.runSync(registries.pipeline.entries())).toEqual([]);
-		expect(Effect.runSync(registries.renderers.entries())).toEqual([]);
+		// The settings section and the renderer override are `ui` contributions,
+		// so disposing every handle empties `ui` — there is no separate registry.
 		expect(Effect.runSync(registries.ui.entries())).toEqual([]);
 	});
 
@@ -114,7 +127,7 @@ describe("makeHost", () => {
 		const hostB = makeHost(registries, "p-b", scopeB);
 
 		hostA.ui.register(contribution("a1"));
-		hostA.tools.register({ id: "tool-a" });
+		hostA.tools.register(tool("tool-a"));
 		hostB.ui.register(contribution("b1"));
 
 		expect(ids(Effect.runSync(registries.ui.entries()))).toEqual(["a1", "b1"]);
@@ -135,7 +148,7 @@ describe("makeHost", () => {
 
 		const host = makeHost(registries, "p1", closed);
 		host.ui.register(contribution("late"));
-		host.tools.register({ id: "late-tool" });
+		host.tools.register(tool("late-tool"));
 
 		expect(Effect.runSync(registries.ui.entries())).toEqual([]);
 		expect(Effect.runSync(registries.tools.entries())).toEqual([]);
@@ -152,17 +165,15 @@ describe("makeHost", () => {
 				.sort(),
 		).toEqual([
 			"commands",
-			"keybindings",
 			"pipeline",
 			"providers",
-			"renderers",
 			"settings",
 			"themes",
 			"tools",
 			"ui",
 		]);
 		expect(registries.ui).not.toBe(registries.tools);
-		expect(registries.commands).not.toBe(registries.keybindings);
+		expect(registries.commands).not.toBe(registries.settings);
 	});
 
 	test("reports the build's real, non-empty app version", () => {
@@ -185,5 +196,22 @@ describe("makeHost", () => {
 		);
 
 		expect(host.version).toEqual({ app: "9.9.9", api: "0.1" });
+	});
+
+	test("host.notify is wired: a banner unloads with the plugin's scope", async () => {
+		clearOverlay();
+		const registries = services();
+		const closed = scope();
+		const host = makeHost(registries, "p1", closed);
+
+		host.notify.banner({ text: "hello" });
+		// The notification primitives resolve no host service, so their fibre
+		// completes on the next tick; a short yield lets it land before the read.
+		await Effect.runPromise(Effect.sleep(Duration.millis(10)));
+		expect(getOverlaySnapshot().toasts).toHaveLength(1);
+
+		// Unload is the scope closing: the queued notice goes with the plugin.
+		Effect.runSync(Scope.close(closed, Exit.void));
+		expect(getOverlaySnapshot().toasts).toEqual([]);
 	});
 });

@@ -125,6 +125,12 @@ export interface SendCtx {
 	 * `ctx.msg` again — the question would reach the model once
 	 * per tool round. Absent or `false` (every fresh turn)
 	 * appends the message as the final user turn.
+	 *
+	 * This is the requirement every protocol's `buildRequest` must
+	 * satisfy: **idempotence under `skipUserMessage`** — building over
+	 * a body that already carries the turn's user message reproduces
+	 * that body unchanged (appends nothing). The single-body turn in
+	 * `state/chat.ts` is built on it.
 	 */
 	readonly skipUserMessage?: boolean;
 }
@@ -154,6 +160,17 @@ export interface Provider<Send> {
 	readonly endpoint: string;
 	readonly template: Send;
 	parse(raw: unknown): Effect.Effect<Send, string>;
+	/**
+	 * Build the request body for one send from the template (or a replayed
+	 * body) and `ctx`. **Idempotent under `skipUserMessage`:** with
+	 * `ctx.skipUserMessage` set the body already carries the turn's user
+	 * message, so building over it must append nothing — the same body in, the
+	 * same body out. The single-body tool loop depends on this: it builds the
+	 * turn's body once, replays it as `prev` for every round with
+	 * `skipUserMessage`, and stores exactly what it sent, so a builder that
+	 * appended the message again would repeat the question once per round and
+	 * drift the sent body from the stored one. Pure.
+	 */
 	buildRequest(send: Send, ctx: SendCtx): unknown;
 	/**
 	 * Append the streamed assistant reply to a request body, returning the new

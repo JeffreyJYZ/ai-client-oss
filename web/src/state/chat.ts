@@ -10,6 +10,11 @@ import {
 } from "@lib/plugins/pipeline";
 import { protocolNames, resolveProviderSync } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
+import {
+	publishChatSnapshot,
+	publishHostEvent,
+	registerChatStore,
+} from "@lib/plugins/services";
 import { executeTool } from "@lib/plugins/tools";
 import { searchKindFor } from "@lib/providers/presets";
 import type {
@@ -135,6 +140,12 @@ const refresh = (): void => {
 		hydrated,
 	};
 	notify();
+	// The host services read the store through these two synchronous sinks:
+	// `host.chat.changes` gets the snapshot, and `host.on("conversation-changed")`
+	// gets the same change. `refresh` is the store's one mutation path, so the
+	// bus and the stream cannot disagree with what the UI sees (spec §3/§5).
+	publishChatSnapshot(state);
+	publishHostEvent("conversation-changed", state);
 };
 
 const updateConversation = (
@@ -266,6 +277,9 @@ const appendChunk = (
 		}),
 	}));
 	refresh();
+	// Every streamed chunk is a host event (spec §3), published after the
+	// snapshot so a `chunk` subscriber sees the message the chunk landed in.
+	publishHostEvent("chunk", chunk);
 };
 
 /**
@@ -346,6 +360,11 @@ const finalize = (
 	}));
 	refresh();
 	persistConversationById(conversationId);
+	publishHostEvent("turn-end", {
+		conversationId,
+		protocol,
+		ok: Exit.isSuccess(exit),
+	});
 };
 
 export const getChat = (): ChatSnapshot => state;
@@ -372,6 +391,13 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// The composer gates on a configured active provider, but `send` is a public
 	// API: refuse rather than stream a request with no protocol to build from.
 	if (active === undefined) return;
+
+	// The turn is under way (spec §3's `turn-start`). Published here, after the
+	// guards, so every `turn-start` has a matching `turn-end` below.
+	publishHostEvent("turn-start", {
+		conversationId,
+		protocol: active.protocol,
+	});
 
 	// `protocol` is a plain string on the wire-facing schema — a plugin may
 	// register one — so the registry decides whether it resolves. `send` builds
@@ -401,6 +427,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		}));
 		refresh();
 		persistConversationById(conversationId);
+		publishHostEvent("turn-end", { conversationId, protocol, ok: false });
 		return;
 	}
 	const provider = resolved.value;
@@ -652,7 +679,13 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 				// The registry owns dispatch and the two built-ins' argument
 				// reading; a name no tool answers to is a failed outcome with a
 				// sentence, never an exception out of the loop.
-				const outcome = yield* executeTool(effective.name, effective);
+				// The turn's own context, not a store read: the loop already
+				// holds the TinyFish key, so a tool execution cannot disagree
+				// with the request that declared it.
+				publishHostEvent("tool-called", { name: effective.name });
+				const outcome = yield* executeTool(effective.name, effective, {
+					tinyfishApiKey: ctx.tinyfishApiKey,
+				});
 				appendMarker(conversationId, assistantId, outcome.marker, raw);
 				wire = appendToolResult(
 					wire,
@@ -724,6 +757,7 @@ export const stop = (): void => {
 	}));
 	refresh();
 	persistConversationById(conversationId);
+	publishHostEvent("turn-end", { conversationId, ok: false });
 };
 
 export const newConversation = (): void => {
@@ -824,3 +858,20 @@ Effect.runFork(
 		Effect.ensuring(Effect.sync(finishHydration)),
 	),
 );
+
+/**
+ * Hand this store to the chat service (spec §5). The registration is an
+ * inversion — `services.ts` cannot import this module without a boot cycle
+ * (this module reaches the subsystem runtime through `providers.ts`) — so the
+ * store points the service at itself once, at load. `host.chat` then reads and
+ * drives exactly this store.
+ */
+registerChatStore({
+	snapshot: getChat,
+	send: (msg, parts) => send(msg, [...parts]),
+	stop,
+	newConversation,
+	select: selectConversation,
+	rename: renameConversation,
+	remove: deleteConversation,
+});
