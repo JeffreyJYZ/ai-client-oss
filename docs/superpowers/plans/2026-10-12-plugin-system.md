@@ -532,6 +532,8 @@ Tests to pin: a corrupt blob makes `getSettings()` return defaults **and** leave
 - **[ ] Replace the ambient exec context.** `state/chat.ts`'s `executeTool` call site gets its ctx from `tools.ts`'s `ambientExecCtx`, which reads the TinyFish key through a `lib/` → `state/` import. The turn already holds that key: pass the turn's own context instead.
 - **[ ] Make `host.settings` the typed `SettingsRegistry`.** `makeSettingsRegistry` exists and nothing calls it, so `settings.registerSection` is unreachable for a plugin — the module is a seam, not a surface.
 - **[ ] Failure-isolate plugin executors (spec §9), and validate `execute` is callable.** Today a plugin tool's `execute` is invoked un-isolated, and `registerTool` never checks it is a function: a faulty third-party tool would defect the turn instead of being a logged `PluginFault`. Same for a protocol/registry entry a plugin supplies.
+- **[ ] One `requireProvider`, not two.** `lib/api/index.ts`'s `SendMsg` and `lib/providers/models.ts` each resolve-or-fail with their own copy of the same sentence, so they can drift. Export one from `lib/plugins/providers.ts`. (Task 11's review.)
+- **[ ] Carry the request shape on the provider entry.** `lib/providers/models.ts`'s `testModel` still picks the request shape with a **literal** `protocol === "responses"` check, so a plugin protocol is always probed with a chat-completions body — the one place a plugin's protocol is silently mis-shaped now that protocols are runtime data. (Task 11's review.)
 
 - [ ] **Step 1: Write the failing test** — `services.test.ts`: storage round-trips through a fake `Db` and lands under that plugin's `plugins[].data` only; two plugins cannot read each other's keys; an event published on the `PubSub` reaches exactly the subscribers that are still loaded, and a plugin's handlers stop on unload; `host.db` is the same adapter instance the app uses.
 - [ ] **Step 2: Run it and watch it fail.**
@@ -690,6 +692,7 @@ Tests to pin: a corrupt blob makes `getSettings()` return defaults **and** leave
 **Interfaces:**
 - Produces: a deployed `/docs/` — a multi-page Vite entry emitting `dist/docs/index.html`, which Vercel serves at `/docs/` with no router and no new runtime dependency; `bun run docs` regenerates the reference from source.
 - Consumes: the shipped plugin surface — `host.ts`, `manifest.ts`, `ids.ts`, and as they land `tools.ts`, `providers.ts`, `pipeline.ts`, `commands.ts`, `themes.ts`, `notify.ts`, `renderers.ts`, `settings.ts`, and `sdk.ts` (Task 17). The generator reads those modules; it must never hardcode a signature.
+- **Narrowing trap, interlocked with Task 17:** the documented set switches to `web/src/lib/plugins/sdk.ts` once it exists, so **the SDK must re-export the whole documented surface** — an SDK that re-exports a subset makes the reference silently *narrow* to that subset, which looks identical to a healthy page. Task 17's brief carries this interlock.
 
 - [ ] **Step 1: Write the failing test** — `reference.test.ts`: every exported symbol of every module in the generator's entry list appears in its output, and a module added to the list with an undocumented export fails the test. This is the mechanism that makes "it updates as everything progresses" true rather than aspirational.
 - [ ] **Step 2: Run it and watch it fail.**
