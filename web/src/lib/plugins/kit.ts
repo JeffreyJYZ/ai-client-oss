@@ -17,8 +17,11 @@ import Markdown from "@/ui/Markdown";
  * Deliberately **not** exposed: nothing in `ui/kit` takes a slot or a registry
  * handle, so the whole kit is safe to hand over. The class-string constants
  * are included because "without copying Tailwind strings" is the point, and a
- * `FieldRow` needs an `INPUT` for its control. A component that took a
- * `SlotId`/registry handle a plugin cannot supply would stay out.
+ * `FieldRow` needs an `INPUT` for its control. `Section`'s chrome is built in
+ * (its props default to `SECTION`/`SECTION_SUMMARY`), so a plugin's section
+ * needs no class string at all; the pair is exposed for a block the plugin
+ * shapes itself. A component that took a `SlotId`/registry handle a plugin
+ * cannot supply would stay out.
  */
 
 /** The kit as a plugin sees it (spec §4's `ui.kit`). */
@@ -36,6 +39,10 @@ export interface PluginKit {
 	readonly BUTTON: string;
 	readonly BUTTON_PLAIN: string;
 	readonly CONTROL: string;
+	/** The app's standard section chrome; `Section` already defaults to it. */
+	readonly SECTION: string;
+	/** The app's standard section summary row; `Section` already defaults to it. */
+	readonly SECTION_SUMMARY: string;
 }
 
 /**
@@ -55,4 +62,6 @@ export const pluginKit: PluginKit = {
 	BUTTON: uiKit.BUTTON,
 	BUTTON_PLAIN: uiKit.BUTTON_PLAIN,
 	CONTROL: uiKit.CONTROL,
+	SECTION: uiKit.SECTION,
+	SECTION_SUMMARY: uiKit.SECTION_SUMMARY,
 };

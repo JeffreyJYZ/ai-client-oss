@@ -9,6 +9,8 @@
  *                                  borderless and larger than `BUTTON`, so it
  *                                  is a separate constant rather than a merge)
  * - `CONTROL`                    — `ui/ProfilePicker.tsx` / `ui/ProviderPicker.tsx`
+ * - `SECTION` / `SECTION_SUMMARY` / `SECTION_SUMMARY_WRAP` — `ui/Settings.tsx`
+ *   (the foldable section chrome; `Section` defaults to the first two)
  */
 
 /** Join class names, dropping the falsy ones (no dependency, one line). */
@@ -31,3 +33,18 @@ export const BUTTON_PLAIN =
 
 export const CONTROL =
 	"max-w-[12rem] truncate rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 focus:border-neutral-500 focus:outline-none";
+
+/**
+ * The standard foldable Settings section: a top-divided block. The first
+ * section on a page skips the divider and passes a `className` of its own.
+ * `Section` defaults to this, so a plugin's section needs no class string.
+ */
+export const SECTION = "flex flex-col gap-3 border-t border-neutral-800 pt-5";
+
+/** A section's summary row: the heading on the left, its controls on the right. */
+export const SECTION_SUMMARY =
+	"flex cursor-pointer select-none items-center justify-between gap-3";
+
+/** The summary row when a wide heading must wrap instead of clip. */
+export const SECTION_SUMMARY_WRAP =
+	"flex cursor-pointer select-none flex-wrap items-center justify-between gap-3";

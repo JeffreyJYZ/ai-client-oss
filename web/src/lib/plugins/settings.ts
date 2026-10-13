@@ -40,10 +40,7 @@ export interface SettingsRegistry {
 	readonly registerSection: (section: SettingsSection) => Disposable;
 }
 
-/** The built-in sections' chrome, reused so a plugin section matches them. */
-const SECTION_CLASS = "flex flex-col gap-3 border-t border-neutral-800 pt-5";
-const SECTION_SUMMARY =
-	"flex cursor-pointer select-none items-center justify-between gap-3";
+/** The built-in sections' heading, reused so a plugin section matches them. */
 const HEADING_CLASS = "text-xs uppercase tracking-widest text-neutral-500";
 
 /**
@@ -51,6 +48,11 @@ const HEADING_CLASS = "text-xs uppercase tracking-widest text-neutral-500";
  * section's title. Built once per registration, so the component identity is
  * stable across renders. `createElement` rather than JSX because this module is
  * `.ts` (the plan's file name) — a component factory, not a rendered view.
+ *
+ * `Section` takes no class strings here: its defaults are the app's standard
+ * section chrome (`SECTION`/`SECTION_SUMMARY`), the same values the built-in
+ * sections use, so a plugin section matches a built-in's with no copy that
+ * could drift.
  */
 const withChrome = (
 	title: string,
@@ -58,8 +60,6 @@ const withChrome = (
 ): ComponentType<Record<string, unknown>> =>
 	function SettingsSectionChrome(props: Record<string, unknown>) {
 		return createElement(Section, {
-			className: SECTION_CLASS,
-			summaryClassName: SECTION_SUMMARY,
 			heading: createElement("h3", { className: HEADING_CLASS }, title),
 			// React 19's `createElement` overload types the props argument as the
 			// component's full props, so a required `children` must be passed here

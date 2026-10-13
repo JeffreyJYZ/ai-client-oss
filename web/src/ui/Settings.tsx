@@ -47,7 +47,15 @@ import {
 } from "@/state/settings";
 import { checkForUpdates, installNow, useUpdates } from "@/state/updates";
 import ConfirmButton from "@/ui/ConfirmButton";
-import { BUTTON, INPUT, LABEL, Section } from "@/ui/kit";
+import {
+	BUTTON,
+	INPUT,
+	LABEL,
+	SECTION,
+	SECTION_SUMMARY,
+	SECTION_SUMMARY_WRAP,
+	Section,
+} from "@/ui/kit";
 import Slot from "@/ui/slots/Slot";
 
 /** Only tool the UI exposes; the request body sends it verbatim. */
@@ -191,7 +199,7 @@ export function ProviderSection() {
 	return (
 		<Section
 			className="flex flex-col gap-3"
-			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
 					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
@@ -496,8 +504,8 @@ export function ProfilesSection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			className={SECTION}
+			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
 					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
@@ -682,8 +690,8 @@ export function WebSearchSection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			className={SECTION}
+			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
 					Web search
@@ -819,8 +827,8 @@ export function MemorySection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-			summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+			className={SECTION}
+			summaryClassName={SECTION_SUMMARY_WRAP}
 			open={false}
 			heading={
 				<>
@@ -1077,8 +1085,8 @@ export function BackupSection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-			summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+			className={SECTION}
+			summaryClassName={SECTION_SUMMARY_WRAP}
 			heading={
 				<>
 					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
@@ -1181,8 +1189,8 @@ export function UpdatesSection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+			className={SECTION}
+			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
 					<h3 className="text-xs uppercase tracking-widest text-neutral-500">

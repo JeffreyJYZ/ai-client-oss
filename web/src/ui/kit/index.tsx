@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from "react";
-import { BUTTON, cls, LABEL } from "@/ui/kit/classes";
+import { BUTTON, cls, LABEL, SECTION, SECTION_SUMMARY } from "@/ui/kit/classes";
 
 /**
  * The component kit (spec §4): the host's own primitives, so plugin UI is
@@ -17,6 +17,9 @@ export {
 	cls,
 	INPUT,
 	LABEL,
+	SECTION,
+	SECTION_SUMMARY,
+	SECTION_SUMMARY_WRAP,
 } from "@/ui/kit/classes";
 
 /** The bordered panel the Settings editor forms already use. */
@@ -37,8 +40,10 @@ export function Panel({ className, children, ...rest }: ComponentProps<"div">) {
 }
 
 interface SectionProps {
-	readonly className: string;
-	readonly summaryClassName: string;
+	/** The `<details>` chrome; defaults to the app's standard `SECTION`. */
+	readonly className?: string;
+	/** The summary row; defaults to the app's standard `SECTION_SUMMARY`. */
+	readonly summaryClassName?: string;
 	readonly heading: ReactNode;
 	readonly children: ReactNode;
 	readonly open?: boolean;
@@ -49,10 +54,15 @@ interface SectionProps {
  * heading row (its `<h3>` and controls), the children its content.
  * Open by default — a fold that starts closed would hide content
  * the user never chose to hide.
+ *
+ * The chrome is built in: `className`/`summaryClassName` default to the app's
+ * canonical `SECTION`/`SECTION_SUMMARY`, so a plugin renders a native-looking
+ * section without copying a class string. Pass `SECTION_SUMMARY_WRAP` (or a
+ * `cls` composition) only for a heading row that genuinely needs to wrap.
  */
 export function Section({
-	className,
-	summaryClassName,
+	className = SECTION,
+	summaryClassName = SECTION_SUMMARY,
 	heading,
 	children,
 	open = true,

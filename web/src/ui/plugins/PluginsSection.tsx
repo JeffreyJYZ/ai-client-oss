@@ -13,7 +13,14 @@ import {
 	setPluginsEnabled,
 	usePlugins,
 } from "@/state/plugins";
-import { Button, INPUT, LABEL, Section } from "@/ui/kit";
+import {
+	Button,
+	INPUT,
+	LABEL,
+	SECTION,
+	SECTION_SUMMARY_WRAP,
+	Section,
+} from "@/ui/kit";
 import { PluginLog } from "@/ui/plugins/PluginLog";
 import { PluginRow } from "@/ui/plugins/PluginRow";
 
@@ -97,8 +104,8 @@ export function PluginsSection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3 border-t border-neutral-800 pt-5"
-			summaryClassName="flex cursor-pointer select-none flex-wrap items-center justify-between gap-3"
+			className={SECTION}
+			summaryClassName={SECTION_SUMMARY_WRAP}
 			heading={
 				<>
 					<h3 className={HEADING}>Plugins</h3>
