@@ -13,6 +13,7 @@ import { clearOverlay, getOverlaySnapshot } from "@lib/plugins/notify";
 import appPackage from "@root/package.json";
 import { Duration, Effect, Exit, Scope } from "effect";
 import type { ComponentType } from "react";
+import * as kit from "@/ui/kit";
 
 /**
  * The registries the layer builds. A fresh set per test: registrations are the
@@ -100,7 +101,7 @@ describe("makeHost", () => {
 			host.providers.register({ id: "provider" }),
 			host.pipeline.register({ id: "stage" }),
 			host.renderers.register("markdown", component()),
-			host.themes.register({ id: "theme" }),
+			host.themes.register({ id: "theme", name: "Theme", variables: {} }),
 		];
 
 		expect(ids(Effect.runSync(registries.tools.ownedBy("p1")))).toEqual([
@@ -161,7 +162,7 @@ describe("makeHost", () => {
 		expect(host.version.api).toBe(pluginApiVersion);
 		expect(
 			Object.keys(registries)
-				.filter((key) => key !== "version")
+				.filter((key) => key !== "version" && key !== "themesService")
 				.sort(),
 		).toEqual([
 			"commands",
@@ -174,6 +175,8 @@ describe("makeHost", () => {
 		]);
 		expect(registries.ui).not.toBe(registries.tools);
 		expect(registries.commands).not.toBe(registries.settings);
+		// The one theme core sits beside the registries, not inside one.
+		expect(typeof registries.themesService.forPlugin).toBe("function");
 	});
 
 	test("reports the build's real, non-empty app version", () => {
@@ -196,6 +199,25 @@ describe("makeHost", () => {
 		);
 
 		expect(host.version).toEqual({ app: "9.9.9", api: "0.1" });
+	});
+
+	test("host.ui.kit is the app's own kit instance, shared by every plugin", () => {
+		const registries = services();
+		const hostA = makeHost(registries, "p-a", scope());
+		const hostB = makeHost(registries, "p-b", scope());
+
+		// Identity, not equivalence: the component a plugin renders is the very
+		// one the app's own sections render, from the app's one React instance.
+		expect(hostA.ui.kit.Button).toBe(kit.Button);
+		expect(hostA.ui.kit.Panel).toBe(kit.Panel);
+		expect(hostA.ui.kit.Section).toBe(kit.Section);
+		expect(hostA.ui.kit.FieldRow).toBe(kit.FieldRow);
+		expect(hostA.ui.kit.cls).toBe(kit.cls);
+		expect(hostA.ui.kit.INPUT).toBe(kit.INPUT);
+
+		// One kit object for the whole app: a plugin cannot receive a divergent
+		// per-plugin copy that would drift on the next kit edit.
+		expect(hostA.ui.kit).toBe(hostB.ui.kit);
 	});
 
 	test("host.notify is wired: a banner unloads with the plugin's scope", async () => {

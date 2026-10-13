@@ -2,6 +2,7 @@ import { type Db, db } from "@lib/db";
 import { isDesktop } from "@lib/platform";
 import { PluginFault } from "@lib/plugins/errors";
 import { type HostEvent, type SlotId, slotIdSchema } from "@lib/plugins/ids";
+import { type PluginKit, pluginKit } from "@lib/plugins/kit";
 import { reportingLogger } from "@lib/plugins/log";
 import { makeNotifyService, type NotifyService } from "@lib/plugins/notify";
 import {
@@ -29,6 +30,7 @@ import {
 	makeSettingsRegistry,
 	type SettingsRegistry,
 } from "@lib/plugins/settings";
+import { makeThemeService, type ThemeService } from "@lib/plugins/themes";
 import { makeToolRegistry, type ToolRegistry } from "@lib/plugins/tools";
 import { runningVersion } from "@lib/updates";
 import appPackage from "@root/package.json";
@@ -101,8 +103,9 @@ export interface HostRegistry<E extends RegistryEntry> {
  *
  * Two kinds of member live here, deliberately split by signature. The
  * **synchronous registries** (`ui`, `commands`, `settings`, `tools`,
- * `providers`, `pipeline`, `renderers`, `themes`) register now and read as
- * Effects/Streams. The **services** a plugin calls for behaviour (`chat`, `db`,
+ * `providers`, `pipeline`, `renderers`) register now and read as
+ * Effects/Streams; `themes` is the one typed service that both registers and
+ * applies. The **services** a plugin calls for behaviour (`chat`, `db`,
  * `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface,
  * populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is
  * the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with
@@ -111,14 +114,26 @@ export interface HostRegistry<E extends RegistryEntry> {
 export interface Host {
 	/** The app and plugin-API versions a plugin is checked against (spec §10). */
 	readonly version: { readonly app: string; readonly api: string };
-	readonly ui: HostRegistry<Contribution>;
+	/**
+	 * The slot registry, plus the component kit (spec §4). `ui.kit` is the app's
+	 * own primitives — buttons, a panel, the foldable `<details>` section, a
+	 * field row, the markdown renderer and the shared class strings — so plugin
+	 * UI matches a built-in's without copying Tailwind classes.
+	 */
+	readonly ui: HostRegistry<Contribution> & { readonly kit: PluginKit };
 	readonly commands: HostRegistry<RegistryEntry>;
 	readonly settings: SettingsRegistry;
 	readonly tools: ToolRegistry;
 	readonly providers: HostRegistry<RegistryEntry>;
 	readonly pipeline: HostRegistry<RegistryEntry>;
 	readonly renderers: RendererRegistry;
-	readonly themes: HostRegistry<RegistryEntry>;
+	/**
+	 * The theme service (spec §4/§5): register a theme and, unlike a bare
+	 * registry, **apply** one. Every plugin's `host.themes` and the app's own
+	 * are facades over one core, so a plugin's apply is the built-in's apply —
+	 * the same stylesheet and the same `data-theme` marker.
+	 */
+	readonly themes: ThemeService;
 	/** The chat store, read and driven (spec §5). */
 	readonly chat: ChatService;
 	/** The app's own settings/conversation adapter (spec §5). */
@@ -139,14 +154,18 @@ export interface Host {
 }
 
 /**
- * What `HostServices` provides: the versions the host reports, plus one
- * registry per kind (spec §3). Registries are created once in `HostLayer`'s
- * construction, so the whole app shares one collection per kind. The service
- * members that carry no per-plugin state (`chat`, `db`, `storage`, `on`, `log`,
- * `native`) are not held here — they live in `services.ts` and are bound per
- * plugin in `makeHost`. Neither `keybindings` nor `renderers` is a registry: a
- * command carries its own keybinding (`commands.ts` is the source of truth),
- * and a renderer is a `ui` contribution resolved through `useComponent`.
+ * What `HostServices` provides: the versions the host reports, one registry per
+ * kind, and the one theme service (spec §3). Registries are created once in
+ * `HostLayer`'s construction, so the whole app shares one collection per kind;
+ * `themesService` is created there too, for the same reason — one `<style>`
+ * element and one `data-theme` marker for the whole app, with `makeHost`
+ * handing each plugin a facade over it rather than a service of its own. The
+ * service members that carry no per-plugin state (`chat`, `db`, `storage`,
+ * `on`, `log`, `native`) are not held here — they live in `services.ts` and are
+ * bound per plugin in `makeHost`. Neither `keybindings` nor `renderers` is a
+ * registry: a command carries its own keybinding (`commands.ts` is the source
+ * of truth), and a renderer is a `ui` contribution resolved through
+ * `useComponent`.
  *
  * The app version is host data, not a registry — it is resolved once at boot
  * (`runtime.ts` builds this layer), which is the only place with the async
@@ -162,6 +181,8 @@ export interface HostServicesShape {
 	readonly commands: Registry<RegistryEntry>;
 	readonly settings: Registry<RegistryEntry>;
 	readonly themes: Registry<RegistryEntry>;
+	/** The app's one theme core; `makeHost` binds it to each plugin. */
+	readonly themesService: ReturnType<typeof makeThemeService>;
 }
 
 /** The host service (spec §3): the versions and the registries, provided once at boot. */
@@ -295,7 +316,9 @@ export const makeHost = (
 	const uiView: HostUiView = { ui };
 	return {
 		version: services.version,
-		ui,
+		// The registry plus the shared kit object — one identity for every
+		// plugin, so a plugin's `Button` is the app's `Button`.
+		ui: { ...ui, kit: pluginKit },
 		commands: makeHostRegistry(services.commands, pluginId, scope),
 		settings: makeSettingsRegistry(uiView),
 		tools: makeToolRegistry(
@@ -305,7 +328,12 @@ export const makeHost = (
 		providers: makeHostRegistry(services.providers, pluginId, scope),
 		pipeline: makeHostRegistry(services.pipeline, pluginId, scope),
 		renderers: makeRendererRegistry(uiView),
-		themes: makeHostRegistry(services.themes, pluginId, scope),
+		// The shared theme core, with `register` bound to this plugin's registry
+		// view so its themes are owned by it and collected with its scope; every
+		// other member is the app's one service.
+		themes: services.themesService.forPlugin(
+			makeHostRegistry(services.themes, pluginId, scope),
+		),
 		chat: makeChatService(scope),
 		db,
 		storage: makeScopedStorage(pluginId),
@@ -325,14 +353,16 @@ export const makeHost = (
 };
 
 /**
- * The host service layer (spec §3): the app version is resolved here, once,
- * and every registry is created here, once, so the runtime that consumes this
- * layer is the one place registries come from.
+ * The host service layer (spec §3): the app version is resolved here, once, and
+ * every registry **and the one theme core** are created here, once, so the
+ * runtime that consumes this layer is the one place they come from — and there
+ * is a single theme core from boot, before any built-in or plugin registers.
  */
 export const HostLayer: Layer.Layer<HostServices> = Layer.effect(
 	HostServices,
 	Effect.gen(function* () {
 		const app = yield* resolveAppVersion();
+		const themes = yield* makeRegistry<RegistryEntry>("themes");
 		return {
 			version: { app, api: pluginApiVersion },
 			ui: yield* makeRegistry<Contribution>("ui"),
@@ -341,7 +371,8 @@ export const HostLayer: Layer.Layer<HostServices> = Layer.effect(
 			pipeline: yield* makeRegistry<RegistryEntry>("pipeline"),
 			commands: yield* makeRegistry<RegistryEntry>("commands"),
 			settings: yield* makeRegistry<RegistryEntry>("settings"),
-			themes: yield* makeRegistry<RegistryEntry>("themes"),
+			themes,
+			themesService: makeThemeService(themes),
 		} satisfies HostServicesShape;
 	}),
 );

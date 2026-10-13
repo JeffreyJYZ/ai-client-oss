@@ -1,6 +1,6 @@
 import { PluginFault } from "@lib/plugins/errors";
 import type { Disposable, HostRegistry } from "@lib/plugins/host";
-import type { RegistryEntry } from "@lib/plugins/registry";
+import type { Registry, RegistryEntry } from "@lib/plugins/registry";
 import { Effect, Option, Stream } from "effect";
 
 /**
@@ -91,17 +91,39 @@ export interface ThemeContribution extends RegistryEntry {
 /** A theme as an author writes one: identity and data, no owner plumbing. */
 export type ThemeDefinition = Omit<ThemeContribution, "owner">;
 
-/** The theme registry a plugin drives (spec §5). */
+/** The theme service a plugin drives (spec §5). */
 export interface ThemeService {
 	/** Register a theme; disposing the handle unregisters it. */
 	readonly register: (theme: ThemeDefinition) => Disposable;
 	/** Apply a registered theme by id. An unknown id leaves the defaults on. */
 	readonly apply: (id: string) => Effect.Effect<void>;
+	/**
+	 * Restore the `:root` defaults: remove the active theme's variables, its
+	 * stylesheet and its marker. The inverse of {@link apply}, and what a
+	 * toggling plugin calls to switch a theme back off.
+	 */
+	readonly clear: () => Effect.Effect<void>;
 	/** The active theme's id, or `Option.none()` when the defaults are in force. */
 	readonly active: () => Effect.Effect<Option.Option<string>>;
 	/** Reconcile with one registry snapshot: drop an active theme that is gone. */
 	readonly sync: (entries: readonly RegistryEntry[]) => Effect.Effect<void>;
 	/** Reconcile on every registry change; fork this for the plugin-unload path. */
+	readonly run: () => Effect.Effect<void>;
+}
+
+/**
+ * The app's one theme service, before it is bound to a plugin (spec §3). The
+ * applied state is the DOM's — there is one `documentElement` and one
+ * `<style>` element — so this holds only which theme is in force, and
+ * {@link ThemeServiceCore.forPlugin} hands that shared state to each caller
+ * with `register` bound to the caller's own registry view. Two plugins, or a
+ * plugin and the built-in, therefore cannot end up with two stylesheets or two
+ * `data-theme` markers: there is exactly one core per host services instance.
+ */
+interface ThemeServiceCore {
+	/** The service as one plugin uses it: `register` owned by that plugin. */
+	readonly forPlugin: (themes: HostRegistry<RegistryEntry>) => ThemeService;
+	/** Reconcile on every change of the underlying registry; fork once. */
 	readonly run: () => Effect.Effect<void>;
 }
 
@@ -115,15 +137,23 @@ const asTheme = (entry: RegistryEntry): ThemeContribution =>
 	entry as ThemeContribution;
 
 /**
- * The theme service over one registry (spec §3's `ThemeRegistry`). The applied
- * state is the DOM's — there is one `documentElement` — so the service keeps
- * only which theme it put there, and every method that touches it is an
- * `Effect.sync`.
+ * The app's one theme core over its `themes` registry (spec §3). `dom` is the
+ * seam the writes go to — the real element path ({@link browserThemeDom}) in
+ * the app, a recorded object in tests.
+ *
+ * **One instance, many facades.** The active theme, the `<style>` element and
+ * the `data-theme` marker are the core's, created once by `HostLayer`; every
+ * caller gets a {@link ThemeServiceCore.forPlugin} facade over that same core,
+ * so `host.themes.apply` for a plugin is the built-in's apply, and no second
+ * service with its own stylesheet can exist. `register` is the one member that
+ * differs per caller: it is bound to the caller's registry view, so a theme is
+ * owned by the plugin that registered it and is collected when its scope
+ * closes.
  */
 export const makeThemeService = (
-	themes: HostRegistry<RegistryEntry>,
+	registry: Registry<RegistryEntry>,
 	dom: ThemeDom = browserThemeDom(),
-): ThemeService => {
+): ThemeServiceCore => {
 	let activeTheme: ThemeContribution | null = null;
 
 	/** Undo one theme: its variables, the stylesheet, the active marker. */
@@ -140,23 +170,9 @@ export const makeThemeService = (
 		activeTheme = null;
 	};
 
-	const register: ThemeService["register"] = (theme) => {
-		const inner = themes.register(theme);
-		return {
-			dispose: () => {
-				inner.dispose();
-				// Disposing is the explicit unregister: restore at once, so the
-				// unloaded theme's variables cannot outlive it.
-				if (activeTheme !== null && activeTheme.id === theme.id) {
-					restoreDefaults();
-				}
-			},
-		};
-	};
-
 	const apply: ThemeService["apply"] = (id) =>
 		Effect.gen(function* () {
-			const entries = yield* themes.entries();
+			const entries = yield* registry.entries();
 			const entry = entries.find((candidate) => candidate.id === id);
 			if (entry === undefined) {
 				yield* Effect.logWarning(
@@ -178,6 +194,12 @@ export const makeThemeService = (
 			});
 		});
 
+	/** The toggle-off half: restore the defaults through the same DOM. */
+	const clearActive: ThemeService["clear"] = () =>
+		Effect.sync(() => {
+			restoreDefaults();
+		});
+
 	const active: ThemeService["active"] = () =>
 		Effect.sync(() =>
 			activeTheme === null
@@ -187,9 +209,10 @@ export const makeThemeService = (
 
 	/**
 	 * A plugin's scope closing removes its registrations through the registry's
-	 * own finalizer, not through the handle above — so a theme that was active
-	 * when its plugin unloaded would otherwise leave its variables applied. This
-	 * snapshot check is the second, path-independent half of the restore.
+	 * own finalizer — so a theme that was active when its plugin unloaded would
+	 * otherwise leave its variables applied. This snapshot check is the second,
+	 * path-independent half of the restore, and it is why the core's shared
+	 * `run` is forked once.
 	 */
 	const sync: ThemeService["sync"] = (entries) =>
 		Effect.sync(() => {
@@ -201,16 +224,40 @@ export const makeThemeService = (
 		});
 
 	const run: ThemeService["run"] = () =>
-		Stream.runForEach(themes.changes, sync);
+		Stream.runForEach(registry.changes, sync);
 
-	return { register, apply, active, sync, run };
+	const forPlugin = (themes: HostRegistry<RegistryEntry>): ThemeService => ({
+		register: (theme) => {
+			const inner = themes.register(theme);
+			return {
+				dispose: () => {
+					inner.dispose();
+					// Disposing is the explicit unregister: restore at once, so the
+					// unloaded theme's variables cannot outlive it.
+					if (activeTheme !== null && activeTheme.id === theme.id) {
+						restoreDefaults();
+					}
+				},
+			};
+		},
+		apply,
+		clear: clearActive,
+		active,
+		sync,
+		run,
+	});
+
+	return { forPlugin, run };
 };
 
 /**
- * The app's one theme service (spec §3), set by the theme built-in at boot
- * (`builtin/themes`). `applyTheme`/`activeTheme` are the free-function surface
- * a plugin is given; before the built-in registers there is no service, and
- * they degrade to "the defaults are in force" rather than failing.
+ * The app-internal handle on the one theme core (spec §3), set by the theme
+ * built-in at boot (`builtin/themes`). It exists for app code that applies a
+ * theme without a plugin in hand; a plugin does not use it — a plugin reaches
+ * the same core through `host.themes` (the typed {@link ThemeService}), which
+ * is why `applyTheme`/`activeTheme` are no longer the only way in. Before the
+ * built-in registers there is no handle, and they degrade to "the defaults are
+ * in force" rather than failing.
  */
 let appService: ThemeService | null = null;
 
@@ -218,7 +265,7 @@ export const setAppThemeService = (service: ThemeService): void => {
 	appService = service;
 };
 
-/** Apply a theme by id (spec §5). */
+/** Apply a theme by id (spec §5), through the one core. */
 export const applyTheme = (id: string): Effect.Effect<void> =>
 	appService === null ? Effect.void : appService.apply(id);
 

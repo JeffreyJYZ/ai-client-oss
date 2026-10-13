@@ -71,6 +71,17 @@ const registries = (): HostServicesShape =>
 const hostFor = (services: HostServicesShape, id = "plugins.test"): Host =>
 	makeHost(services, id, Effect.runSync(Scope.make()));
 
+/**
+ * A host over the app's services, but with the one theme core writing to the
+ * recorded DOM. The host surface reads the core from the services shape, never
+ * building one, so this is exactly the app's wiring with an observable seam.
+ */
+const hostWithDom = (services: HostServicesShape, dom: ThemeDom): Host =>
+	hostFor({
+		...services,
+		themesService: makeThemeService(services.themes, dom),
+	});
+
 const run = <A, E>(effect: Effect.Effect<A, E>): Promise<A> =>
 	Effect.runPromise(effect);
 
@@ -81,7 +92,7 @@ describe("makeThemeService", () => {
 	test("applying a theme sets every variable and injects its CSS", async () => {
 		const services = registries();
 		const dom = fakeDom();
-		const themes = makeThemeService(hostFor(services).themes, dom);
+		const themes = hostWithDom(services, dom).themes;
 
 		themes.register({
 			id: "test.theme.a",
@@ -104,7 +115,7 @@ describe("makeThemeService", () => {
 	test("applying a second theme replaces the first rather than stacking", async () => {
 		const services = registries();
 		const dom = fakeDom();
-		const themes = makeThemeService(hostFor(services).themes, dom);
+		const themes = hostWithDom(services, dom).themes;
 
 		themes.register({
 			id: "test.theme.a",
@@ -135,7 +146,7 @@ describe("makeThemeService", () => {
 	test("unregistering the active theme restores the defaults", async () => {
 		const services = registries();
 		const dom = fakeDom();
-		const themes = makeThemeService(hostFor(services).themes, dom);
+		const themes = hostWithDom(services, dom).themes;
 
 		const handle = themes.register({
 			id: "test.theme.a",
@@ -157,7 +168,7 @@ describe("makeThemeService", () => {
 	test("a theme may define variables the app never named", async () => {
 		const services = registries();
 		const dom = fakeDom();
-		const themes = makeThemeService(hostFor(services).themes, dom);
+		const themes = hostWithDom(services, dom).themes;
 
 		themes.register({
 			id: "test.theme.new",
@@ -173,7 +184,7 @@ describe("makeThemeService", () => {
 	test("applying an unknown id leaves the defaults and does not fail", async () => {
 		const services = registries();
 		const dom = fakeDom();
-		const themes = makeThemeService(hostFor(services).themes, dom);
+		const themes = hostWithDom(services, dom).themes;
 
 		await run(Effect.provide(themes.apply("test.theme.missing"), silent));
 
@@ -184,14 +195,18 @@ describe("makeThemeService", () => {
 
 	test("a theme id colliding with the built-in replaces it in place", async () => {
 		const services = registries();
-		const builtinHost = hostFor(services, "app.builtin");
-		const pluginHost = hostFor(services, "acme.theme");
 		const dom = fakeDom();
+		// One core (the app's), two plugins' views of it.
+		const withCore: HostServicesShape = {
+			...services,
+			themesService: makeThemeService(services.themes, dom),
+		};
+		const builtinHost = hostFor(withCore, "app.builtin");
+		const pluginHost = hostFor(withCore, "acme.theme");
 
 		// The shipping theme, then a plugin theme claiming the same id.
-		makeThemeService(builtinHost.themes, dom).register(darkTheme);
-		const plugin = makeThemeService(pluginHost.themes, dom);
-		plugin.register({
+		builtinHost.themes.register(darkTheme);
+		pluginHost.themes.register({
 			...darkTheme,
 			name: "Acme dark",
 			variables: { "--collide": "1" },
@@ -203,8 +218,9 @@ describe("makeThemeService", () => {
 		expect(dark[0]?.owner).toBe("acme.theme");
 		expect((dark[0] as ThemeContribution).name).toBe("Acme dark");
 
-		// Applying the collided id applies the plugin's theme, not the built-in's.
-		await run(plugin.apply(darkTheme.id));
+		// Applying the collided id applies the plugin's theme, not the built-in's,
+		// through the one shared core.
+		await run(pluginHost.themes.apply(darkTheme.id));
 		expect([...dom.variables]).toEqual([["--collide", "1"]]);
 	});
 
@@ -213,8 +229,7 @@ describe("makeThemeService", () => {
 			Effect.gen(function* () {
 				const services = registries();
 				const dom = fakeDom();
-				const host = hostFor(services);
-				const themes = makeThemeService(host.themes, dom);
+				const themes = hostWithDom(services, dom).themes;
 
 				// Registered raw, so its disposal carries no restore of its own: only
 				// the stream can notice, which is the plugin-unload (scope-close) path.
@@ -223,7 +238,7 @@ describe("makeThemeService", () => {
 					name: "Raw",
 					variables: { "--r": "1" },
 				};
-				const raw: { dispose: () => void } = host.themes.register(definition);
+				const raw: { dispose: () => void } = themes.register(definition);
 
 				const fiber = yield* themes.run().pipe(Effect.forkChild);
 				yield* themes.apply("test.theme.raw");
@@ -261,5 +276,106 @@ describe("registerThemeBuiltins", () => {
 		for (const name of Object.keys(darkTheme.variables)) {
 			expect(name.startsWith("--")).toBe(true);
 		}
+	});
+});
+
+/**
+ * The reachability contract Task 19's acceptance run found missing: `apply`
+ * must be on the host surface, and applying through a plugin's host must reach
+ * the **one** service the app itself uses — one `<style>` element, one
+ * `data-theme` marker — not a second instance the plugin quietly builds.
+ *
+ * The recorded DOM seam is injected into the service the services shape
+ * carries, so the test observes exactly what the app's built-in would.
+ */
+describe("host.themes (the service on the host surface)", () => {
+	test("exposes apply/active/clear, and a plugin reaches the app's one core", async () => {
+		const services = registries();
+		const dom = fakeDom();
+		// The shape the app runs with, but with a recorded DOM so the assertions
+		// can see the writes the real document would receive.
+		const withCore: HostServicesShape = {
+			...services,
+			themesService: makeThemeService(services.themes, dom),
+		};
+		const builtin = makeHost(
+			withCore,
+			"app.builtin",
+			Effect.runSync(Scope.make()),
+		);
+		const plugin = makeHost(
+			withCore,
+			"acme.theme",
+			Effect.runSync(Scope.make()),
+		);
+
+		// Reachable through the host surface — the hole this task closes.
+		expect(typeof plugin.themes.apply).toBe("function");
+		expect(typeof plugin.themes.active).toBe("function");
+		expect(typeof plugin.themes.clear).toBe("function");
+
+		const handle = plugin.themes.register({
+			id: "acme.theme.t",
+			name: "T",
+			variables: { "--acme": "1" },
+			css: "body{color:red}",
+		});
+		await run(plugin.themes.apply("acme.theme.t"));
+
+		// The plugin's apply wrote the service's own DOM: its variables, its one
+		// stylesheet, its marker — not the plugin's own <style> element.
+		expect(dom.variables.get("--acme")).toBe("1");
+		expect(dom.css.value).toBe("body{color:red}");
+		expect(dom.cssWrites.count).toBe(1);
+		expect(dom.activeId.value).toBe("acme.theme.t");
+
+		// Same instance the built-in sees: the built-in's view reports the
+		// plugin's apply, which only a shared core can do.
+		expect(Option.getOrNull(await run(builtin.themes.active()))).toBe(
+			"acme.theme.t",
+		);
+
+		// `clear` is the inverse, through the same core.
+		await run(plugin.themes.clear());
+		expect(dom.variables.size).toBe(0);
+		expect(dom.css.value).toBeUndefined();
+		expect(dom.activeId.value).toBeUndefined();
+		expect(Option.isNone(await run(builtin.themes.active()))).toBe(true);
+
+		handle.dispose();
+	});
+
+	test("the built-in and a plugin register and apply through one core", async () => {
+		const services = registries();
+		const dom = fakeDom();
+		const withCore: HostServicesShape = {
+			...services,
+			themesService: makeThemeService(services.themes, dom),
+		};
+		const builtin = makeHost(
+			withCore,
+			"app.builtin",
+			Effect.runSync(Scope.make()),
+		);
+		const plugin = makeHost(
+			withCore,
+			"acme.theme",
+			Effect.runSync(Scope.make()),
+		);
+
+		registerThemeBuiltins(builtin);
+		plugin.themes.register({
+			id: "acme.theme.t",
+			name: "T",
+			variables: { "--x": "1" },
+		});
+
+		// The built-in's dark theme, applied through the plugin's host surface,
+		// is indistinguishable from the built-in applying it: one core, one DOM.
+		await run(plugin.themes.apply(darkTheme.id));
+		expect(dom.activeId.value).toBe(darkTheme.id);
+		expect(Option.getOrNull(await run(builtin.themes.active()))).toBe(
+			darkTheme.id,
+		);
 	});
 });

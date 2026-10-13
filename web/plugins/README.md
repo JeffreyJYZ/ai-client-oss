@@ -100,11 +100,12 @@ read as `Effect`/`Stream`; **services return `Effect`/`Stream`**.
 | `host.` | Adds | Example |
 |---|---|---|
 | `ui.register` | a component into a named `slot` | `hello-world/main.ts` |
+| `ui.kit` | the app's own primitives — `Button`, `Panel`, `Section`, `FieldRow`, `Markdown`, `cls`, and the class constants — so plugin UI matches a built-in's without copying Tailwind strings | `hello-world/main.ts` |
 | `commands.register` | a command (+ optional keybinding) for the palette | `export-conversation/main.ts` |
 | `settings.registerSection` | a foldable Settings section | `theme-solarized/main.ts` |
 | `tools.register` | a model-callable tool (`declaration` + `execute`) | `custom-tool/main.ts` |
 | `pipeline.register` | a stage: `beforeSend`, `transformBody`, `onChunk`, `afterReply`, `onToolCall`, `onHistory` | `custom-tool/main.ts` (`onToolCall`) |
-| `themes.register` | a theme (variables + optional `css`) | `theme-solarized/main.ts` |
+| `themes.register` / `apply` / `clear` / `active` | a theme (variables + optional `css`), and apply or clear it through the app's one theme service — the same `<style>` element and `data-theme` marker the built-in uses | `theme-solarized/main.ts` |
 | `providers.register` | a wire protocol (`send`/`buildRequest`/…) | see `lib/providers/chatCompletions.ts` |
 | `renderers.register` | override `message`/`markdown`/`marker`/`reasoning` | `lib/plugins/renderers.ts` |
 | `chat.snapshot()` | the active conversation (synchronous) | `export-conversation/main.ts` |
@@ -130,12 +131,13 @@ component id (`ui.markdown`) is resolved by `useComponent`, not a slot.
 
 ### Typing your `host`
 
-`host.ui`, `host.settings`, `host.tools` and `host.renderers` are typed.
-`host.commands`, `host.themes`, `host.providers` and `host.pipeline` are the
-generic `HostRegistry<RegistryEntry>`: pass your entry as a **typed variable**
-(not a fresh literal) and it type-checks; the runtime stores whatever fields you
-put on it. The typed helpers (`registerCommand`, `makeThemeService`,
-`registerProvider`) are host-module exports a plugin cannot reach at runtime.
+`host.ui`, `host.ui.kit`, `host.settings`, `host.tools`, `host.renderers` and
+`host.themes` are typed. `host.commands`, `host.providers` and `host.pipeline`
+are the generic `HostRegistry<RegistryEntry>`: pass your entry as a **typed
+variable** (not a fresh literal) and it type-checks; the runtime stores whatever
+fields you put on it. The typed helpers (`registerCommand`, `registerProvider`)
+are host-module exports a plugin cannot reach at runtime — but `host.themes` is
+now the typed theme service itself, so apply/clear/active are on `host`.
 
 ## 5. Trust — read this before installing anything you did not write
 
@@ -156,20 +158,15 @@ put on it. The typed helpers (`registerCommand`, `makeThemeService`,
 
 ## 6. Gaps these examples found (do not be surprised)
 
-1. **No component kit on `Host`.** Spec §4 promises `ui.kit` (buttons, panel,
-   `<details>` section, field row, markdown). It is not exposed — copy the
-   neutral Tailwind classes by hand.
-2. **A theme can be registered but not applied.** `host.themes` has no `apply`,
-   and `applyTheme(id)` / `activeTheme()` are host-module exports a plugin
-   cannot reach. Applying a theme means writing the variables yourself.
-3. **`host.commands`/`themes`/`providers`/`pipeline` are untyped** (see §4).
-4. **A registered tool is never declared to the model.** The wire `tools` array
+1. **`host.commands`/`providers`/`pipeline` are untyped** (see §4). `host.themes`
+   and `host.ui.kit` are typed.
+2. **A registered tool is never declared to the model.** The wire `tools` array
    is built from host policy plus the provider's stored toggle; the tools
    registry is not consulted, and a `transformBody` stage is overwritten by
    `buildRequest` before the request goes out. The tool is *executable* when the
    model calls it, not *announceable*.
-5. **No Effect runner** (see §2). Bundle `effect` if you need one.
-6. **A plugin's `dispose` can run after a reload's `setup`.** Clicking
+3. **No Effect runner** (see §2). Bundle `effect` if you need one.
+4. **A plugin's `dispose` can run after a reload's `setup`.** Clicking
    **Reload** can leave a plugin's mirrored document state retracted even though
    the plugin is reported loaded and its persisted setting says otherwise; a
    plain page reload is unaffected. Re-apply defensively if you mirror state.

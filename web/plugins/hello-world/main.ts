@@ -8,8 +8,9 @@ import { createElement, useState } from "react";
  *
  * - a **slot contribution**: `chat.message.actions` is the region `Message.tsx`
  *   renders under a message, and what is registered here appears there;
- * - the **`Host` object**: the API and app versions, the scoped logger, `notify`
- *   and the `ui` registry all arrive as one parameter;
+ * - the **component kit**: the button is `host.ui.kit.Button` — the app's own
+ *   `Button`, on the app's React instance — so it matches a built-in's exactly
+ *   without copying a single Tailwind class;
  * - the **lifecycle**: registering returns a `Disposable`, and the handle this
  *   `setup` returns is disposed first on unload — so disabling the plugin in the
  *   Plugins section removes the contribution and clears the marker, with no
@@ -18,14 +19,11 @@ import { createElement, useState } from "react";
  * The component is a plain React function created with `createElement` (this
  * file is `.ts`, per the plan's file list, so there is no JSX). It arrives
  * through the host's React global — the build preset maps the `react` import
- * onto it — so `useState` is the app's own React instance, not a second copy.
+ * onto it — so `useState` is the app's own React instance, not a second copy,
+ * and it renders the kit's components without a second component tree.
  *
- * **Contract notes an author needs.**
- * - There is **no component kit on `Host`** (spec §4 promises one). The button
- *   below therefore copies the app's neutral palette by hand; a plugin cannot
- *   reach `@/ui/kit`. See the author's guide's "missing kit" note.
- * - `document` is available: a plugin runs in the page, in-process, with full
- *   trust.
+ * `document` is available: a plugin runs in the page, in-process, with full
+ * trust.
  */
 
 /** The attribute this plugin sets while it is loaded; the browser proof reads it. */
@@ -35,13 +33,12 @@ const LOADED_MARKER = "data-example-hello-world";
 const makeHelloButton = (host: Host) =>
 	function HelloButton() {
 		const [count, setCount] = useState(0);
+		// The kit is a stable object on `host.ui`; destructuring it here is only
+		// for readability.
+		const { Button } = host.ui.kit;
 		return createElement(
-			"button",
+			Button,
 			{
-				type: "button",
-				// Copied from the kit's neutral palette — see the contract note above.
-				className:
-					"rounded border border-neutral-700 px-2 py-0.5 text-xs text-neutral-300 hover:bg-neutral-800",
 				onClick: () => {
 					const next = count + 1;
 					setCount(next);
