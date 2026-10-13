@@ -47,7 +47,11 @@ const providers = [
 
 const build = (provider: (typeof providers)[number][1], c: SendCtx): unknown =>
 	(provider.buildRequest as (send: unknown, ctx: SendCtx) => unknown)(
-		provider.template,
+		// Build over the replayed body when the context names one, exactly as a
+		// provider's own `send` does (`ctx.prev ?? template`); a helper that
+		// always started from the template would make the idempotence case
+		// rebuild from scratch and never exercise the replayed body at all.
+		c.prev ?? provider.template,
 		c,
 	);
 

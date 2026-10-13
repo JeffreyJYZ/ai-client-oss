@@ -19,7 +19,7 @@ import {
 import {
 	executeTool,
 	type ToolDeclaration,
-	toolDeclarationSchema,
+	type ToolEntry,
 } from "@lib/plugins/tools";
 import { searchKindFor } from "@lib/providers/presets";
 import type {
@@ -93,11 +93,13 @@ const prevKey = (conversationId: string, protocol: string): string =>
  * Every tool the host's registry holds, as the declarations a request
  * announces — read once per turn, on the turn's own runtime.
  *
- * Only `tools.ts` writes `ToolEntry`s, so this reads the generic
- * `RegistryEntry` at that shape; and it validates each declaration on the way
- * out exactly as `registerTool` does on the way in, because a plugin is untyped
- * JavaScript at this boundary. A declaration that does not parse is skipped,
- * never serialized to the model.
+ * `tools.ts` is the tool registry's only writer, and `addTool` validates each
+ * declaration with `toolDeclarationSchema` before storing it — an invalid one
+ * is refused there, with a logged `PluginFault`, and never stored. So every
+ * entry read here already carries a parsed `ToolDeclaration`; this reads the
+ * generic `RegistryEntry` at that shape rather than re-parsing. A second parse
+ * on the way out could only make a stored, valid declaration vanish silently,
+ * and the write side is where an invalid one is refused and reported.
  *
  * The **registry is the enablement**: the loader disposes a plugin's
  * contributions when it unloads, so an entry's presence already means that
@@ -114,12 +116,9 @@ export const registeredToolDeclarations: Effect.Effect<
 > = Effect.gen(function* () {
 	const services = yield* HostServices;
 	const entries = yield* services.tools.entries();
-	return entries.flatMap((entry) => {
-		const parsed = toolDeclarationSchema.safeParse(
-			(entry as { readonly declaration?: unknown }).declaration,
-		);
-		return parsed.success ? [parsed.data] : [];
-	});
+	// The narrowing is sound for the same reason: only `addTool` writes, and it
+	// stores a validated `ToolEntry`, so no non-tool entry can be read back.
+	return entries.map((entry) => (entry as ToolEntry).declaration);
 });
 
 let activeFiber: Fiber.Fiber<Exit.Exit<void, string>, never> | undefined;
