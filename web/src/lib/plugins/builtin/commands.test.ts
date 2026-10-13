@@ -7,7 +7,12 @@ import {
 	type HostServicesShape,
 	makeHost,
 } from "@lib/plugins/host";
-import { clearOverlay, getOverlaySnapshot } from "@lib/plugins/notify";
+import {
+	clearOverlay,
+	getOverlaySnapshot,
+	type OverlayState,
+	subscribeOverlay,
+} from "@lib/plugins/notify";
 import { Effect, Scope } from "effect";
 
 /**
@@ -44,6 +49,16 @@ let requestsFail = false;
 
 /** The `download` filename of every anchor the export clicked. */
 const downloads: string[] = [];
+
+/**
+ * Woken by the fake anchor's click. The download has no store event of its own,
+ * so the signal the product emits here is the browser seam itself — the
+ * `anchor.click()` inside `downloadBackup`. Waiting on it keeps the test driven
+ * by the code path that performs the download rather than by a wall clock; a
+ * download the product never performs leaves the wait unsettled, so the test
+ * fails on bun's own timeout instead of being papered over.
+ */
+let resolveDownload: (() => void) | null = null;
 
 interface FakeRequest {
 	result: unknown;
@@ -117,6 +132,7 @@ const installBrowser = (): (() => void) => {
 				download: "",
 				click: (): void => {
 					downloads.push(anchor.download);
+					resolveDownload?.();
 				},
 			};
 			return anchor;
@@ -132,15 +148,45 @@ const installBrowser = (): (() => void) => {
 	};
 };
 
-/** Poll for a state the fire-and-forget export reaches on another fibre. */
-const waitFor = async (predicate: () => boolean): Promise<boolean> => {
-	const deadline = Date.now() + 2000;
-	while (Date.now() < deadline) {
-		if (predicate()) return true;
-		await new Promise((resolve) => setTimeout(resolve, 2));
-	}
-	return predicate();
-};
+/**
+ * Wait for the overlay to reach a state, driven by the store's own subscription
+ * rather than a wall clock.
+ *
+ * `commit` writes the ref and the React projection, then wakes the listeners,
+ * all in one synchronous step (`notify.ts`), so a listener that re-checks on
+ * every change cannot miss an entry that landed between checks — and the
+ * current snapshot is tested once up front as well. No `Date.now()` bounds the
+ * wait, so a machine sleep or a process pause cannot make it give up while the
+ * toast is still in flight — the flake the replaced `Date.now() + 2000`
+ * deadline produced. It still detects a toast that never arrives: the promise
+ * settles only on a real overlay change, so a missing toast fails on bun's own
+ * test timeout.
+ */
+const waitForOverlay = (
+	predicate: (state: OverlayState) => boolean,
+): Promise<OverlayState> =>
+	new Promise((resolve) => {
+		let dispose: () => void = () => {};
+		const check = (): void => {
+			const state = getOverlaySnapshot();
+			if (predicate(state)) {
+				dispose();
+				resolve(state);
+			}
+		};
+		dispose = subscribeOverlay(check);
+		check();
+	});
+
+/** Wait for the fake anchor's click, the delivery step the export performs. */
+const waitForDownload = (): Promise<void> =>
+	new Promise((resolve) => {
+		if (downloads.length > 0) {
+			resolve();
+			return;
+		}
+		resolveDownload = resolve;
+	});
 
 /** Everything the logger wrote, flattened, with the spied consoles silenced. */
 const captureLog = (): {
@@ -172,6 +218,7 @@ beforeEach(() => {
 	clearOverlay();
 	downloads.length = 0;
 	requestsFail = false;
+	resolveDownload = null;
 	restoreBrowser = installBrowser();
 });
 
@@ -188,14 +235,14 @@ describe("app.backup.export from the command palette", () => {
 		requestsFail = true;
 
 		await runExport(s);
-		const shown = await waitFor(() => getOverlaySnapshot().toasts.length > 0);
-		const toasts = getOverlaySnapshot().toasts;
+		const shown = await waitForOverlay((state) => state.toasts.length > 0);
+		const toasts = shown.toasts;
 		const written = log.text();
 		log.restore();
 
 		// The toast is the load-bearing assertion: the failure is visible to a
 		// user who ran the command from the palette, not only to the log.
-		expect(shown).toBe(true);
+		expect(toasts.length).toBeGreaterThan(0);
 		expect(toasts).toHaveLength(1);
 		expect(toasts[0]?.tone).toBe("error");
 		expect(toasts[0]?.text).toContain("indexeddb request failed");
@@ -209,10 +256,12 @@ describe("app.backup.export from the command palette", () => {
 		const s = services();
 		requestsFail = false;
 
+		// Subscribe before the export so its download signal cannot be missed.
+		const downloaded = waitForDownload();
 		await runExport(s);
-		const delivered = await waitFor(() => downloads.length > 0);
+		await downloaded;
 
-		expect(delivered).toBe(true);
+		expect(downloads).toHaveLength(1);
 		expect(downloads[0] ?? "").toMatch(
 			/^ai-client-backup-\d{4}-\d{2}-\d{2}\.json$/,
 		);

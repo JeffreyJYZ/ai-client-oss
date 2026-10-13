@@ -17,6 +17,7 @@ import {
 } from "@lib/plugins/pipeline";
 import type { Disposable, RegistryEntry } from "@lib/plugins/registry";
 import { runtime } from "@lib/plugins/runtime";
+import { subscribeHostEvent } from "@lib/plugins/services";
 import { anthropic } from "@lib/providers/anthropicMessages";
 import { chatcompletions } from "@lib/providers/chatCompletions";
 import { responses } from "@lib/providers/responses";
@@ -560,17 +561,34 @@ describe("beforeSend abort", () => {
 		) => Effect.Effect<Disposable, never, HostServices>,
 	): Disposable => runtime.runSync(Effect.flatMap(HostServices, add));
 
-	const waitFor = async <A>(
-		probe: () => A | undefined,
-		timeoutMs = 2000,
-	): Promise<A> => {
-		const deadline = Date.now() + timeoutMs;
-		for (;;) {
-			const value = probe();
-			if (value !== undefined) return value;
-			if (Date.now() > deadline) throw new Error("timed out");
-			await Bun.sleep(5);
-		}
+	/**
+	 * Wait for the turn's own completion signal, not a wall-clock deadline.
+	 *
+	 * `finalize` publishes `turn-end` on every exit path — success, failure,
+	 * abort — and only after it has written the error row and set `status` to
+	 * `idle` (`web/src/state/chat.ts:399-400`), so the snapshot is complete by
+	 * the time the event arrives. Subscribing **before** `send` means the event
+	 * cannot be missed.
+	 *
+	 * Nothing here reads a clock, so a machine sleep or a process pause cannot
+	 * make the wait give up while the turn is still in flight — exactly what the
+	 * replaced `Date.now() + 2000` deadline did. The wait is bounded by the
+	 * runtime's own step, the signal a pause cannot defeat.
+	 *
+	 * It still detects a turn that never ends: the bus event is the only way
+	 * the wait settles, so a signal that never fires fails on bun's own test
+	 * timeout rather than being papered over.
+	 */
+	const waitForTurnEnd = (): {
+		readonly done: Promise<void>;
+		readonly dispose: () => void;
+	} => {
+		let settle: () => void = () => {};
+		const done = new Promise<void>((resolve) => {
+			settle = resolve;
+		});
+		const subscription = subscribeHostEvent("turn-end", () => settle());
+		return { done, dispose: () => subscription.dispose() };
 	};
 
 	test("a beforeSend veto reaches finalize: an error row lands and the turn ends", async () => {
@@ -595,20 +613,19 @@ describe("beforeSend abort", () => {
 			activeProviderId: "t12-provider",
 		});
 		try {
-			send("please abort", []);
-			const snapshot = await waitFor(() => {
-				const current = getChat();
-				// `finalize` is the only writer of `status = "idle"` after a
-				// turn, and it clears `activeFiber` on the same path.
-				return current.status === "idle" &&
-					current.messages.some((message) => message.role === "error")
-					? current
-					: undefined;
-			});
-			const error = snapshot.messages.at(-1);
-			expect(error?.role).toBe("error");
-			expect(error?.text).toContain("aborted");
-			expect(snapshot.status).toBe("idle");
+			// Subscribe before starting the turn so its `turn-end` cannot be missed.
+			const turn = waitForTurnEnd();
+			try {
+				send("please abort", []);
+				await turn.done;
+				const snapshot = getChat();
+				const error = snapshot.messages.at(-1);
+				expect(error?.role).toBe("error");
+				expect(error?.text).toContain("aborted");
+				expect(snapshot.status).toBe("idle");
+			} finally {
+				turn.dispose();
+			}
 		} finally {
 			stageHandle.dispose();
 			providerHandle.dispose();
