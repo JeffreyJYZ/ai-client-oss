@@ -2,10 +2,12 @@ import type { Settings } from "@lib/db";
 import { type PluginError, PluginLoadFailed } from "@lib/plugins/errors";
 import type { HostServices } from "@lib/plugins/host";
 import {
+	activatePlugin,
 	installPlugin,
 	type LoadedPlugin,
-	loadPlugin,
 	MANIFEST_FILE,
+	type PreparedPlugin,
+	preparePlugin,
 	removePlugin,
 	unloadPlugin,
 } from "@lib/plugins/loader";
@@ -122,16 +124,22 @@ export interface PluginsDeps {
 	) => Effect.Effect<PluginManifest, PluginError>;
 	readonly uninstall: (id: string) => Effect.Effect<void, PluginLoadFailed>;
 	/**
-	 * Load one plugin. The context is `HostServices` because the real one builds
-	 * the plugin's `Host` from the runtime's registries, and this must happen
-	 * **inside** the runtime rather than through a synchronous read: at boot the
-	 * layer may not be built yet, and `runSync` over the desktop's promise-backed
-	 * version read throws `AsyncFiberError`. A fake that needs no context is
-	 * assignable here.
+	 * The two phases of a load, split so a reload can validate the new source
+	 * **before** it closes the old instance (spec §6/§9). `prepare` decodes the
+	 * manifest, opens the plugin's scope, runs the version gate and imports the
+	 * entry; `activate` runs the new `setup` inside that scope. The context is
+	 * `HostServices` because the real pair builds the plugin's `Host` from the
+	 * runtime's registries, and this must happen **inside** the runtime rather
+	 * than through a synchronous read: at boot the layer may not be built yet,
+	 * and `runSync` over the desktop's promise-backed version read throws
+	 * `AsyncFiberError`. A fake that needs no context is assignable here.
 	 */
-	readonly load: (
+	readonly prepare: (
 		id: string,
 		raw: unknown,
+	) => Effect.Effect<PreparedPlugin, PluginError, HostServices>;
+	readonly activate: (
+		prepared: PreparedPlugin,
 	) => Effect.Effect<LoadedPlugin, PluginError, HostServices>;
 	readonly unload: (loaded: LoadedPlugin) => Effect.Effect<void>;
 	readonly fetchText: (url: string) => Effect.Effect<string, string>;
@@ -189,6 +197,11 @@ interface Step {
 /** A load's two outcomes, kept as data so the effect never fails. */
 type LoadOutcome =
 	| { readonly ok: true; readonly loaded: LoadedPlugin }
+	| { readonly ok: false; readonly detail: string };
+
+/** An acquire's two outcomes, kept as data so the effect never fails. */
+type PrepareOutcome =
+	| { readonly ok: true; readonly prepared: PreparedPlugin }
 	| { readonly ok: false; readonly detail: string };
 
 /** A plugin with nothing persisted yet — the shape a fresh entry starts from. */
@@ -383,7 +396,7 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 							pluginId: id,
 						}),
 					)
-				: deps.load(id, raw);
+				: deps.prepare(id, raw).pipe(Effect.flatMap(deps.activate));
 		return decision.pipe(
 			Effect.map((loaded): LoadOutcome => ({ ok: true, loaded })),
 			Effect.catchCause((cause) =>
@@ -440,32 +453,37 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 	};
 
 	/**
-	 * Reload one plugin by **swapping**, never by unloading first (spec §6/§9).
-	 * The new version is loaded into its own fresh scope while the current one is
-	 * still live; only once the new load has succeeded is the old scope closed.
-	 * A reload whose new source is invalid therefore leaves the plugin exactly as
-	 * it was — running, registered, and reporting the error — never half-unloaded,
-	 * and every other plugin is untouched.
+	 * Reload one plugin **in two phases** (spec §6/§9): acquire and import the new
+	 * source, then close the old instance, then run the new `setup`.
 	 *
-	 * The registration order is what makes the swap seamless: the new load's
-	 * registrations replace the old one's by id (`Registry.add` replaces in
-	 * place), so no frame exists in which the plugin's contributions are absent,
-	 * and the old scope's close then removes only the ids the new version no
-	 * longer registers.
+	 * The order is the whole point, and it is what the old "swap" got wrong.
 	 *
-	 * The one case this cannot cover, stated rather than hidden: a new `setup`
-	 * that registers an entry and *then* throws. The failed load's scope closes
-	 * and disposes that entry by identity, but the old entry with the same id was
-	 * already evicted when the new one replaced it, so that one contribution is
-	 * lost while the old plugin's scope is still open. A bad **import** — a syntax
-	 * error, a missing default export, a bare specifier, which is the shape an
-	 * invalid source actually takes — registers nothing and is fully protected.
+	 * - A bad **import** — a syntax error, a missing default export, a bare
+	 *   specifier, a manifest that no longer decodes, a refused API version — is
+	 *   caught in the acquire phase, **before** the old scope closes, so a reload
+	 *   whose new source is invalid leaves the old instance running, registered
+	 *   and unchanged, with the reason reported.
+	 * - The old instance's `dispose` runs **before** the new `setup`, so a plugin
+	 *   that manages shared imperative state outside the registry (a theme
+	 *   applying a document class) can never have the old disposal retract what
+	 *   the new setup just applied.
+	 * - A **`setup` that throws** is the one case two phases cannot make seamless:
+	 *   the old instance is already closed, so the result is *nothing loaded*, with
+	 *   `status: "failed"` and the error logged. That is honest, unlike a swap that
+	 *   kept the row reading `loaded` while the plugin's contributions were gone.
+	 *   The trade is deliberate: a failed reload can no longer run old code behind
+	 *   a new manifest's name.
+	 *
+	 * Between closing the old instance and running the new `setup` the plugin's
+	 * contributions are absent. That window is bounded to one synchronous stretch
+	 * of this fiber — no repaint interleaves in practice — and is preferable to
+	 * the alternative a swap produced, a *permanent* retraction.
 	 */
 	const swapStep = (entry: Entry): Effect.Effect<void, never, HostServices> => {
 		const id = entry.persisted.id;
 		const raw = entry.raw;
 		const previous = entry.loaded;
-		const decision: Effect.Effect<LoadedPlugin, PluginError, HostServices> =
+		const decision: Effect.Effect<PreparedPlugin, PluginError, HostServices> =
 			raw === undefined
 				? Effect.fail(
 						new PluginLoadFailed({
@@ -473,18 +491,17 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 							pluginId: id,
 						}),
 					)
-				: deps.load(id, raw);
+				: deps.prepare(id, raw);
 
 		return decision.pipe(
-			Effect.map((loaded): LoadOutcome => ({ ok: true, loaded })),
+			Effect.map((prepared): PrepareOutcome => ({ ok: true, prepared })),
 			Effect.catchCause((cause) =>
-				Effect.succeed<LoadOutcome>({ ok: false, detail: describe(cause) }),
+				Effect.succeed<PrepareOutcome>({ ok: false, detail: describe(cause) }),
 			),
 			Effect.flatMap((outcome) => {
 				if (!outcome.ok) {
-					// The failed load closed its own scope, so nothing new remains.
-					// The old instance was never touched: it keeps running and the
-					// reason is reported.
+					// The new source is invalid. The old instance was never
+					// touched: it keeps running and the reason is reported.
 					return Effect.sync(() => {
 						if (entries.get(id) !== entry) return;
 						entry.pending = false;
@@ -493,19 +510,12 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 						publish();
 					});
 				}
-				const next = outcome.loaded;
+				const prepared = outcome.prepared;
 				return Effect.gen(function* () {
-					// Adopt the new instance first, so the plugin is never absent;
-					// then close the old scope. A state read mid-reload sees a live
-					// plugin.
-					yield* Effect.sync(() => {
-						if (entries.get(id) !== entry) return;
-						entry.loaded = next;
-						entry.manifest = next.manifest;
-						entry.error = undefined;
-						recordLog(id, "info", `reloaded version ${next.manifest.version}`);
-						publish();
-					});
+					// The new source is acquired and imported, so the reload is
+					// committed from here: close the old instance, then run the new
+					// `setup`. This order is what stops the old disposal retracting
+					// the new setup's own application.
 					if (previous !== undefined) {
 						yield* deps.unload(previous).pipe(
 							Effect.catchCause((cause) =>
@@ -519,11 +529,40 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 							),
 						);
 					}
+					const activated = yield* deps.activate(prepared).pipe(
+						Effect.map((loaded): LoadOutcome => ({ ok: true, loaded })),
+						Effect.catchCause((cause) =>
+							Effect.succeed<LoadOutcome>({
+								ok: false,
+								detail: describe(cause),
+							}),
+						),
+					);
 					yield* Effect.sync(() => {
 						if (entries.get(id) !== entry) return;
 						entry.pending = false;
+						if (activated.ok) {
+							entry.loaded = activated.loaded;
+							entry.manifest = activated.loaded.manifest;
+							entry.error = undefined;
+							recordLog(
+								id,
+								"info",
+								`reloaded version ${activated.loaded.manifest.version}`,
+							);
+							publish();
+							publishHostEvent("plugin-loaded", { id });
+							return;
+						}
+						// The old instance is closed and the new setup failed, so
+						// nothing is loaded. Say so rather than report `loaded` over
+						// an empty registry; recording the decision key stops the
+						// settle loop retrying an unchanged failure.
+						entry.loaded = undefined;
+						entry.error = activated.detail;
+						entry.attempted = decisionKey(entry);
+						recordLog(id, "error", `reload failed: ${activated.detail}`);
 						publish();
-						publishHostEvent("plugin-loaded", { id });
 					});
 				});
 			}),
@@ -789,7 +828,14 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 				yield* Effect.sync(() => {
 					applyManifests(manifests);
 					const entry = entries.get(id);
-					if (entry === undefined || entry.pending) return;
+					// Recorded even when a step for this plugin is in flight. The
+					// settle loop re-plans after every step and its last re-plan is
+					// in the same synchronous stretch as clearing `settling`, so a
+					// forced swap set here is picked up by the running loop (or by
+					// this call's own `settle` if it has already stopped). Dropping
+					// the request because `pending` was true is exactly the file
+					// change a user cannot diagnose.
+					if (entry === undefined) return;
 					entry.forced = true;
 					entry.revision += 1;
 				});
@@ -1023,11 +1069,9 @@ const realDeps: PluginsDeps = {
 	listManifests: () => pluginSource.list(),
 	install: (id, files) => installPlugin(id, files, pluginInstaller),
 	uninstall: (id) => removePlugin(id, pluginInstaller),
-	load: (id, raw) =>
-		Effect.gen(function* () {
-			const seams = yield* loadDeps(id);
-			return yield* loadPlugin(raw, seams);
-		}),
+	prepare: (id, raw) =>
+		loadDeps(id).pipe(Effect.flatMap((seams) => preparePlugin(raw, seams))),
+	activate: (prepared) => activatePlugin(prepared),
 	unload: (loaded) => unloadPlugin(loaded),
 	fetchText: realFetchText,
 	run: (effect) => {

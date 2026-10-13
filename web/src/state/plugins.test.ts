@@ -8,17 +8,17 @@ import {
 	makeHost,
 } from "@lib/plugins/host";
 import {
+	activatePlugin,
 	installPlugin,
-	loadPlugin,
 	MANIFEST_FILE,
 	type PluginInstaller,
 	type PluginModule,
 	type PluginSource,
+	preparePlugin,
 	unloadPlugin,
 } from "@lib/plugins/loader";
 import { clearLog, getLogSnapshot } from "@lib/plugins/log";
 import { Duration, Effect } from "effect";
-import type { ComponentType } from "react";
 import {
 	declaredBodyOverLimit,
 	MAX_SETTLE_ROUNDS,
@@ -69,6 +69,17 @@ const filesOf = (
 	"main.js": "export default { setup() {} }",
 });
 
+/** The module a plugin id's entry evaluates to: one header marker. */
+const moduleOf = (id: string): PluginModule => ({
+	setup: (host) => {
+		host.ui.register({
+			id: `marker.${id}`,
+			slot: "app.header.actions",
+			component: () => null,
+		});
+	},
+});
+
 interface HarnessOptions {
 	/** Plugin ids whose load must fail, so a partial failure can be asserted. */
 	readonly failLoadFor?: readonly string[];
@@ -82,6 +93,12 @@ interface HarnessOptions {
 	 * make one load produce new work for the settle loop's next round.
 	 */
 	readonly onLoad?: (id: string) => void;
+	/**
+	 * The module an entry's text evaluates to, when a test needs one that does
+	 * more than the default header marker (a theme-shape plugin whose `dispose`
+	 * retracts its `setup`, or one whose `setup` throws).
+	 */
+	readonly moduleFor?: (id: string, text: string) => PluginModule;
 }
 
 interface Harness {
@@ -116,7 +133,6 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 	const sourceText = (id: string): string =>
 		entrySources.get(id) ?? "export default { setup() {} }";
 	const failing = new Set(options.failLoadFor ?? []);
-	const component: ComponentType<Record<string, unknown>> = () => null;
 
 	const installer: PluginInstaller = {
 		write: (id, _manifest, files) =>
@@ -133,17 +149,6 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 		list: () => Effect.succeed([]),
 		read: (id) => Effect.succeed(sourceText(id)),
 	};
-
-	/** The module a plugin id's entry evaluates to: one header marker. */
-	const moduleOf = (id: string): PluginModule => ({
-		setup: (host) => {
-			host.ui.register({
-				id: `marker.${id}`,
-				slot: "app.header.actions",
-				component,
-			});
-		},
-	});
 
 	const deps: PluginsDeps = {
 		readSettings: () => settings,
@@ -168,7 +173,7 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 			]),
 		install: (id, files) => installPlugin(id, files, installer),
 		uninstall: (id) => installer.remove(id),
-		load: (id, raw) =>
+		prepare: (id, raw) =>
 			// `Effect.suspend` so an attempt is counted when it happens, not when
 			// it is planned — a failed load counts too.
 			Effect.suspend(() => {
@@ -178,7 +183,7 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 				// (finding 2's chain); runs when the load executes, not when it
 				// is planned.
 				options.onLoad?.(id);
-				return loadPlugin(raw, {
+				return preparePlugin(raw, {
 					source,
 					// The importer reads the text the source returned, so a changed
 					// `entrySources` entry is what a reload actually sees — and a
@@ -194,11 +199,18 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 											pluginId: id,
 										}),
 									)
-								: Effect.succeed(moduleOf(id)),
+								: Effect.succeed((options.moduleFor ?? moduleOf)(id, text)),
 					},
 					hostFor: (pluginId, scope) => makeHost(registries, pluginId, scope),
 					timeout: Duration.millis(200),
 				});
+			}),
+		activate: (prepared) =>
+			// The setup half, split from the acquire half so a reload can close
+			// the old instance between the two.
+			Effect.suspend(() => {
+				trace.push(`setup:${prepared.manifest.id}`);
+				return activatePlugin(prepared, Duration.millis(200));
 			}),
 		unload: (loaded) =>
 			unloadPlugin(loaded).pipe(
@@ -603,27 +615,133 @@ describe("reload", () => {
 		return { entries: () => Effect.runSync(h.registries.ui.entries()) };
 	};
 
-	test("reload loads the new version before it unloads the old", async () => {
+	test("reload validates the new source before it closes the old instance", async () => {
 		const h = makeHarness();
 		const { entries } = await bringUp(h);
 		const first = entries()[0];
 		expect(first).toBeDefined();
+		expect(h.trace).toEqual(["load:t18.fixture", "setup:t18.fixture"]);
 
 		h.entrySources.set("t18.fixture", "export default { setup() {} } /* v2 */");
 		h.store.reload("t18.fixture");
 		await tick();
 
 		expect(only(h.store).status).toBe("loaded");
-		// The order is the invariant: the fresh instance is up before the old
-		// scope is closed, so no frame exists with the plugin absent.
+		// Two-phase: the new source is acquired and imported, then the old
+		// instance's scope is closed, and only then does the new `setup` run — so
+		// the old dispose cannot undo the new setup's own application.
 		expect(h.trace).toEqual([
 			"load:t18.fixture",
+			"setup:t18.fixture",
 			"load:t18.fixture",
 			"unload:t18.fixture",
+			"setup:t18.fixture",
 		]);
 		const after = entries();
 		expect(after.length).toBe(1);
 		expect(after[0]).not.toBe(first);
+	});
+
+	test("a reload whose new setup applies state survives the old instance's disposal", async () => {
+		// A plugin whose `setup` mutates shared imperative state and whose
+		// returned handle retracts it — the shape of T19's `theme-solarized`
+		// example (a document class). If the old `dispose` runs after the new
+		// `setup`, it retracts what the new instance just applied.
+		let applied: string | undefined;
+		const h = makeHarness({
+			moduleFor: (_id, text) => ({
+				setup: () => {
+					applied = text.includes("v2") ? "v2" : "v1";
+					return {
+						dispose: () => {
+							applied = undefined;
+						},
+					};
+				},
+			}),
+		});
+		await bringUp(h);
+		expect(applied).toBe("v1");
+
+		h.entrySources.set("t18.fixture", "export default {} /* v2 */");
+		h.store.reload("t18.fixture");
+		await tick();
+
+		// The new instance's application is what survives, not the old dispose's
+		// retraction: the ordering is acquire → close old → new setup.
+		expect(only(h.store).status).toBe("loaded");
+		expect(applied).toBe("v2");
+	});
+
+	test("a reload whose new setup throws leaves nothing loaded, not a silent empty id", async () => {
+		// The new `setup` registers a contribution and then throws. Recording the
+		// registration by identity means the failed scope's finalizer removes the
+		// new entry, so the id is silently empty — and under the old swap the row
+		// still read `loaded` over that empty registry. With the two-phase order
+		// the old instance is already closed, so the honest result is nothing
+		// loaded and `status: "failed"`.
+		const h = makeHarness({
+			moduleFor: (id, text) =>
+				text.includes("THROWS")
+					? {
+							setup: (host) => {
+								host.ui.register({
+									id: `marker.${id}`,
+									slot: "app.header.actions",
+									component: () => null,
+								});
+								throw new Error("boom");
+							},
+						}
+					: moduleOf(id),
+		});
+		const { entries } = await bringUp(h);
+		expect(entries().length).toBe(1);
+
+		h.entrySources.set("t18.fixture", "export default {} /* THROWS */");
+		h.store.reload("t18.fixture");
+		await tick();
+
+		const plugin = only(h.store);
+		// No stale entry survives under the id, and no failure is hidden behind a
+		// `loaded` status: the row says what the registry shows.
+		expect(entries()).toEqual([]);
+		expect(plugin.status).toBe("failed");
+		expect(plugin.error ?? "").toContain("boom");
+	});
+
+	test("a reload asked for while the plugin is mid-step is not dropped", async () => {
+		// A watcher event can arrive while the settle loop is mid-step on the very
+		// plugin it names. Asking for the reload from inside that step's own
+		// `setup` is the deterministic shape of that race: `entry.pending` is set,
+		// so a `pending` guard would discard the request entirely. It must instead
+		// be recorded and applied once the step settles.
+		let store: PluginsStore | undefined;
+		let requested = false;
+		const h = makeHarness({
+			moduleFor: (id, text) =>
+				text.includes("TRIGGER") && !requested
+					? {
+							setup: () => {
+								requested = true;
+								store?.reload(id);
+							},
+						}
+					: moduleOf(id),
+		});
+		store = h.store;
+		h.entrySources.set("t18.fixture", "export default {} /* TRIGGER */");
+		h.store.start();
+		h.store.installFromText("", filesOf());
+		await tick();
+		h.store.setPluginsEnabled(true);
+		h.store.setPluginEnabled("t18.fixture", true);
+		await tick();
+
+		// The initial load ran, asked for a reload from inside its own setup, and
+		// the reload was applied rather than dropped.
+		expect(h.loads.filter((id) => id === "t18.fixture").length).toBe(2);
+		expect(only(h.store).status).toBe("loaded");
 	});
 
 	test("a reload whose new source is invalid keeps the old version loaded, registered and working", async () => {
@@ -692,7 +810,12 @@ describe("reload", () => {
 		h.store.setPluginEnabled("t18.fixture", true);
 		h.store.setPluginEnabled("t18.other", true);
 		await tick();
-		expect(h.trace).toEqual(["load:t18.fixture", "load:t18.other"]);
+		expect(h.trace).toEqual([
+			"load:t18.fixture",
+			"setup:t18.fixture",
+			"load:t18.other",
+			"setup:t18.other",
+		]);
 
 		h.store.reloadAll();
 		await tick();

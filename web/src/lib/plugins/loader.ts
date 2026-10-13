@@ -172,44 +172,100 @@ const toPluginError = (
 };
 
 /**
- * Turn one raw manifest into a live plugin (spec §6): decode the manifest,
- * open the plugin's scope, run the version gate, read the entry, import it and
- * call `setup` — all inside that scope, so closing it removes everything the
- * plugin registered. Every step is wrapped by `Effect.timeout` (a plugin that
- * never finishes is a load failure, not a hung boot) and every failure maps to
- * a tagged error, with the scope closed so a failed load leaves no trace
- * (spec §9). Identity comes from the manifest, never the module.
+ * A plugin whose source is validated and imported but whose `setup` has not yet
+ * run (spec §6). It exists so a load can be split in two: the new source is
+ * acquired and imported first, and only once that has succeeded is the old
+ * instance closed and the new `setup` run. A bad import — a syntax error, a
+ * missing default export, a bare specifier the loader refuses, a manifest that
+ * no longer decodes, a refused API version — is caught in the acquire phase,
+ * before anything the old instance owns is touched.
  *
- * The setup handle is registered with `Effect.acquireRelease` rather than a
- * bare `Scope.addFinalizer`: that closes the window an interrupt could land in
- * between `setup` returning a handle and that handle's finalizer being
- * attached, which is what keeps the subsystem's no-leak property intact.
+ * The returned `scope` is the new instance's lifetime: `activatePlugin` runs
+ * `setup` inside it, and `unloadPlugin` closes it.
  */
-export const loadPlugin = (
+export interface PreparedPlugin {
+	readonly manifest: PluginManifest;
+	readonly scope: Scope.Closeable;
+	readonly host: Host;
+	readonly module: PluginModule;
+}
+
+/**
+ * The acquire half of a load (spec §6): decode the manifest, open the plugin's
+ * scope, build its host, run the version gate, and read and import the entry.
+ * Nothing is registered yet — `setup` has not run — so a failure here leaves no
+ * registration behind and disturbs nothing else: the scope this opens is closed
+ * again on failure, and the caller may be holding a *different*, already-live
+ * instance of the same plugin while this runs.
+ *
+ * Every step is wrapped by `Effect.timeout` (a plugin that never finishes is a
+ * load failure, not a hung boot) and every failure maps to a tagged error, with
+ * the scope closed so a failed acquire leaves no trace (spec §9). Identity comes
+ * from the manifest, never the module.
+ */
+export const preparePlugin = (
 	rawManifest: unknown,
 	deps: LoadDeps,
-): Effect.Effect<LoadedPlugin, PluginError> =>
+): Effect.Effect<PreparedPlugin, PluginError> =>
 	Effect.gen(function* () {
 		const manifest = yield* decodeManifest(rawManifest);
 		const scope = yield* Scope.make();
 		const host = deps.hostFor(manifest.id, scope);
 		const timeout = deps.timeout ?? LOAD_TIMEOUT;
 
-		const activate = Effect.gen(function* () {
+		const acquire = Effect.gen(function* () {
 			yield* satisfiesApiVersion(host, manifest);
 			const text = yield* deps.source.read(manifest.id, manifest.entry);
-			const module = yield* deps.importer.importSource(text, manifest.entry);
-			// `setup` is synchronous, and `acquireRelease` makes an acquire
-			// uninterruptible, so the handle it returns is owned by the scope
-			// from the moment the call returns — an interrupt can never land
-			// between the call and its disposal registration. The read and
-			// import above stay interruptible, which is what lets the timeout
-			// below fire.
-			yield* Effect.acquireRelease(acquireHandle(module, host), (handle) =>
-				releaseHandle(manifest.id, handle),
-			);
+			// The read and import stay interruptible, which is what lets the
+			// timeout below fire.
+			return yield* deps.importer.importSource(text, manifest.entry);
 		});
 
+		return yield* acquire.pipe(
+			Effect.timeout(timeout),
+			Effect.catchTag("TimeoutError", () =>
+				Effect.fail(
+					new PluginLoadFailed({
+						detail: `plugin "${manifest.id}" did not finish loading within ${Duration.toMillis(timeout)}ms`,
+						pluginId: manifest.id,
+					}),
+				),
+			),
+			Effect.catchCause((cause) => toPluginError(cause, manifest.id)),
+			Effect.map(
+				(module): PreparedPlugin => ({ manifest, scope, host, module }),
+			),
+			// On any failure (including a fault) close the scope, so a failed
+			// acquire leaves no registration behind. On success it stays open —
+			// it is the plugin's lifetime, and `unloadPlugin` closes it.
+			Effect.onExit((exit) =>
+				Exit.isFailure(exit) ? Scope.close(scope, Exit.void) : Effect.void,
+			),
+		);
+	});
+
+/**
+ * The run half of a load (spec §6): call `setup` inside the prepared scope and
+ * hand back the live plugin. The handle `setup` returns is registered with
+ * `Effect.acquireRelease` rather than a bare `Scope.addFinalizer`: that closes
+ * the window an interrupt could land in between `setup` returning a handle and
+ * that handle's finalizer being attached, which is what keeps the subsystem's
+ * no-leak property intact.
+ *
+ * A `setup` that throws is a `PluginFault`, and the scope closes so the
+ * registrations it made before throwing are collected — a failed activate
+ * leaves the plugin with nothing loaded, which is the honest state (spec §9).
+ */
+export const activatePlugin = (
+	prepared: PreparedPlugin,
+	timeout: Duration.Input = LOAD_TIMEOUT,
+): Effect.Effect<LoadedPlugin, PluginError> =>
+	Effect.gen(function* () {
+		const { manifest, scope, host, module } = prepared;
+		const activate = Effect.acquireRelease(
+			acquireHandle(module, host),
+			(handle) => releaseHandle(manifest.id, handle),
+		);
 		return yield* Effect.provideService(activate, Scope.Scope, scope).pipe(
 			Effect.timeout(timeout),
 			Effect.catchTag("TimeoutError", () =>
@@ -223,13 +279,28 @@ export const loadPlugin = (
 			Effect.catchCause((cause) => toPluginError(cause, manifest.id)),
 			Effect.as({ manifest, scope } satisfies LoadedPlugin),
 			// On any failure (including a fault) close the scope, so a failed
-			// load leaves no registration behind. On success it stays open —
+			// `setup` leaves no registration behind. On success it stays open —
 			// it is the plugin's lifetime, and `unloadPlugin` closes it.
 			Effect.onExit((exit) =>
 				Exit.isFailure(exit) ? Scope.close(scope, Exit.void) : Effect.void,
 			),
 		);
 	});
+
+/**
+ * Turn one raw manifest into a live plugin (spec §6) — the ordinary single-step
+ * load, {@link preparePlugin} then {@link activatePlugin}: decode the manifest,
+ * open the plugin's scope, run the version gate, read and import the entry and
+ * call `setup`, all inside that scope, so closing it removes everything the
+ * plugin registered.
+ */
+export const loadPlugin = (
+	rawManifest: unknown,
+	deps: LoadDeps,
+): Effect.Effect<LoadedPlugin, PluginError> =>
+	preparePlugin(rawManifest, deps).pipe(
+		Effect.flatMap((prepared) => activatePlugin(prepared, deps.timeout)),
+	);
 
 /**
  * Unload a plugin (spec §3): close its scope, disposing its `setup` handle

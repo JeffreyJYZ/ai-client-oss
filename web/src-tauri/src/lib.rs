@@ -457,13 +457,26 @@ fn collect_files(dir: &Path, out: &mut BTreeMap<PathBuf, FileStamp>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        let Ok(meta) = entry.metadata() else {
+        // `DirEntry::file_type` never follows a symlink, unlike `fs::metadata` —
+        // so a symlinked directory is not recursed (there is no loop to guard
+        // against: `DirEntry::metadata` below is `lstat`, so it does not follow
+        // either). Skipping symlinks is still worth it: without it a symlink is
+        // recorded as a plain *file* (its own mtime and length), which puts a
+        // path in the watch set whose real target's edits are invisible and
+        // which pulls nothing at or below the plugins root. Plugins are
+        // full-trust, so this is containment tidiness, not a security guard.
+        let Ok(file_type) = entry.file_type() else {
             continue;
         };
-        if meta.is_dir() {
+        if file_type.is_symlink() {
+            continue;
+        }
+        if file_type.is_dir() {
             collect_files(&path, out);
-        } else if let Ok(modified) = meta.modified() {
-            out.insert(path, (modified, meta.len()));
+        } else if let Ok(meta) = entry.metadata() {
+            if let Ok(modified) = meta.modified() {
+                out.insert(path, (modified, meta.len()));
+            }
         }
     }
 }
@@ -896,6 +909,52 @@ mod watcher_tests {
 
         assert!(changed_ids(&before, &scan_plugins(&plugins), &plugins).is_empty());
         cleanup(&app_data);
+    }
+
+    #[test]
+    fn a_deleted_plugin_file_or_directory_is_a_change_for_its_id() {
+        // The deletion branch of `changed_ids`: a path present in `before` and
+        // absent from `after` is a change for its plugin. It has to be pinned —
+        // a deleted file is exactly the edit that would otherwise go unnoticed.
+        let root = temp_root("scan-delete");
+        let plugin = root.join("acme.theme");
+        fs::create_dir_all(&plugin).expect("create plugin dir");
+        fs::write(plugin.join("main.js"), "export default {}").expect("write entry");
+
+        let before = scan_plugins(&root);
+        fs::remove_file(plugin.join("main.js")).expect("delete entry");
+        assert_eq!(
+            changed_ids(&before, &scan_plugins(&root), &root),
+            vec!["acme.theme".to_string()]
+        );
+
+        // Removing the whole plugin directory is the same id.
+        fs::write(plugin.join("main.js"), "export default {}").expect("rewrite entry");
+        let before = scan_plugins(&root);
+        fs::remove_dir_all(&plugin).expect("delete plugin dir");
+        assert_eq!(
+            changed_ids(&before, &scan_plugins(&root), &root),
+            vec!["acme.theme".to_string()]
+        );
+        cleanup(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_loop_is_not_followed() {
+        use std::os::unix::fs::symlink;
+        // A directory symlink back to its own directory: following it makes the
+        // scan recurse forever. Only the real files are recorded.
+        let root = temp_root("symlink-loop");
+        let plugin = root.join("acme.theme");
+        fs::create_dir_all(&plugin).expect("create plugin dir");
+        fs::write(plugin.join("main.js"), "export default {}").expect("write entry");
+        symlink(&plugin, plugin.join("loop")).expect("create symlink loop");
+
+        let files = scan_plugins(&root);
+        assert_eq!(files.len(), 1);
+        assert!(files.contains_key(&plugin.join("main.js")));
+        cleanup(&root);
     }
 }
 

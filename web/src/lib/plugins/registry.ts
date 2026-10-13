@@ -83,12 +83,14 @@ const removeEntry = <E extends RegistryEntry>(
  *
  * Lifetime is `Scope` (spec §3): `add` registers its own removal as a finalizer
  * on the ambient scope, so closing a plugin's scope removes everything that
- * plugin registered, in reverse order, and a hot reload is that close plus a
- * fresh `setup`. The scope is *optional* here — `add` runs with no ambient scope
- * by adding the entry without a finalizer — because the registry primitive is
- * also used at boot and in tests where no plugin scope exists; the caller that
- * owns a plugin's lifetime (the loader) always provides one, and only that
- * caller can promise a registration will be disposed.
+ * plugin registered, in reverse order. A hot reload closes the old scope and
+ * only **then** runs the new `setup` — the loader imports the new source first,
+ * so an invalid reload never reaches the close, and the old `dispose` cannot
+ * retract what the new `setup` applies. The scope is *optional* here — `add` runs
+ * with no ambient scope by adding the entry without a finalizer — because the
+ * registry primitive is also used at boot and in tests where no plugin scope
+ * exists; the caller that owns a plugin's lifetime (the loader) always provides
+ * one, and only that caller can promise a registration will be disposed.
  */
 export const makeRegistry = <E extends RegistryEntry>(
 	name: string,
