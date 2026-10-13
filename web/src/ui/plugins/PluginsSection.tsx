@@ -2,7 +2,7 @@ import {
 	PLUGIN_TRUST_POINTS,
 	PLUGIN_TRUST_SUMMARY,
 } from "@lib/plugins/consent";
-import { MANIFEST_FILE } from "@lib/plugins/loader";
+import { pastedFiles } from "@lib/plugins/pasted";
 import { Effect } from "effect";
 import { type ChangeEvent, useRef, useState } from "react";
 import {
@@ -62,13 +62,9 @@ export function PluginsSection() {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const installPasted = (): void => {
-		const name = entryName.trim();
-		if (manifestText.trim() === "" || name === "") return;
-		if (name === MANIFEST_FILE) return;
-		installFromText("", {
-			[MANIFEST_FILE]: manifestText,
-			[name]: entryText,
-		});
+		const files = pastedFiles(manifestText, entryName, entryText);
+		if (files === null) return;
+		installFromText("", files);
 	};
 
 	/**
@@ -213,9 +209,7 @@ export function PluginsSection() {
 						onClick={installPasted}
 						disabled={
 							!plugins.enabled ||
-							manifestText.trim() === "" ||
-							entryName.trim() === "" ||
-							entryName.trim() === MANIFEST_FILE
+							pastedFiles(manifestText, entryName, entryText) === null
 						}
 					>
 						Install pasted plugin
