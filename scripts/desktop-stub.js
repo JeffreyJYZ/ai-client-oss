@@ -27,9 +27,40 @@
  */
 (() => {
 	const realFetch = window.fetch.bind(window);
+	// Records the plugin-scoped writes a proof drives through `host.native`, so
+	// the transcript shows what actually reached the (stubbed) Rust command.
+	window.__t20PluginWrites = [];
 	window.__TAURI_INTERNALS__ = {
-		invoke: (cmd) => {
+		invoke: (cmd, args) => {
 			if (cmd === "plugin:app|version") return Promise.resolve("0.2.3");
+			// The plugin commands Task 20 added. They answer the way Rust would,
+			// so the JS layers' adapter selection and `host.native` are provable
+			// in a browser; Rust's real path containment is proven by its own
+			// unit tests, not here.
+			if (cmd === "plugin_list") {
+				return Promise.resolve([
+					JSON.stringify({
+						id: "t20.fixture",
+						name: "T20 fixture",
+						version: "1.0.0",
+						apiVersion: "0.1",
+						entry: "main.js",
+					}),
+				]);
+			}
+			if (cmd === "plugin_read_file") {
+				return Promise.resolve("export default { setup() {} }");
+			}
+			if (cmd === "plugin_data_dir") {
+				return Promise.resolve("/tmp/ai-client-stub/plugin-data/" + args.id);
+			}
+			if (cmd === "plugin_fs_write") {
+				window.__t20PluginWrites.push(args);
+				return Promise.resolve(null);
+			}
+			if (cmd === "plugin_fs_read") return Promise.resolve("stub data");
+			if (cmd === "plugin_fs_list") return Promise.resolve(["a.txt"]);
+			if (cmd === "plugin_fs_delete") return Promise.resolve(null);
 			return Promise.reject(
 				new Error("desktop stub: " + cmd + " is not implemented"),
 			);

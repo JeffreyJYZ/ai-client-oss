@@ -1,9 +1,12 @@
+import { isDesktop } from "@lib/platform";
 import { PluginFault } from "@lib/plugins/errors";
 import { type HostEvent, hostEventSchema } from "@lib/plugins/ids";
 import {
 	PLUGIN_DATA_MAX_BYTES,
 	pluginDataWithinCap,
 } from "@lib/plugins/manifest";
+import { tauriNative } from "@lib/plugins/native/tauri";
+import { webNative } from "@lib/plugins/native/web";
 import type { Disposable } from "@lib/plugins/registry";
 import type { AttachmentPart } from "@lib/providers/types";
 import { Cause, Deferred, Effect, Option, PubSub, Scope, Stream } from "effect";
@@ -344,17 +347,60 @@ export const makeLogger = (pluginId?: string): Logger => {
 
 /**
  * The desktop-only native surface (spec §7): the scoped data directory and the
- * file commands the Tauri bridge exposes. Task 20 supplies a real handle; until
- * then `host.native` is `Option.none()`, so a plugin checks the `Option` rather
- * than calling a method that silently does nothing.
+ * file commands the Tauri bridge exposes. The host narrows the platform bridge
+ * to the current plugin with {@link NativeHandle.forPlugin}, so a plugin only
+ * ever names its own `plugin-data/<id>/`; Rust re-checks every resolved path
+ * after canonicalizing it.
+ *
+ * **`plugin-data` is path-scoped in Rust; it is not a sandbox.** A plugin is
+ * full-trust code (spec's threat model): it can call the raw command with any
+ * id, and the `http` member rides the same `net` that is **unenforceable**
+ * because the webview has a global `fetch`. The consent UI states exactly this.
  */
 export interface NativeHandle {
-	/** Absolute path of the plugin's scoped data directory (spec §7). */
-	readonly dataDir: string;
+	/**
+	 * The same bridge narrowed to one plugin id. The host calls this with the
+	 * plugin it is building, which is what binds the handle; calling it with
+	 * another id is possible (see the type's warning) but the API never does.
+	 */
+	readonly forPlugin: (pluginId: string) => NativeHandle;
+	/** Absolute path of the plugin's scoped data directory, created on use. */
+	readonly dataDir: Effect.Effect<string, string>;
+	/** Read a file inside the scoped data directory. */
+	readonly read: (relPath: string) => Effect.Effect<string, string>;
+	/** Write a file inside the scoped data directory. */
+	readonly write: (
+		relPath: string,
+		contents: string,
+	) => Effect.Effect<void, string>;
+	/** List the names inside the scoped data directory, or a subdirectory. */
+	readonly list: (relPath: string) => Effect.Effect<readonly string[], string>;
+	/** Delete a file or directory inside the scoped data directory. */
+	readonly remove: (relPath: string) => Effect.Effect<void, string>;
+	/**
+	 * Send a request through the Rust shell, bypassing the browser's CORS limit
+	 * the way `fetch_url` does. The `net` capability is **not enforceable** (the
+	 * webview has a global `fetch`); this reuses the app's own `http_request`
+	 * command and is a convenience, never a gate.
+	 */
+	readonly http: (request: {
+		readonly method: "GET" | "POST";
+		readonly url: string;
+		readonly headers?: Readonly<Record<string, string>>;
+		readonly body?: string;
+	}) => Effect.Effect<string, string>;
 }
 
-/** The native handle, absent until the desktop bridge lands (Task 20). */
-export const nativeHandle: Option.Option<NativeHandle> = Option.none();
+/**
+ * The platform's native bridge (spec §7), chosen by `isDesktop` exactly as the
+ * db adapter is in `lib/db/index.ts`: the desktop shell's real handle, or
+ * `Option.none()` on the web build, which has no filesystem. `host.native` is
+ * this value narrowed to the current plugin, so a plugin checks the `Option`
+ * rather than calling a method that silently does nothing.
+ */
+export const nativeHandle: Option.Option<NativeHandle> = isDesktop
+	? tauriNative
+	: webNative;
 
 /**
  * The settings store's one change path is `subscribe`, so subscribing here

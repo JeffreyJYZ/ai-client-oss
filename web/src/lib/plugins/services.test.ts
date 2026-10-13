@@ -172,7 +172,7 @@ describe("host services", () => {
 		expect(host("test.db").db).toBe(db);
 	});
 
-	test("host.native is empty until the desktop bridge lands", () => {
+	test("host.native is none on the web build", () => {
 		expect(Option.isNone(host("test.native").native)).toBe(true);
 	});
 

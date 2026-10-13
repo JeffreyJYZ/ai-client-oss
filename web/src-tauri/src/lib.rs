@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::Manager;
@@ -7,6 +7,12 @@ use tauri::Manager;
 /// Settings live at the root of the app data dir; one file per conversation.
 const SETTINGS_FILE: &str = "settings.json";
 const CONVERSATIONS_DIR: &str = "conversations";
+
+/// Installed plugin source: `<app data>/plugins/<id>/plugin.json` plus assets.
+const PLUGINS_DIR: &str = "plugins";
+
+/// Per-plugin scoped data: `<app data>/plugin-data/<id>/` (spec §7).
+const PLUGIN_DATA_DIR: &str = "plugin-data";
 
 /// Whole-request deadline: a hung host must fail the fetch rather than
 /// park the command — and the UI awaiting it — indefinitely.
@@ -38,6 +44,90 @@ fn conversations_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let dir = app_data_dir(app)?.join(CONVERSATIONS_DIR);
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create conversations dir: {e}"))?;
     Ok(dir)
+}
+
+/// The one scope helper the plugin commands share (spec §7). Resolve
+/// `root/rel_path` so that the result can only ever be inside `root`:
+///
+/// 1. `root` is created on demand and canonicalized, so symlinks in the app
+///    data path itself are resolved once;
+/// 2. an absolute `rel_path` is refused — `Path::join` would discard `root`;
+/// 3. the deepest **existing** ancestor of the join is canonicalized and must
+///    be under the canonical root, so a symlink anywhere along the path is
+///    resolved *before* the check (a plain prefix test on the un-canonicalized
+///    join would let `link -> /etc` through);
+/// 4. the non-existent suffix is re-appended to that canonical ancestor; it
+///    carries no symlink, because it does not exist.
+///
+/// `Path::starts_with` is component-wise, so `…/x` is not a prefix of `…/xy`.
+fn resolve_within(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
+    fs::create_dir_all(root)
+        .map_err(|e| format!("failed to create {}: {e}", root.display()))?;
+    let root = fs::canonicalize(root)
+        .map_err(|e| format!("failed to canonicalize {}: {e}", root.display()))?;
+
+    let rel = Path::new(rel_path);
+    if rel.is_absolute() {
+        return Err(format!(
+            "{} must be a relative path inside the plugin directory",
+            rel_path
+        ));
+    }
+
+    // Walk up from the join until an ancestor exists, canonicalizing it. Any
+    // symlink on the way is resolved by `canonicalize` before the check, so a
+    // link pointing outside `root` is refused rather than followed.
+    let mut current = root.join(rel);
+    let mut suffix: Vec<std::ffi::OsString> = Vec::new();
+    loop {
+        match fs::canonicalize(&current) {
+            Ok(resolved) => {
+                if !resolved.starts_with(&root) {
+                    return Err(format!(
+                        "path escapes the plugin directory: {rel_path}"
+                    ));
+                }
+                let mut path = resolved;
+                for part in suffix.iter().rev() {
+                    path.push(part);
+                }
+                return Ok(path);
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                let name = current.file_name().ok_or_else(|| {
+                    format!("cannot resolve a parent of {rel_path}")
+                })?;
+                suffix.push(name.to_os_string());
+                current = current
+                    .parent()
+                    .ok_or_else(|| format!("cannot resolve a parent of {rel_path}"))?
+                    .to_path_buf();
+            }
+            Err(e) => {
+                return Err(format!("failed to resolve {rel_path}: {e}"));
+            }
+        }
+    }
+}
+
+/// A plugin id is one path component: no separators and no `.`/`..`, so it
+/// cannot steer {@link resolve_within} out of the app data directory.
+fn safe_id(id: &str) -> Result<&str, String> {
+    let ok = !id.is_empty()
+        && id != "."
+        && id != ".."
+        && !id.contains('/')
+        && !id.contains('\\');
+    if ok {
+        Ok(id)
+    } else {
+        Err(format!("invalid plugin id: {id}"))
+    }
+}
+
+/// `<app data>/<base>/<id>` for a validated plugin id.
+fn plugin_root(app: &tauri::AppHandle, base: &str, id: &str) -> Result<PathBuf, String> {
+    Ok(app_data_dir(app)?.join(base).join(safe_id(id)?))
 }
 
 #[tauri::command]
@@ -104,6 +194,152 @@ fn db_delete_conversation(app: tauri::AppHandle, id: String) -> Result<(), Strin
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(format!("failed to delete conversation: {e}")),
+    }
+}
+
+/* ------------------------------------------------------------------ plugins */
+
+/// Scan `<app data>/plugins/` and return each `plugin.json` **verbatim** (spec
+/// §7), so an invalid manifest reaches the UI with its reason instead of
+/// vanishing here. A directory with no readable manifest is skipped.
+#[tauri::command]
+fn plugin_list(app: tauri::AppHandle) -> Result<Vec<String>, String> {
+    let dir = app_data_dir(&app)?.join(PLUGINS_DIR);
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let entries = fs::read_dir(&dir).map_err(|e| format!("failed to read plugins dir: {e}"))?;
+    let mut manifests = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|e| format!("failed to read dir entry: {e}"))?
+            .path();
+        if !path.is_dir() {
+            continue;
+        }
+        match fs::read_to_string(path.join("plugin.json")) {
+            Ok(text) => manifests.push(text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(e) => return Err(format!("failed to read a plugin manifest: {e}")),
+        }
+    }
+    Ok(manifests)
+}
+
+/// Read a file inside one plugin's source directory (spec §7).
+#[tauri::command]
+fn plugin_read_file(
+    app: tauri::AppHandle,
+    id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    let path = resolve_within(&plugin_root(&app, PLUGINS_DIR, &id)?, &rel_path)?;
+    fs::read_to_string(&path).map_err(|e| format!("failed to read plugin file: {e}"))
+}
+
+/// Write a file inside one plugin's source directory (install/update, spec §7).
+#[tauri::command]
+fn plugin_write_file(
+    app: tauri::AppHandle,
+    id: String,
+    rel_path: String,
+    contents: String,
+) -> Result<(), String> {
+    let path = resolve_within(&plugin_root(&app, PLUGINS_DIR, &id)?, &rel_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("failed to create plugin dir: {e}"))?;
+    }
+    fs::write(&path, contents).map_err(|e| format!("failed to write plugin file: {e}"))
+}
+
+/// Delete one plugin's source directory (spec §7).
+#[tauri::command]
+fn plugin_remove(app: tauri::AppHandle, id: String) -> Result<(), String> {
+    let dir = plugin_root(&app, PLUGINS_DIR, &id)?;
+    match fs::remove_dir_all(&dir) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("failed to remove plugin: {e}")),
+    }
+}
+
+/// Absolute path of the plugin's scoped data directory, created on demand.
+#[tauri::command]
+fn plugin_data_dir(app: tauri::AppHandle, id: String) -> Result<String, String> {
+    let root = plugin_root(&app, PLUGIN_DATA_DIR, &id)?;
+    fs::create_dir_all(&root).map_err(|e| format!("failed to create plugin data dir: {e}"))?;
+    fs::canonicalize(&root)
+        .map(|path| path.to_string_lossy().into_owned())
+        .map_err(|e| format!("failed to resolve plugin data dir: {e}"))
+}
+
+/// Read a file inside the plugin's scoped data directory (spec §7).
+#[tauri::command]
+fn plugin_fs_read(
+    app: tauri::AppHandle,
+    id: String,
+    rel_path: String,
+) -> Result<String, String> {
+    let path = resolve_within(&plugin_root(&app, PLUGIN_DATA_DIR, &id)?, &rel_path)?;
+    fs::read_to_string(&path).map_err(|e| format!("failed to read plugin data file: {e}"))
+}
+
+/// Write a file inside the plugin's scoped data directory (spec §7).
+#[tauri::command]
+fn plugin_fs_write(
+    app: tauri::AppHandle,
+    id: String,
+    rel_path: String,
+    contents: String,
+) -> Result<(), String> {
+    let path = resolve_within(&plugin_root(&app, PLUGIN_DATA_DIR, &id)?, &rel_path)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("failed to create plugin data dir: {e}"))?;
+    }
+    fs::write(&path, contents).map_err(|e| format!("failed to write plugin data file: {e}"))
+}
+
+/// List the names inside the plugin's scoped data directory, or one of its
+/// subdirectories (spec §7).
+#[tauri::command]
+fn plugin_fs_list(
+    app: tauri::AppHandle,
+    id: String,
+    rel_path: String,
+) -> Result<Vec<String>, String> {
+    let dir = resolve_within(&plugin_root(&app, PLUGIN_DATA_DIR, &id)?, &rel_path)?;
+    let entries = match fs::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(format!("failed to read plugin data dir: {e}")),
+    };
+    let mut names = Vec::new();
+    for entry in entries {
+        names.push(
+            entry
+                .map_err(|e| format!("failed to read dir entry: {e}"))?
+                .file_name()
+                .to_string_lossy()
+                .into_owned(),
+        );
+    }
+    Ok(names)
+}
+
+/// Delete a file or directory inside the plugin's scoped data directory (spec
+/// §7). A missing target is not an error, so a delete is idempotent.
+#[tauri::command]
+fn plugin_fs_delete(app: tauri::AppHandle, id: String, rel_path: String) -> Result<(), String> {
+    let path = resolve_within(&plugin_root(&app, PLUGIN_DATA_DIR, &id)?, &rel_path)?;
+    let removed = if path.is_dir() {
+        fs::remove_dir_all(&path)
+    } else {
+        fs::remove_file(&path)
+    };
+    match removed {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("failed to delete plugin data: {e}")),
     }
 }
 
@@ -227,6 +463,69 @@ async fn http_request(
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
+#[cfg(test)]
+mod scope_tests {
+    use super::resolve_within;
+    use std::fs;
+    use std::path::PathBuf;
+
+    /// A fresh temp root per test — no new dependency, so no `tempfile`.
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-client-plugin-scope-{}-{tag}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp root");
+        dir
+    }
+
+    fn cleanup(root: &PathBuf) {
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn allows_a_nested_path_inside_the_root() {
+        let root = temp_root("nested");
+        let resolved = resolve_within(&root, "logs/run.txt").expect("a nested path is allowed");
+        assert!(resolved.starts_with(fs::canonicalize(&root).unwrap()));
+        assert!(resolved.ends_with("logs/run.txt"));
+        cleanup(&root);
+    }
+
+    #[test]
+    fn refuses_traversal_out_of_the_root() {
+        let root = temp_root("traversal");
+        let err =
+            resolve_within(&root, "../../settings.json").expect_err("traversal must be refused");
+        assert!(err.contains("escapes"), "unexpected error: {err}");
+        cleanup(&root);
+    }
+
+    #[test]
+    fn refuses_an_absolute_path_outside_the_root() {
+        let root = temp_root("absolute");
+        let err = resolve_within(&root, "/etc/passwd").expect_err("absolute must be refused");
+        assert!(!err.is_empty());
+        cleanup(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_symlink_that_points_outside_the_root() {
+        use std::os::unix::fs::symlink;
+        let root = temp_root("symlink");
+        let outside = temp_root("symlink-outside");
+        fs::write(outside.join("secret.txt"), "secret").expect("seed outside file");
+        symlink(&outside, root.join("link")).expect("create symlink");
+        let err = resolve_within(&root, "link/secret.txt")
+            .expect_err("a symlink escape must be refused");
+        assert!(err.contains("escapes"), "unexpected error: {err}");
+        cleanup(&root);
+        cleanup(&outside);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -241,6 +540,15 @@ pub fn run() {
             db_delete_conversation,
             fetch_url,
             http_request,
+            plugin_list,
+            plugin_read_file,
+            plugin_write_file,
+            plugin_remove,
+            plugin_data_dir,
+            plugin_fs_read,
+            plugin_fs_write,
+            plugin_fs_list,
+            plugin_fs_delete,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

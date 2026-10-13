@@ -31,14 +31,7 @@ import {
 import { makeToolRegistry, type ToolRegistry } from "@lib/plugins/tools";
 import { runningVersion } from "@lib/updates";
 import appPackage from "@root/package.json";
-import {
-	Context,
-	Effect,
-	Layer,
-	type Option,
-	Scope,
-	type Stream,
-} from "effect";
+import { Context, Effect, Layer, Option, Scope, type Stream } from "effect";
 import type { ComponentType } from "react";
 
 /**
@@ -133,7 +126,7 @@ export interface Host {
 	readonly storage: ScopedStorage;
 	/** Toasts, banners, confirms and modals rendered by the host (spec §5). */
 	readonly notify: NotifyService;
-	/** The desktop bridge, absent until Task 20 (spec §7). */
+	/** The desktop bridge, narrowed to this plugin; `Option.none()` on web (spec §7). */
 	readonly native: Option.Option<NativeHandle>;
 	/** Scoped logging (spec §2). */
 	readonly log: Logger;
@@ -316,7 +309,9 @@ export const makeHost = (
 		db,
 		storage: makeScopedStorage(pluginId),
 		notify: makeNotifyService(scope),
-		native: nativeHandle,
+		// The platform bridge, narrowed to this plugin: on desktop the plugin
+		// gets a handle bound to its own id, on web `Option.none()`.
+		native: Option.map(nativeHandle, (handle) => handle.forPlugin(pluginId)),
 		log: makeLogger(pluginId),
 		on: (event, handler) => {
 			const handle = subscribeHostEvent(event, handler, pluginId);
