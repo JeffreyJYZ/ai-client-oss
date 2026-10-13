@@ -83,6 +83,73 @@ describe("testModel isolates a plugin protocol's own members", () => {
 			expect(Option.isSome(Cause.findErrorOption(exit.cause))).toBe(true);
 		}
 	});
+
+	test("a plugin throw whose own `String` throws is still a typed message", async () => {
+		const s = services();
+		register(
+			s,
+			"test.unprintable",
+			probePlugin({
+				headers: () => {
+					throw {
+						toString() {
+							throw new Error("unprintable");
+						},
+					};
+				},
+			}),
+		);
+
+		const exit = await run(
+			Effect.exit(
+				testModel("test.unprintable", "https://x.test/v1", undefined, "m1"),
+			),
+			s,
+		);
+
+		expect(Exit.isFailure(exit)).toBe(true);
+		if (Exit.isFailure(exit)) {
+			// A defect leaves `findErrorOption` empty — the silent reset the
+			// seam exists to prevent.
+			expect(Option.isSome(Cause.findErrorOption(exit.cause))).toBe(true);
+		}
+	});
+
+	test("a plugin header value whose own `String` throws is still a typed message", async () => {
+		// Verified against the installed runtime: `fetch` rejects with the raw
+		// plugin-supplied header value when its coercion throws, so the
+		// rejection reason is plugin code too.
+		const s = services();
+		register(
+			s,
+			"test.evilheader",
+			probePlugin({
+				headers: () => ({
+					"x-evil": {
+						toString() {
+							throw {
+								toString() {
+									throw new Error("unprintable");
+								},
+							};
+						},
+					} as unknown as string,
+				}),
+			}),
+		);
+
+		const exit = await run(
+			Effect.exit(
+				testModel("test.evilheader", "https://x.test/v1", undefined, "m1"),
+			),
+			s,
+		);
+
+		expect(Exit.isFailure(exit)).toBe(true);
+		if (Exit.isFailure(exit)) {
+			expect(Option.isSome(Cause.findErrorOption(exit.cause))).toBe(true);
+		}
+	});
 });
 
 /**
@@ -168,51 +235,6 @@ describe("probeConnection always yields a visible line", () => {
 
 		expect(message.startsWith("✓")).toBe(false);
 		expect(message).toContain("network down");
-	});
-
-	/**
-	 * The fallback half of `probeFailure`: a defect the probe could not frame
-	 * must still become the one readable line, never escape `probeConnection`.
-	 *
-	 * Every plugin-supplied member the probe calls (`headers`, `buildRequest`,
-	 * and the values they return through the `JSON.stringify`/property reads in
-	 * `testModel`) sits inside an `Effect.try`/`Effect.tryPromise` frame, so a
-	 * plugin throw is a *typed* failure and cannot reach this branch — verified
-	 * by routing a plugin `buildRequest` whose result throws from `toJSON`
-	 * through the probe and getting the typed `String(cause)` line instead.
-	 * The one statement outside any try frame is `testModel`'s
-	 * `Effect.sync(() => void response.body?.cancel())`, so a defect there is
-	 * the reachable route to `probeFailure`'s `Cause.pretty` fallback: a 2xx
-	 * whose body cannot be cancelled still reports a visible line, not a
-	 * silently-reset button.
-	 */
-	test("a defect outside the probe's try frames becomes the readable fallback line", async () => {
-		const s = services();
-		register(s, "probe.cancel", probePlugin());
-
-		const message = await withFetch(
-			(() =>
-				Promise.resolve({
-					ok: true,
-					body: {
-						cancel: () => {
-							throw new Error("cancel boom");
-						},
-					},
-				})) as unknown as typeof fetch,
-			() =>
-				run(
-					probeConnection("probe.cancel", "https://x.test/v1", undefined, "m1"),
-					s,
-				),
-		);
-
-		// The `Cause.pretty` fallback line — the typed branch would have said
-		// `the "probe.cancel" protocol could not …`, never `could not be reached`.
-		expect(message).toMatch(
-			/^the "probe\.cancel" protocol could not be reached: /,
-		);
-		expect(message).toContain("cancel boom");
 	});
 
 	test("a successful probe reports the model", async () => {

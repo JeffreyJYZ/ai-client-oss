@@ -1,11 +1,25 @@
 import type { HostServices } from "@lib/plugins/host";
 import { requireProvider } from "@lib/plugins/providers";
 import type { SendCtx } from "@lib/providers/types";
-import { Cause, Effect, Option } from "effect";
+import { Cause, Effect, Option, Result } from "effect";
 
 interface ModelsPayload {
 	readonly data?: readonly { readonly id?: unknown }[];
 }
+
+/**
+ * `String(cause)` that cannot itself throw. A plugin supplies whatever it
+ * throws (and the rejection reason of a `fetch` whose plugin-supplied header
+ * value — or, for the probe, request body — fails to coerce), so its own
+ * `String`/`Symbol.toPrimitive` can throw; run inside a catch function that
+ * would **defect** the frame and bypass the `string` channel. Here the throw is
+ * a defect of its own `Effect.sync`, recovered to the fixed fallback, so this
+ * always succeeds.
+ */
+const describeCause = (cause: unknown): Effect.Effect<string> =>
+	Effect.sync(() => String(cause)).pipe(
+		Effect.catchCause(() => Effect.succeed("an unprintable cause")),
+	);
 
 /**
  * Call one plugin-supplied protocol member, turning a throw into the `string`
@@ -14,18 +28,49 @@ interface ModelsPayload {
  * untyped plugin code at this boundary: a throw there would **defect** the
  * helper, and a caller's typed `catch` would miss it — which is how
  * "Test connection" and "Fetch models" reset silently. `Effect.try`, not a
- * native `try`/`catch`, keeps the call in Effect.
+ * native `try`/`catch`, keeps the call in Effect, and `describeCause` keeps the
+ * message itself from throwing.
  */
 const pluginCall = <A>(
 	protocol: string,
 	what: string,
 	call: () => A,
 ): Effect.Effect<A, string> =>
-	Effect.try({
-		try: call,
-		catch: (cause) =>
-			`the "${protocol}" protocol could not ${what}: ${String(cause)}`,
+	Effect.gen(function* () {
+		const outcome = yield* Effect.try({
+			try: call,
+			// A typed cell, not the raw `unknown`: the cause is plugin code and
+			// is described by `describeCause`, never surfaced as the error type.
+			catch: (cause) => ({ cause }),
+		}).pipe(Effect.result);
+		if (Result.isFailure(outcome)) {
+			const detail = yield* describeCause(outcome.failure.cause);
+			return yield* Effect.fail(
+				`the "${protocol}" protocol could not ${what}: ${detail}`,
+			);
+		}
+		return outcome.success;
 	});
+
+/**
+ * `fetch` whose rejection is described without `String` throwing. The request's
+ * `headers` are plugin-supplied (and so is the probe's body), so the rejection
+ * reason can be a value whose own stringification throws — `Effect.tryPromise`'s
+ * `catch` would then throw out of its own frame and defect the caller.
+ */
+const fetchDescribed = (
+	call: () => Promise<Response>,
+): Effect.Effect<Response, string> =>
+	Effect.tryPromise({
+		try: call,
+		catch: (cause) => ({ cause }),
+	}).pipe(
+		Effect.catch((carrier) =>
+			describeCause(carrier.cause).pipe(
+				Effect.flatMap((detail) => Effect.fail(detail)),
+			),
+		),
+	);
 
 /**
  * `GET ${baseUrl}/models` — the OpenAI list endpoint (`baseUrl` carries the
@@ -50,10 +95,9 @@ export const listModels = (
 			}),
 		);
 
-		const response = yield* Effect.tryPromise({
-			try: () => fetch(`${baseUrl}/models`, { headers }),
-			catch: (cause) => String(cause),
-		});
+		const response = yield* fetchDescribed(() =>
+			fetch(`${baseUrl}/models`, { headers }),
+		);
 
 		if (!response.ok) {
 			const detail = yield* Effect.tryPromise({
@@ -110,15 +154,13 @@ export const testModel = (
 			} satisfies SendCtx),
 		);
 
-		const response = yield* Effect.tryPromise({
-			try: () =>
-				fetch(`${baseUrl}${provider.endpoint}`, {
-					method: "POST",
-					headers,
-					body: JSON.stringify(probe),
-				}),
-			catch: (cause) => String(cause),
-		});
+		const response = yield* fetchDescribed(() =>
+			fetch(`${baseUrl}${provider.endpoint}`, {
+				method: "POST",
+				headers,
+				body: JSON.stringify(probe),
+			}),
+		);
 
 		if (!response.ok) {
 			const detail = yield* Effect.tryPromise({
@@ -138,9 +180,14 @@ const probeSucceeded = (model: string): string => `✓ ${model} responded`;
 
 /**
  * Reduce a probe's whole cause to the one line to show. A typed failure already
- * carries a readable message (a non-2xx status, or an isolated member throw);
- * anything else — a defect the probe could not frame — is described from the
- * cause, so the button never resets with nothing to read.
+ * carries a readable message (a non-2xx status, or an isolated member throw).
+ * The fallback is a **totality** requirement, not a coverage target:
+ * `catchCause` also catches a **defect or an interrupt**, neither of which has
+ * an error option, and `probeConnection`'s signature is `Effect<string, never>`
+ * so it cannot re-raise. No plugin-reachable state reaches it — every
+ * plugin-supplied member sits inside `pluginCall` or `fetchDescribed`, so a
+ * plugin throw is always typed — but the line keeps the button from resetting
+ * with nothing to read if one ever does.
  */
 const probeFailure = (protocol: string, cause: Cause.Cause<string>): string =>
 	Option.getOrElse(
