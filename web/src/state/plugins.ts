@@ -25,7 +25,7 @@ import {
 } from "@lib/plugins/runtime";
 import { publishHostEvent } from "@lib/plugins/services";
 import { pluginSource } from "@lib/plugins/source";
-import { Cause, Duration, Effect, Option } from "effect";
+import { Cause, Duration, Effect, Exit, Option, Scope } from "effect";
 import { useSyncExternalStore } from "react";
 import { z } from "zod";
 import {
@@ -478,6 +478,12 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 	 * contributions are absent. That window is bounded to one synchronous stretch
 	 * of this fiber — no repaint interleaves in practice — and is preferable to
 	 * the alternative a swap produced, a *permanent* retraction.
+	 *
+	 * The entry is re-checked **immediately after** the acquire, before anything
+	 * is committed: `uninstall` runs on its own fiber and can delete the entry
+	 * while the new source is being prepared, in which case the prepared scope is
+	 * closed and the step stops (activating it would register into a scope the
+	 * store no longer tracks).
 	 */
 	const swapStep = (entry: Entry): Effect.Effect<void, never, HostServices> => {
 		const id = entry.persisted.id;
@@ -511,6 +517,16 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 					});
 				}
 				const prepared = outcome.prepared;
+				// The entry can be gone by now. `uninstall` runs on its own fiber
+				// and can delete it while the new source was being prepared, so
+				// activating here would register contributions into a scope the
+				// store no longer tracks — a live plugin it can never unload.
+				// Nothing has been committed yet (the old instance is untouched
+				// and `setup` has not run), so close the scope the reload would
+				// have activated and stop.
+				if (entries.get(id) !== entry) {
+					return Scope.close(prepared.scope, Exit.void);
+				}
 				return Effect.gen(function* () {
 					// The new source is acquired and imported, so the reload is
 					// committed from here: close the old instance, then run the new

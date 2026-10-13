@@ -858,6 +858,41 @@ describe("the installed list", () => {
 });
 
 describe("uninstall", () => {
+	test("an uninstall that lands while a reload prepares the same plugin leaves no ghost", async () => {
+		// `uninstall` runs on its own fiber, so it can delete the entry while the
+		// settle loop is mid-`prepare` for that same plugin's reload. The reload
+		// must then not `activate` the prepared scope: the store would no longer
+		// track it, so its contributions would stay registered until the app
+		// exits — a ghost plugin. The interleave is the harness's own `onLoad`
+		// seam (fired inside `prepare`, before it resolves), not a timer.
+		let store: PluginsStore | undefined;
+		let armed = false;
+		const h = makeHarness({
+			onLoad: (id) => {
+				if (!armed) return;
+				armed = false;
+				store?.uninstall(id);
+			},
+		});
+		store = h.store;
+		h.store.start();
+		h.store.installFromText("", filesOf());
+		await tick();
+		h.store.setPluginsEnabled(true);
+		h.store.setPluginEnabled("t18.fixture", true);
+		await tick();
+		expect(Effect.runSync(h.registries.ui.entries()).length).toBe(1);
+
+		armed = true;
+		h.store.reload("t18.fixture");
+		await tick();
+
+		// The plugin was uninstalled, so the store tracks nothing for it — and
+		// nothing may stay registered: the prepared scope never activated.
+		expect(h.store.getPlugins().plugins).toEqual([]);
+		expect(Effect.runSync(h.registries.ui.entries())).toEqual([]);
+	});
+
 	test("unloads, removes the files and drops the persisted entry", async () => {
 		const h = makeHarness();
 		h.store.start();
