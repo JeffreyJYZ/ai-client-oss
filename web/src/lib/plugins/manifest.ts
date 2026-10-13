@@ -2,6 +2,18 @@ import { capabilitySchema } from "@lib/plugins/ids";
 import { z } from "zod";
 
 /**
+ * A plugin id is one plain path component. **Allowlist, not a denylist**: only
+ * ASCII letters, digits, `.`, `_` and `-`, and no leading or trailing `.`.
+ *
+ * This is the same rule as `safe_id` in `web/src-tauri/src/lib.rs`, which
+ * guards every path the native bridge joins — **keep the two in step**. A
+ * denylist of `/`, `\`, `.` and `..` is not enough: a Windows **drive prefix**
+ * (`C:`, `C:foo`) passes it, but `PathBuf::join` clears the base for a path
+ * with a prefix, so the rule must allowlist what a component may contain.
+ */
+const PLUGIN_ID_PATTERN = /^[A-Za-z0-9_-](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/;
+
+/**
  * `plugin.json` — the only thing parsed from disk (spec §6). Identity and
  * version are non-empty strings; the loader checks `apiVersion`'s major
  * and `engines.app` separately (spec §10), so they stay plain strings
@@ -9,7 +21,17 @@ import { z } from "zod";
  * and `apiVersion` are required.
  */
 export const manifestSchema = z.object({
-	id: z.string().min(1),
+	/**
+	 * One plain path component — the allowlist in `PLUGIN_ID_PATTERN`, mirrored
+	 * by `safe_id` in `web/src-tauri/src/lib.rs`, so a bad id fails here at
+	 * install rather than at first use in the native bridge.
+	 */
+	id: z
+		.string()
+		.regex(
+			PLUGIN_ID_PATTERN,
+			"a plugin id may use only letters, digits, '.', '_' and '-', with no leading or trailing '.'",
+		),
 	name: z.string().min(1),
 	version: z.string().min(1),
 	apiVersion: z.string(),

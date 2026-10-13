@@ -99,7 +99,7 @@ export const surfaceModules: readonly SurfaceModule[] = [
 		path: "src/lib/plugins/services.ts",
 		label: "Host services",
 		summary:
-			"Chat, scoped storage, the event bus, logging and the native stub — the behaviour a plugin calls.",
+			"Chat, scoped storage, the event bus, logging and the native bridge (a stub on web) — the behaviour a plugin calls.",
 	},
 ];
 

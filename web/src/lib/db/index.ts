@@ -15,8 +15,9 @@ export const db: Db = isDesktop ? tauri : web;
  * Raw text of the last pre-migration settings blob, or `null` when no
  * migration has run. Handed to the Backup surface (Settings → Backup) so the
  * user can download the pre-migration state (spec §13). In-memory only: a
- * durable, file-backed snapshot needs a desktop file-write command, which does
- * not exist yet (T20). Today the registry is empty, so no capture fires.
+ * durable, file-backed snapshot would need a general desktop file-write
+ * command, and the native bridge exposes only plugin-scoped writes (T20).
+ * Today the registry is empty, so no capture fires.
  */
 let preMigrationCapture: string | null = null;
 

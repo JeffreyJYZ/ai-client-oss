@@ -36,6 +36,44 @@ describe("manifestSchema", () => {
 			}).success,
 		).toBe(false);
 	});
+	test("rejects an id that is not one plain path component", () => {
+		// `C:`/`C:foo` are Windows drive-relative paths: `PathBuf::join` clears
+		// the base for a path with a prefix, so the rule is an allowlist (the
+		// Rust half is `safe_id` in `web/src-tauri/src/lib.rs`), not a denylist.
+		for (const id of [
+			"C:",
+			"C:foo",
+			".hidden",
+			"trailing.",
+			"a/b",
+			"a\\b",
+			"a b",
+			"",
+		]) {
+			expect(
+				manifestSchema.safeParse({
+					id,
+					name: "B",
+					version: "1",
+					apiVersion: "0.1",
+				}).success,
+				`id ${JSON.stringify(id)} must be refused`,
+			).toBe(false);
+		}
+	});
+	test("accepts a dotted, underscored and hyphenated id", () => {
+		for (const id of ["acme.theme", "a", "a-b_c.1", "t18.fixture"]) {
+			expect(
+				manifestSchema.safeParse({
+					id,
+					name: "B",
+					version: "1",
+					apiVersion: "0.1",
+				}).success,
+				`id ${JSON.stringify(id)} must be allowed`,
+			).toBe(true);
+		}
+	});
 });
 
 describe("Settings", () => {

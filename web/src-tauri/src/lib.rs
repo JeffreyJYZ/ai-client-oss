@@ -50,14 +50,28 @@ fn conversations_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 /// `root/rel_path` so that the result can only ever be inside `root`:
 ///
 /// 1. `root` is created on demand and canonicalized, so symlinks in the app
-///    data path itself are resolved once;
+///    data path itself are resolved once. **A read through this helper
+///    therefore creates `root`**: `plugin_fs_read`/`plugin_fs_list` on an
+///    unknown id leave an empty `plugin-data/<id>/` behind. That is harmless —
+///    it is only ever the plugin's own scope directory, never anything outside
+///    it;
 /// 2. an absolute `rel_path` is refused — `Path::join` would discard `root`;
 /// 3. the deepest **existing** ancestor of the join is canonicalized and must
 ///    be under the canonical root, so a symlink anywhere along the path is
 ///    resolved *before* the check (a plain prefix test on the un-canonicalized
 ///    join would let `link -> /etc` through);
-/// 4. the non-existent suffix is re-appended to that canonical ancestor; it
-///    carries no symlink, because it does not exist.
+/// 4. the non-existent suffix is re-appended to that canonical ancestor. Each
+///    such component is `symlink_metadata`-checked and refused if it is a
+///    symlink: a **dangling** symlink (target not yet created) makes
+///    `canonicalize` return `NotFound`, so without this check the walk treats
+///    it as a plain absent name and returns the symlink itself, which
+///    `fs::write` then follows out of `root`. So the suffix is safe because no
+///    component of it is a symlink, not merely because it does not exist.
+///
+/// A `rel_path` that normalises to `root` itself (`""`, `"."`, `"subdir/.."`
+/// with `subdir` present) resolves to the root, so `plugin_fs_delete` on one
+/// clears the plugin's own scoped directory — inside the contract, which is
+/// "at or below `root`", and it names only the plugin's own data.
 ///
 /// `Path::starts_with` is component-wise, so `…/x` is not a prefix of `…/xy`.
 fn resolve_within(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
@@ -94,6 +108,17 @@ fn resolve_within(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
                 return Ok(path);
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // `NotFound` does not mean "not a symlink": a dangling symlink
+                // reports it too. Refuse any symlink here, so the re-appended
+                // suffix cannot carry one out of the root.
+                if fs::symlink_metadata(&current)
+                    .map(|meta| meta.file_type().is_symlink())
+                    .unwrap_or(false)
+                {
+                    return Err(format!(
+                        "path escapes the plugin directory: {rel_path}"
+                    ));
+                }
                 let name = current.file_name().ok_or_else(|| {
                     format!("cannot resolve a parent of {rel_path}")
                 })?;
@@ -110,18 +135,28 @@ fn resolve_within(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
     }
 }
 
-/// A plugin id is one path component: no separators and no `.`/`..`, so it
-/// cannot steer {@link resolve_within} out of the app data directory.
+/// A plugin id is one plain path component. **Allowlist**, not a denylist:
+/// only ASCII letters, digits, `.`, `_` and `-`, and no leading or trailing
+/// `.`. A denylist of `/`, `\`, `.` and `..` misses a Windows **drive prefix**
+/// — `PathBuf::join` clears the base entirely when the pushed path has a
+/// prefix but no root, so `id = "C:"` would make {@link plugin_root} return a
+/// drive-relative path resolving to the process cwd.
+///
+/// **The same rule is enforced at install time by `manifestSchema.id` in
+/// `web/src/lib/plugins/manifest.ts`; keep the two in step** (that one fails a
+/// bad id with a readable decode error before it ever reaches here).
 fn safe_id(id: &str) -> Result<&str, String> {
+    let allowed = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-';
     let ok = !id.is_empty()
-        && id != "."
-        && id != ".."
-        && !id.contains('/')
-        && !id.contains('\\');
+        && !id.starts_with('.')
+        && !id.ends_with('.')
+        && id.chars().all(allowed);
     if ok {
         Ok(id)
     } else {
-        Err(format!("invalid plugin id: {id}"))
+        Err(format!(
+            "invalid plugin id {id:?}: use only letters, digits, '.', '_' and '-', with no leading or trailing '.'"
+        ))
     }
 }
 
@@ -465,7 +500,7 @@ async fn http_request(
 
 #[cfg(test)]
 mod scope_tests {
-    use super::resolve_within;
+    use super::{resolve_within, safe_id};
     use std::fs;
     use std::path::PathBuf;
 
@@ -523,6 +558,42 @@ mod scope_tests {
         assert!(err.contains("escapes"), "unexpected error: {err}");
         cleanup(&root);
         cleanup(&outside);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn refuses_a_dangling_symlink_that_points_outside_the_root() {
+        use std::os::unix::fs::symlink;
+        let root = temp_root("dangling-symlink");
+        let outside = temp_root("dangling-symlink-outside");
+        // The target is absent, so `canonicalize` reports NotFound and the walk
+        // would otherwise treat `link` as a plain, non-existent name — returning
+        // the symlink itself, which `fs::write` then follows out of the root.
+        let target = outside.join("pwned.txt");
+        symlink(&target, root.join("link")).expect("create dangling symlink");
+        let err =
+            resolve_within(&root, "link").expect_err("a dangling symlink must be refused");
+        assert!(err.contains("escapes"), "unexpected error: {err}");
+        assert!(!target.exists(), "the escape target must not be created");
+        cleanup(&root);
+        cleanup(&outside);
+    }
+
+    #[test]
+    fn refuses_a_drive_prefix_or_otherwise_invalid_id() {
+        // `C:` (and `C:foo`) is a Windows drive-relative path, and
+        // `PathBuf::join` discards the base entirely for a path that has a
+        // prefix but no root — so the id must be an allowlist, never a
+        // denylist of `/`, `\` and dots.
+        for bad in [
+            "C:", "C:foo", "C:..", "..", ".", "", ".hidden", "trailing.", "a/b", "a\\b", "a b",
+            "a:b",
+        ] {
+            assert!(safe_id(bad).is_err(), "id {bad:?} must be refused");
+        }
+        for good in ["acme.theme", "a", "a-b_c.1", "t18.fixture"] {
+            assert!(safe_id(good).is_ok(), "id {good:?} must be allowed");
+        }
     }
 }
 
