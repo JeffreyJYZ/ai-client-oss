@@ -1,0 +1,11 @@
+{
+	"id": "example.theme-solarized",
+	"name": "Solarized theme",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "Registers a Solarized colour theme and a Settings section that applies it; the choice survives a reload.",
+	"author": "AI Client examples"
+}

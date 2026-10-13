@@ -1,0 +1,11 @@
+{
+	"id": "example.custom-tool",
+	"name": "Shout tool",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "Registers a model-callable `shout` tool, plus an onToolCall stage that refuses calls carrying a forbidden argument.",
+	"author": "AI Client examples"
+}

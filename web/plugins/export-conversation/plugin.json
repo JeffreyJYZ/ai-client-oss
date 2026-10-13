@@ -1,0 +1,11 @@
+{
+	"id": "example.export-conversation",
+	"name": "Export conversation",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": ["plugin-data"],
+	"engines": { "app": "*" },
+	"description": "Adds an \"Export conversation as Markdown\" command that reads the active conversation and downloads it.",
+	"author": "AI Client examples"
+}

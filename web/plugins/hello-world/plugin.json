@@ -1,0 +1,11 @@
+{
+	"id": "example.hello-world",
+	"name": "Hello world",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "Adds one button to every message's action row; proves a ui slot, the Host object and the plugin lifecycle.",
+	"author": "AI Client examples"
+}
