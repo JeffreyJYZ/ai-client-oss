@@ -165,6 +165,57 @@ describe("makeThemeService", () => {
 		expect(Option.isNone(await run(themes.active()))).toBe(true);
 	});
 
+	/**
+	 * The one path a wrong guard silently breaks: A is applied, B's handle is
+	 * disposed. The restore is guarded on the *active* theme being the one
+	 * disposed, so B's disposal must leave A's variables, the one stylesheet and
+	 * the marker exactly as they were — otherwise unloading one plugin wipes
+	 * another's theme.
+	 */
+	test("disposing one plugin's theme handle leaves another plugin's applied theme intact", async () => {
+		const services = registries();
+		const dom = fakeDom();
+		// One core (the app's), two plugins' views of it.
+		const withCore: HostServicesShape = {
+			...services,
+			themesService: makeThemeService(services.themes, dom),
+		};
+		const pluginA = hostFor(withCore, "acme.theme.a");
+		const pluginB = hostFor(withCore, "acme.theme.b");
+
+		const handleA = pluginA.themes.register({
+			id: "test.theme.a",
+			name: "A",
+			variables: { "--a": "1" },
+			css: "a{}",
+		});
+		const handleB = pluginB.themes.register({
+			id: "test.theme.b",
+			name: "B",
+			variables: { "--b": "2" },
+			css: "b{}",
+		});
+
+		await run(pluginA.themes.apply("test.theme.a"));
+		expect(dom.activeId.value).toBe("test.theme.a");
+		expect(dom.cssWrites.count).toBe(1);
+
+		// B is not the active theme: disposing its handle unregisters B and
+		// must not touch the DOM. An unguarded restore here would clear A's
+		// variables, drop its stylesheet and clear the marker.
+		handleB.dispose();
+
+		expect([...dom.variables]).toEqual([["--a", "1"]]);
+		expect(dom.css.value).toBe("a{}");
+		expect(dom.cssWrites.count).toBe(1);
+		expect(dom.activeId.value).toBe("test.theme.a");
+		expect(Option.getOrNull(await run(pluginA.themes.active()))).toBe(
+			"test.theme.a",
+		);
+
+		handleA.dispose();
+	});
+
 	test("a theme may define variables the app never named", async () => {
 		const services = registries();
 		const dom = fakeDom();
