@@ -28,7 +28,7 @@ export default { setup(host) { /* register things; return void or a Disposable *
 ```
 
 - **Your source may import.** `react` and `react/jsx-runtime` are rewritten by the build preset onto the host's own React (so `useState` is the app's React, not a second copy). **Every other bare specifier is bundled into your file.**
-- **Your output may not import anything.** The host supplies the API and React through globals, because a bundled app has no module resolver for a plugin directory. The build fails if the emitted chunk imports a bare specifier, and the loader refuses one at load time. Do not reach for `import "@lib/..."` — that is a host module, resolved only if it happens to be bundled, and it would be a **second copy** whose module state is not the app's.
+- **Your output may not import anything.** The host supplies the API and React through globals, because a bundled app has no module resolver for a plugin directory. The build fails if the emitted chunk imports a bare specifier, and the loader refuses one at load time. Do not reach for `import { … } from "@lib/…"` — that is a host module: the build runs with `configFile: false` and no `@lib` alias, so it does not resolve and the build fails (were it bundled it would be a **second copy** whose module state is not the app's). The **type-only** form every example uses — `import type { Host, Tool, CommandDefinition } from "@lib/plugins/sdk"` — is erased at build time and is the supported way to get the host types.
 - **The globals you get** (set immediately before your module is imported): `__aiClient` (the `Host`), `__aiClientReact`, `__aiClientJsxRuntime`. Nothing else. `import { useState } from "react"` compiles onto the second of those.
 - **`main.tsx` is preferred** (JSX). `main.ts` works — use React's `createElement` then; that is what `theme-solarized/main.ts` does.
 - **JSX uses the automatic runtime** — no `import React` needed for it.
@@ -40,7 +40,7 @@ export default { setup(host) { /* register things; return void or a Disposable *
 ## 3. Build, install, repeat — a build loop, not an HMR loop
 
 ```sh
-bun scripts/build-plugins.ts            # every web/plugins/*/main.tsx|main.ts
+bun scripts/build-plugins.ts            # every web/plugins/*/main.tsx|main.ts (includes globals-proof/, a Task-17 fixture with no plugin.json — built, not installable)
 bun scripts/build-plugins.ts my-plugin  # just one
 ```
 
@@ -61,24 +61,25 @@ A pasted/installed plugin's source is imported from a `Blob`, which is the **pro
 | `host.` | Adds | Example |
 |---|---|---|
 | `ui.register` | a component into a named `slot` | `hello-world/main.ts` |
-| `ui.kit` | the app's own primitives — `Button`, `Panel`, `Section`, `FieldRow`, `Markdown`, `cls`, and the class constants — so plugin UI matches a built-in's without copying Tailwind strings | `hello-world/main.ts` |
+| `ui.kit` | the app's own primitives — `Button`, `Panel`, `Section`, `FieldRow`, `Markdown`, `cls`, and the class constants — so plugin UI matches a built-in's without copying Tailwind strings | `hello-world/main.ts`, `theme-solarized/main.ts` |
 | `commands.register` | a command (+ optional keybinding) for the palette | `export-conversation/main.ts` |
 | `settings.registerSection` | a foldable Settings section | `theme-solarized/main.ts` |
 | `tools.register` | a model-callable tool (`declaration` + `execute`) | `custom-tool/main.ts` |
 | `pipeline.register` | a stage: `beforeSend`, `transformBody`, `onChunk`, `afterReply`, `onToolCall`, `onHistory` | `custom-tool/main.ts` (`onToolCall`) |
 | `themes.register` / `apply` / `clear` / `active` | a theme (variables + optional `css`), and apply or clear it through the app's one theme service — the same `<style>` element and `data-theme` marker the built-in uses | `theme-solarized/main.ts` |
-| `providers.register` | a wire protocol (`send`/`buildRequest`/…) | see `lib/providers/chatCompletions.ts` |
-| `renderers.register` | override `message`/`markdown`/`marker`/`reasoning` | `lib/plugins/renderers.ts` |
+| `providers.register` | a wire protocol (`send`/`buildRequest`/…) | host implementation (`lib/providers/chatCompletions.ts`); no plugin example |
+| `renderers.register` | override `message`/`markdown`/`marker`/`reasoning` | host implementation (`lib/plugins/renderers.ts`); no plugin example |
 | `chat.snapshot()` | the active conversation (synchronous) | `export-conversation/main.ts` |
-| `storage.get/set/keys` | your own KV, persisted in `Settings.plugins[].data` | `theme-solarized/main.ts` |
+| `storage.get/set/delete/keys` | your own KV, persisted in `Settings.plugins[].data` | `theme-solarized/main.ts` |
 | `notify.toast/banner/modal` | host-rendered notices (synchronous) | `hello-world/main.ts` |
-| `native` | `Option<NativeHandle>` — `none` on web; `write`/`read`/`list`/`http` scoped to `plugin-data/<id>/` | `export-conversation/main.ts` |
+| `native` | `Option<NativeHandle>` — `none` on web; the file members `read`/`write`/`list`/`remove`/`dataDir` are scoped to `plugin-data/<id>/` | `export-conversation/main.ts` |
+| `native.http` | an unrestricted network request on the app's own `http_request` command — **not path-scoped**; it rides the `net` capability, which is **unenforceable** (§5) | — |
 | `on(event, handler)` | subscribe to `turn-start`/`chunk`/`turn-end`/`conversation-changed`/`settings-changed`/`tool-called`/`plugin-loaded`/`plugin-unloaded` | `hello-world/main.ts` |
 | `log.info/warn/error/debug` | the scoped logger, shown in the Plugins log panel | any |
 | `db` | the app's own settings/conversation adapter | — |
 | `version` | `{ app, api }` | `hello-world/main.ts` |
 
-Every `register*` returns a `Disposable`; disposing removes exactly that entry. Closing your plugin's scope (disable/uninstall/reload) disposes **all** of them plus your `setup` handle — a disabled plugin must leave no trace, so retract anything you put on the document in `dispose`.
+Every `register*` returns a `Disposable`; disposing removes exactly that entry. A contribution the host **refuses** yields this same inert handle: an unknown `slot` name, or a tool whose name collides with a built-in or whose `declaration`/`execute` is malformed, is dropped silently and only logged as a `PluginFault` — nothing throws, nothing renders, so a typo is invisible until you check the **Plugins log panel**. Closing your plugin's scope (disable/uninstall/reload) disposes **all** of them plus your `setup` handle — a disabled plugin must leave no trace, so retract anything you put on the document in `dispose`.
 
 ### Tools on the wire
 
@@ -104,4 +105,4 @@ The slot map is `web/src/lib/plugins/ids.ts` (`slotIds`, one `as const` tuple �
 
 1. **`host.commands`/`providers`/`pipeline` are loosely typed** — the generic `HostRegistry<RegistryEntry>`, not a per-kind type (see §4). `host.ui`, `host.ui.kit`, `host.settings`, `host.tools`, `host.renderers` and the typed `host.themes` service are typed.
 2. **No Effect runner** (see §2). `host.storage`, `host.chat.send`, `host.native` and `host.notify.confirm` return `Effect`s; bundle `effect` and run them yourself.
-3. **Reload is two-phase, and the host owns only what you register.** A reload imports and validates the new source **first**, then closes the old instance, then runs the new `setup` — so a reload whose new source fails to import leaves the old instance running untouched, and your old `dispose` cannot retract what your new `setup` just applied. A `setup` that **throws** on reload is the one case this cannot make seamless: the old instance is already closed, so the result is *nothing* loaded (`status: "failed"`, error logged) rather than a `loaded` row over an empty registry. If you mirror state onto the page (a `data-` marker, a document class, a theme), retract it in `dispose` and re-apply it in `setup`; between the close and the new `setup` your contributions are absent for one synchronous stretch.
+3. **Reload is two-phase, and the host owns only what you register.** A reload imports and validates the new source **first**, then closes the old instance (running its `dispose`), then runs the new `setup` — so a reload whose new source fails to import leaves the old instance running untouched, and the new `setup` runs only after the old `dispose`, so it cannot have been retracted by it. A `setup` that **throws** on reload is the one case this cannot make seamless: the old instance is already closed, so the result is *nothing* loaded (`status: "failed"`, error logged) rather than a `loaded` row over an empty registry. If you mirror state onto the page (a `data-` marker, a document class, a theme), retract it in `dispose` and re-apply it in `setup`; between the close and the new `setup` your contributions are absent for one synchronous stretch.
