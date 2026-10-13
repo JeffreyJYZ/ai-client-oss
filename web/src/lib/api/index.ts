@@ -24,20 +24,29 @@ import { Cause, Effect, Stream } from "effect";
  *
  * `HostServices` is required because the protocol is runtime data: the caller
  * runs this on the subsystem's runtime, where the registries live.
+ *
+ * A fault names **both** the protocol and the plugin that registered it
+ * (`provider.owner`): with a name that can come from anywhere, the protocol
+ * alone does not say which plugin misbehaved — the same attribution the tool
+ * and pipeline seams already carry.
  */
 
 /** The one sentence a faulted protocol is reported with. */
 const faultSentence = (protocol: string, cause: Cause.Cause<unknown>): string =>
 	`the protocol "${protocol}" faulted: ${Cause.pretty(cause)}`;
 
-/** Log a `PluginFault` naming the protocol, then fail with the same sentence. */
+/** Log a `PluginFault` naming the protocol and its plugin, then fail with the sentence. */
 const faultAndFail = (
 	protocol: string,
+	pluginId: string,
 	cause: Cause.Cause<unknown>,
 ): Effect.Effect<never, string> =>
 	Effect.andThen(
 		Effect.logWarning(
-			new PluginFault({ detail: faultSentence(protocol, cause) }),
+			new PluginFault({
+				detail: faultSentence(protocol, cause),
+				pluginId,
+			}),
 		),
 		Effect.fail(faultSentence(protocol, cause)),
 	);
@@ -52,13 +61,14 @@ const faultAndFail = (
  */
 const isolateStream = (
 	protocol: string,
+	pluginId: string,
 	stream: Stream.Stream<Chunk, string>,
 ): Stream.Stream<Chunk, string> =>
 	stream.pipe(
 		Stream.catchCause((cause) =>
 			Cause.hasFails(cause) || Cause.hasInterrupts(cause)
 				? Stream.failCause(cause)
-				: Stream.fromEffect(faultAndFail(protocol, cause)),
+				: Stream.fromEffect(faultAndFail(protocol, pluginId, cause)),
 		),
 	);
 
@@ -69,15 +79,16 @@ const isolateStream = (
  */
 const sendThrough = (
 	protocol: string,
+	pluginId: string,
 	provider: AnyProvider,
 	ctx: SendCtx,
 ): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 	Effect.suspend(() => provider.send(ctx)).pipe(
-		Effect.map((stream) => isolateStream(protocol, stream)),
+		Effect.map((stream) => isolateStream(protocol, pluginId, stream)),
 		Effect.catchCause((cause) =>
 			Cause.hasInterrupts(cause)
 				? Effect.failCause(cause)
-				: faultAndFail(protocol, cause),
+				: faultAndFail(protocol, pluginId, cause),
 		),
 	);
 
@@ -87,5 +98,5 @@ export const SendMsg = (
 ): Effect.Effect<Stream.Stream<Chunk, string>, string, HostServices> =>
 	Effect.gen(function* () {
 		const provider = yield* requireProvider(protocol);
-		return yield* sendThrough(protocol, provider, ctx);
+		return yield* sendThrough(protocol, provider.owner, provider, ctx);
 	});

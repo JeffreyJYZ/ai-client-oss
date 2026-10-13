@@ -16,7 +16,7 @@ import { MAX_MEMORY_NOTE_LENGTH, mergeMemories } from "@lib/memory";
 import { isDesktop } from "@lib/platform";
 import { protocolNames } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
-import { listModels, testModel } from "@lib/providers/models";
+import { listModels, probeConnection } from "@lib/providers/models";
 import {
 	isLocalEndpoint,
 	PROVIDER_PRESETS,
@@ -336,17 +336,26 @@ export function ProviderEditor() {
 		);
 	};
 
+	/**
+	 * "Test connection" shows the probe's one line — a success tick or a
+	 * readable failure. `probeConnection` never fails: it catches a plugin
+	 * protocol's typed failure **and** a defect, which this button's old typed
+	 * `Effect.catch` missed (a protocol whose `headers` threw escaped it, so
+	 * only `ensuring` ran and the user saw nothing).
+	 */
 	const testConnection = (): void => {
 		if (active === undefined || !canTest) return;
 		const model = active.model;
 		editor?.setMessage(null);
 		setTestPending(true);
 		runtime.runFork(
-			testModel(active.protocol, active.baseUrl, active.apiKey, model).pipe(
-				Effect.tap(() =>
-					Effect.sync(() => editor?.setMessage(`✓ ${model} responded`)),
-				),
-				Effect.catch((error) => Effect.sync(() => editor?.setMessage(error))),
+			probeConnection(
+				active.protocol,
+				active.baseUrl,
+				active.apiKey,
+				model,
+			).pipe(
+				Effect.tap((message) => Effect.sync(() => editor?.setMessage(message))),
 				Effect.ensuring(Effect.sync(() => setTestPending(false))),
 			),
 		);

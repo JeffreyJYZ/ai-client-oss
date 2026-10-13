@@ -1,3 +1,4 @@
+import { bareImports } from "@lib/build/bareImports";
 import { PluginLoadFailed } from "@lib/plugins/errors";
 import { setHostGlobals } from "@lib/plugins/globals";
 import type { Host } from "@lib/plugins/host";
@@ -31,36 +32,15 @@ const isDev = viteEnv?.DEV === true;
 const baseUrl = viteEnv?.BASE_URL ?? "/";
 
 /**
- * An ESM import statement's specifier, anchored to a line start so a
- * `from "…"` inside a string or comment is not mistaken for an import. The
- * built entry has no imports at all, so a match is always a contract breach.
+ * The first bare specifier the source imports, or `null` when it imports none.
+ * Delegates to the **same** `bareImports` the build-time chunk guard runs, so
+ * the rule has one encoding rather than two that can drift: the two seams ask
+ * different questions — "does this built chunk import anything bare?" (all of
+ * them, to fail the build) versus "which specifier should the refusal name?"
+ * (the first) — but must never disagree about what counts as bare.
  */
-const FROM_IMPORT =
-	/^[ \t]*(?:import|export)\b[^\n]*?\bfrom\s*["']([^"']+)["']/gm;
-const SIDE_EFFECT_IMPORT = /^[ \t]*import\s*["']([^"']+)["']/gm;
-
-/**
- * A bare specifier is one no URL can resolve: not relative, not root-absolute,
- * and carrying no scheme. `react`, `react/jsx-runtime` and
- * `@ai-client/plugin-sdk` are bare; `./x.js`, `/x.js` and `data:` are not.
- */
-const isBareSpecifier = (specifier: string): boolean =>
-	!specifier.startsWith(".") &&
-	!specifier.startsWith("/") &&
-	!/^[a-zA-Z][a-zA-Z\d+.-]*:/.test(specifier);
-
-/** The first bare specifier the source imports, or `null` when it imports none. */
-const firstBareSpecifier = (source: string): string | null => {
-	for (const pattern of [FROM_IMPORT, SIDE_EFFECT_IMPORT]) {
-		for (const match of source.matchAll(pattern)) {
-			const specifier = match[1];
-			if (specifier !== undefined && isBareSpecifier(specifier)) {
-				return specifier;
-			}
-		}
-	}
-	return null;
-};
+const firstBareSpecifier = (source: string): string | null =>
+	bareImports(source)[0] ?? null;
 
 /**
  * The user-facing copy for a plugin that broke the no-imports contract. It

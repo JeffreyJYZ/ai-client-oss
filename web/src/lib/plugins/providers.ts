@@ -103,16 +103,20 @@ const asProviderEntry = (entry: RegistryEntry): ProviderEntry =>
  * The protocol registered as `name`, or `none` (spec §5). `SendMsg` maps
  * `none` to a failed turn, so a caller never dereferences an absent provider —
  * the `TypeError` on `undefined.send` the old static lookup could produce.
+ *
+ * The **entry**, not the bare contract: it carries `owner`, the plugin that
+ * registered the protocol, so a caller that isolates a fault can name the
+ * plugin as the tool and pipeline seams already do.
  */
 export const resolveProvider = (
 	name: string,
-): Effect.Effect<Option.Option<AnyProvider>, never, HostServices> =>
+): Effect.Effect<Option.Option<ProviderEntry>, never, HostServices> =>
 	Effect.flatMap(HostServices, (services) =>
 		Effect.map(services.providers.entries(), (entries) => {
 			const found = entries.find((entry) => entry.id === name);
 			return found === undefined
-				? Option.none<AnyProvider>()
-				: Option.some<AnyProvider>(asProviderEntry(found));
+				? Option.none<ProviderEntry>()
+				: Option.some<ProviderEntry>(asProviderEntry(found));
 		}),
 	);
 
@@ -143,8 +147,9 @@ export const listProtocols = (): Effect.Effect<
  * `runtime.runPromise`), so with the context cached this has no async boundary
  * and never throws `AsyncFiberError`.
  */
-export const resolveProviderSync = (name: string): Option.Option<AnyProvider> =>
-	runtime.runSync(resolveProvider(name));
+export const resolveProviderSync = (
+	name: string,
+): Option.Option<ProviderEntry> => runtime.runSync(resolveProvider(name));
 
 /**
  * Resolve a protocol or fail with one readable sentence (spec §5). This is the
@@ -152,10 +157,13 @@ export const resolveProviderSync = (name: string): Option.Option<AnyProvider> =>
  * it, so the failure sentence cannot drift into two spellings, and a name no
  * protocol answers to is a failed turn rather than a `TypeError` on an absent
  * provider.
+ *
+ * Returns the {@link ProviderEntry}, so a caller that isolates a fault has the
+ * registering plugin's `owner` to name in it, alongside the protocol.
  */
 export const requireProvider = (
 	protocol: string,
-): Effect.Effect<AnyProvider, string, HostServices> =>
+): Effect.Effect<ProviderEntry, string, HostServices> =>
 	Effect.gen(function* () {
 		const provider = yield* resolveProvider(protocol);
 		if (Option.isNone(provider)) {

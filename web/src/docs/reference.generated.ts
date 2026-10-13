@@ -711,8 +711,8 @@ export const reference: DocReference = {
 				{
 					"name": "resolveProvider",
 					"kind": "const",
-					"signature": "export const resolveProvider = (name: string): Effect.Effect<Option.Option<AnyProvider>, never, HostServices> => …",
-					"description": "The protocol registered as `name`, or `none` (spec §5). `SendMsg` maps `none` to a failed turn, so a caller never dereferences an absent provider — the `TypeError` on `undefined.send` the old static lookup could produce.",
+					"signature": "export const resolveProvider = (name: string): Effect.Effect<Option.Option<ProviderEntry>, never, HostServices> => …",
+					"description": "The protocol registered as `name`, or `none` (spec §5). `SendMsg` maps `none` to a failed turn, so a caller never dereferences an absent provider — the `TypeError` on `undefined.send` the old static lookup could produce. The **entry**, not the bare contract: it carries `owner`, the plugin that registered the protocol, so a caller that isolates a fault can name the plugin as the tool and pipeline seams already do.",
 					"members": []
 				},
 				{
@@ -725,15 +725,15 @@ export const reference: DocReference = {
 				{
 					"name": "resolveProviderSync",
 					"kind": "const",
-					"signature": "export const resolveProviderSync = (name: string): Option.Option<AnyProvider> => …",
+					"signature": "export const resolveProviderSync = (name: string): Option.Option<ProviderEntry> => …",
 					"description": "{@link resolveProvider} read synchronously off the app's one runtime. A synchronous caller cannot yield — `state/chat.ts`'s `send` builds the request body it forks with, and the Settings picker renders during React's own render pass — so the read is bridged here rather than pushed into an Effect that would change when the optimistic rows appear. The runtime's layer is built before the first render (`main.tsx` awaits `runtime.runPromise`), so with the context cached this has no async boundary and never throws `AsyncFiberError`.",
 					"members": []
 				},
 				{
 					"name": "requireProvider",
 					"kind": "const",
-					"signature": "export const requireProvider = (protocol: string): Effect.Effect<AnyProvider, string, HostServices> => …",
-					"description": "Resolve a protocol or fail with one readable sentence (spec §5). This is the **single** resolve-or-fail seam: `SendMsg` and the models helpers both call it, so the failure sentence cannot drift into two spellings, and a name no protocol answers to is a failed turn rather than a `TypeError` on an absent provider.",
+					"signature": "export const requireProvider = (protocol: string): Effect.Effect<ProviderEntry, string, HostServices> => …",
+					"description": "Resolve a protocol or fail with one readable sentence (spec §5). This is the **single** resolve-or-fail seam: `SendMsg` and the models helpers both call it, so the failure sentence cannot drift into two spellings, and a name no protocol answers to is a failed turn rather than a `TypeError` on an absent provider. Returns the {@link ProviderEntry}, so a caller that isolates a fault has the registering plugin's `owner` to name in it, alongside the protocol.",
 					"members": []
 				},
 				{

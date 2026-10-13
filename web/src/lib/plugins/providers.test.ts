@@ -264,4 +264,30 @@ describe("protocol registration and send isolation (spec §9)", () => {
 		}
 		expect(calls.some((value) => value instanceof PluginFault)).toBe(true);
 	});
+
+	test("a faulted plugin protocol names the plugin in its PluginFault", async () => {
+		const s = services();
+		registerProvider(
+			host(s, "acme.protocols"),
+			"acme.throw",
+			withSend(() => {
+				throw new Error("boom");
+			}),
+			"acme.protocols",
+		);
+		const logged = spyOn(console, "log");
+		const exit = await runWith(Effect.exit(SendMsg("acme.throw", ctx())), s);
+		const calls = logged.mock.calls.flat();
+		logged.mockRestore();
+
+		// The fault must attribute to the plugin that registered the protocol,
+		// exactly as the tool and pipeline seams already do, so a log line or a
+		// future plugin UI can point at the plugin rather than the protocol only.
+		const faults = calls.filter(
+			(value): value is PluginFault => value instanceof PluginFault,
+		);
+		expect(Exit.isFailure(exit)).toBe(true);
+		expect(faults).toHaveLength(1);
+		expect(faults[0]?.pluginId).toBe("acme.protocols");
+	});
 });

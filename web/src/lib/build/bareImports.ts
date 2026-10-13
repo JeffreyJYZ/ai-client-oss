@@ -10,9 +10,10 @@
  * It is a pure function of the chunk text — no Rollup graph, no filesystem — so
  * it lives here, where the repo's gate (`tsc -b`, `biome check`, `bun test`)
  * proves it. The repo-root `scripts/` are outside that gate; moving the rule in
- * is what turns a hand-run check into an enforced one. `@lib/plugins/moduleImport`
- * carries the same rule for the loader's own check; the two are the build-time
- * and load-time twins of one contract.
+ * is what turns a hand-run check into an enforced one. {@link bareImports} is
+ * the **one** encoding of the rule: the load-time seam
+ * (`@lib/plugins/moduleImport`) calls it too, so the build-time chunk guard and
+ * the loader's refusal cannot drift about what a bare specifier is.
  */
 
 /**
