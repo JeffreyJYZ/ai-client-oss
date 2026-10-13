@@ -182,16 +182,21 @@ export const registerTool = (
 	pluginId?: string,
 ): Disposable => host.tools.register(tool, pluginId);
 
-/** The registered tool called `name`, or `none`. */
+/**
+ * The registered tool called `name`, or `none` — the **entry**, not the bare
+ * `Tool`: it carries `owner`, the plugin that registered it, so a caller that
+ * isolates a fault can name the plugin alongside the tool (the same widening
+ * `resolveProvider` makes, for the same reason).
+ */
 export const resolveTool = (
 	name: string,
-): Effect.Effect<Option.Option<Tool>, never, HostServices> =>
+): Effect.Effect<Option.Option<ToolEntry>, never, HostServices> =>
 	Effect.flatMap(HostServices, (services) =>
 		Effect.map(services.tools.entries(), (entries) => {
 			const found = entries.find((entry) => entry.id === name);
 			return found === undefined
-				? Option.none<Tool>()
-				: Option.some<Tool>(asToolEntry(found));
+				? Option.none<ToolEntry>()
+				: Option.some<ToolEntry>(asToolEntry(found));
 		}),
 	);
 
@@ -233,8 +238,10 @@ const faultOutcome = (name: string, input: unknown): ToolOutcome => {
  *
  * The execution is **failure-isolated** (spec §9): a third-party tool whose
  * `execute` throws, or returns a failed/defected effect, is a logged
- * `PluginFault` and a failed `ToolOutcome` — never a defect that takes the
- * turn down. An interruption is re-raised, so a stopped turn stays a stop.
+ * `PluginFault` — naming the plugin that registered the tool, through
+ * {@link resolveTool}'s entry — and a failed `ToolOutcome`, never a defect that
+ * takes the turn down. An interruption is re-raised, so a stopped turn stays a
+ * stop.
  *
  * `ctx` defaults to an empty context: the turn-scoped values (the TinyFish key)
  * are the caller's to pass, and the loop passes the turn's own context. The
@@ -266,6 +273,7 @@ export const executeTool = (
 							Effect.logWarning(
 								new PluginFault({
 									detail: `the tool "${name}" faulted: ${Cause.pretty(cause)}`,
+									pluginId: tool.value.owner,
 								}),
 							),
 							Effect.succeed(faultOutcome(name, input)),

@@ -168,6 +168,40 @@ describe("tools registry", () => {
 		expect(outcome.failed).toBe(false);
 	});
 
+	test("a tool whose executor faults logs a PluginFault naming the plugin and keeps the failed outcome shape", async () => {
+		const s = services();
+		const pluginId = "acme.tools";
+		const tool: Tool = {
+			declaration: {
+				name: "explode",
+				description: "Always faults.",
+				parameters: { type: "object" },
+			},
+			execute: () => Effect.die("boom"),
+		};
+		registerTool(host(s, pluginId), tool, pluginId);
+
+		const logged = spyOn(console, "log");
+		const outcome = await runWith(
+			executeTool("explode", call("explode", '{"q":"hi"}')),
+			s,
+		);
+		const calls = logged.mock.calls.flat();
+		logged.mockRestore();
+
+		const faults = calls.filter((value) => value instanceof PluginFault);
+		expect(faults).toHaveLength(1);
+		expect((faults[0] as PluginFault).pluginId).toBe(pluginId);
+		expect((faults[0] as PluginFault).detail).toContain("explode");
+		// The caller's view is unchanged: the same failed outcome, never a defect.
+		expect(outcome).toEqual({
+			result: "The tool explode failed unexpectedly.",
+			marker: "🔧 explode failed unexpectedly",
+			failed: true,
+			input: { q: "hi" },
+		});
+	});
+
 	test("a plugin's same-name tool is refused with a PluginFault and the built-in wins at resolve time", async () => {
 		const s = services();
 		// Built-ins register first, through the same registrar a plugin uses.
