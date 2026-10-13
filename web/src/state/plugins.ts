@@ -161,7 +161,7 @@ export interface PluginsStore {
 /** One plugin's live bookkeeping. Mutated in place; never handed to React. */
 interface Entry {
 	persisted: PluginState;
-	/** The raw manifest the loader decodes; `undefined` when not installed. */
+	/** The manifest value the loader decodes; `undefined` when not installed. */
 	raw: unknown;
 	manifest: PluginManifest | null;
 	error: string | undefined;
@@ -542,8 +542,10 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 
 	/**
 	 * The lifecycle decisions that are currently outstanding, in list order.
-	 * Recording the decision key here — not when the effect runs — is what stops
-	 * the settle loop's next re-plan from taking the same decision again.
+	 * Pure: it reads state and mutates nothing. Recording a decision key is the
+	 * settle loop's job, **at the moment a step runs** — a decision that is
+	 * planned but never executed (the round bound is reached first) must not be
+	 * recorded, or the entry would look already-tried and could never be retried.
 	 */
 	const planOf = (): readonly Step[] => {
 		const plan: Step[] = [];
@@ -555,7 +557,6 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 				// no unloaded gap (`swapStep`). A plugin that is not currently
 				// running has nothing to swap, so it falls through to the ordinary
 				// rule and is loaded by it.
-				entry.forced = false;
 				if (shouldRun && entry.loaded !== undefined) {
 					plan.push({ entry, action: "swap" });
 					continue;
@@ -564,11 +565,9 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 			if (shouldRun && entry.loaded === undefined) {
 				if (!listed) continue;
 				if (entry.attempted === decisionKey(entry)) continue;
-				entry.attempted = decisionKey(entry);
 				plan.push({ entry, action: "load" });
 			} else if (!shouldRun && entry.loaded !== undefined) {
 				if (entry.attempted === decisionKey(entry)) continue;
-				entry.attempted = decisionKey(entry);
 				plan.push({ entry, action: "unload" });
 			}
 		}
@@ -595,10 +594,21 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 		deps.run(
 			Effect.gen(function* () {
 				let rounds = 0;
+				// A plan is read, and its decisions are recorded, only as each step
+				// is about to run (`attempted`, and consuming `forced`). A plan the
+				// round bound never reaches therefore leaves no trace: those
+				// decisions stay outstanding, and the next `settle` — which any
+				// settings change calls — retries them.
 				let plan = planOf();
 				while (plan.length > 0 && rounds < MAX_SETTLE_ROUNDS) {
 					rounds += 1;
-					for (const step of plan) step.entry.pending = true;
+					for (const step of plan) {
+						step.entry.pending = true;
+						step.entry.forced = false;
+						if (step.action !== "swap") {
+							step.entry.attempted = decisionKey(step.entry);
+						}
+					}
 					publish();
 					yield* Effect.forEach(
 						plan,
@@ -672,19 +682,19 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 				);
 			}
 
-			const raw = yield* Effect.try({
-				try: () => JSON.parse(files[MANIFEST_FILE] ?? "") as unknown,
-				catch: (cause) =>
-					`"${MANIFEST_FILE}" is not valid JSON: ${String(cause)}`,
-			});
-
 			const manifest = yield* deps
 				.install(id, files)
 				.pipe(Effect.mapError((error) => error.detail));
 
 			yield* Effect.sync(() => {
 				const entry = entryOf(manifest.id);
-				entry.raw = raw;
+				// The decoded manifest is what the loader decodes again when it
+				// loads; a later listing replaces it with the source's own raw
+				// value. `deps.install` owns the one parse of `plugin.json` — it
+				// decodes, validates and writes — so the missing-manifest and
+				// invalid-JSON messages have a single home and cannot drift from
+				// what a pasted, fetched or picked install reports.
+				entry.raw = manifest;
 				entry.manifest = manifest;
 				entry.error = undefined;
 				publish();
@@ -946,10 +956,29 @@ const byName = (a: PluginRuntimeState, b: PluginRuntimeState): number => {
 /* ------------------------------------------------------------------- wiring */
 
 /**
- * Fetch a plugin's files as JSON (spec §6). Bounded twice on purpose: a
- * 20-second deadline, so a stalled host is a reported failure rather than a
- * spinner that never resolves, and a character limit, so a URL cannot hand the
- * installer a document larger than any install is allowed to be.
+ * Whether a `Content-Length` header declares a body past the source limit. The
+ * header counts **bytes** and {@link PLUGIN_SOURCE_MAX_CHARS} counts
+ * **characters**, and a UTF-8 body is never fewer bytes than characters — so
+ * this is a conservative fast reject: it can refuse a multibyte body whose
+ * character count is under the limit, which the post-read check would have
+ * accepted. Pure, and tested directly.
+ */
+export const declaredBodyOverLimit = (
+	contentLength: string | null,
+): boolean => {
+	if (contentLength === null) return false;
+	const declared = Number(contentLength);
+	return Number.isFinite(declared) && declared > PLUGIN_SOURCE_MAX_CHARS;
+};
+
+/**
+ * Fetch a plugin's files as JSON (spec §6). **Time is bounded; memory is not.**
+ * The 20-second deadline makes a stalled host a reported failure rather than a
+ * spinner that never resolves, and the text is capped to
+ * {@link PLUGIN_SOURCE_MAX_CHARS} — but only *after* it is read, so the whole
+ * body is buffered in the webview first. The one cheap memory guard is a
+ * declared `Content-Length` over the limit, refused before the body is read; a
+ * chunked response declares no length and is still read whole before the cap.
  */
 const realFetchText = (url: string): Effect.Effect<string, string> =>
 	Effect.gen(function* () {
@@ -960,6 +989,12 @@ const realFetchText = (url: string): Effect.Effect<string, string> =>
 		if (!response.ok) {
 			return yield* Effect.fail(
 				`fetching ${url} returned HTTP ${response.status}`,
+			);
+		}
+		const declared = response.headers.get("content-length");
+		if (declaredBodyOverLimit(declared)) {
+			return yield* Effect.fail(
+				`${url} declares a ${declared}-byte body, over the ${PLUGIN_SOURCE_MAX_CHARS}-character install limit; refusing to read it`,
 			);
 		}
 		const text = yield* Effect.tryPromise({

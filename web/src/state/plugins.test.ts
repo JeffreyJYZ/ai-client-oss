@@ -20,7 +20,10 @@ import { clearLog, getLogSnapshot } from "@lib/plugins/log";
 import { Duration, Effect } from "effect";
 import type { ComponentType } from "react";
 import {
+	declaredBodyOverLimit,
+	MAX_SETTLE_ROUNDS,
 	makePluginsStore,
+	PLUGIN_SOURCE_MAX_CHARS,
 	type PluginsDeps,
 	type PluginsStore,
 } from "@/state/plugins";
@@ -74,6 +77,11 @@ interface HarnessOptions {
 	readonly fetchText?: PluginsDeps["fetchText"];
 	/** The persisted settings the store boots with. */
 	readonly initialSettings?: Settings;
+	/**
+	 * Run when a load actually executes (not when it is planned), so a test can
+	 * make one load produce new work for the settle loop's next round.
+	 */
+	readonly onLoad?: (id: string) => void;
 }
 
 interface Harness {
@@ -166,6 +174,10 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 			Effect.suspend(() => {
 				loads.push(id);
 				trace.push(`load:${id}`);
+				// A load that makes new work for the settle loop's next round
+				// (finding 2's chain); runs when the load executes, not when it
+				// is planned.
+				options.onLoad?.(id);
 				return loadPlugin(raw, {
 					source,
 					// The importer reads the text the source returned, so a changed
@@ -295,6 +307,23 @@ describe("install", () => {
 
 		expect(h.store.getPlugins().notice?.ok).toBe(false);
 		expect(h.store.getPlugins().notice?.text ?? "").toContain("name");
+		expect(h.installed.size).toBe(0);
+	});
+
+	test("refuses a files record with no plugin.json, naming the missing file", async () => {
+		// Regression: the store used to `JSON.parse` an absent manifest's empty
+		// string first, so this reported `not valid JSON` and the loader's
+		// clearer "carries no plugin.json" was unreachable through the store.
+		const h = makeHarness();
+		h.store.start();
+
+		h.store.installFromText("", { "main.js": "export default { setup() {} }" });
+		await tick();
+
+		const text = h.store.getPlugins().notice?.text ?? "";
+		expect(h.store.getPlugins().notice?.ok).toBe(false);
+		expect(text).toContain("carries no");
+		expect(text).toContain(MANIFEST_FILE);
 		expect(h.installed.size).toBe(0);
 	});
 
@@ -723,5 +752,74 @@ describe("uninstall", () => {
 		expect(h.settings().plugins).toEqual([]);
 		expect(h.store.getPlugins().plugins).toEqual([]);
 		expect(Effect.runSync(h.registries.ui.entries())).toEqual([]);
+	});
+});
+
+describe("the URL fetch bound", () => {
+	test("refuses a declared body only when it exceeds the source limit", () => {
+		expect(declaredBodyOverLimit(null)).toBe(false);
+		expect(declaredBodyOverLimit(String(PLUGIN_SOURCE_MAX_CHARS))).toBe(false);
+		expect(declaredBodyOverLimit(String(PLUGIN_SOURCE_MAX_CHARS + 1))).toBe(
+			true,
+		);
+		expect(declaredBodyOverLimit("not a number")).toBe(false);
+		expect(declaredBodyOverLimit("")).toBe(false);
+	});
+});
+
+describe("the settle loop", () => {
+	test("no enabled plugin is stranded when the round bound is reached", async () => {
+		// Drive the bound: each plugin's load enables the next, so every round
+		// absorbs exactly one new decision and `MAX_SETTLE_ROUNDS` rounds leave
+		// the last plugin planned but never run. Recording a decision when it is
+		// *planned* (rather than when its step runs) would mark that last plugin
+		// as already tried, so no later settings change could ever retry it.
+		const ids = Array.from(
+			{ length: MAX_SETTLE_ROUNDS + 1 },
+			(_, index) => `t18.chain-${index}`,
+		);
+		let store: PluginsStore | undefined;
+		const h = makeHarness({
+			extraManifests: ids.map((id) => manifestOf({ id, name: id })),
+			initialSettings: {
+				...settingsDefaults(),
+				pluginsEnabled: true,
+				plugins: ids.map((id) => ({
+					id,
+					enabled: false,
+					version: "1.0.0",
+					capabilities: ["net"],
+					data: {},
+				})),
+			},
+			onLoad: (id) => {
+				const next = ids[ids.indexOf(id) + 1];
+				if (next !== undefined) store?.setPluginEnabled(next, true);
+			},
+		});
+		store = h.store;
+		h.store.start();
+		await tick();
+		await tick();
+
+		// The chain: enabling the first loads it, and that load enables the next.
+		h.store.setPluginEnabled(ids[0] ?? "", true);
+		await tick();
+		await tick();
+
+		const status = (id: string): string | undefined =>
+			h.store.getPlugins().plugins.find((plugin) => plugin.state.id === id)
+				?.status;
+
+		// One settings change that touches no plugin's own persisted state — the
+		// gesture the log line promised would retry. Under the bug the stranded
+		// plugin is skipped by it anyway.
+		h.store.setPluginsEnabled(true);
+		await tick();
+		await tick();
+
+		// One array assertion, so a failure names every plugin's status at once.
+		expect(ids.map(status)).toEqual(ids.map(() => "loaded"));
+		expect(Effect.runSync(h.registries.ui.entries()).length).toBe(ids.length);
 	});
 });

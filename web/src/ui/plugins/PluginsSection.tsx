@@ -2,6 +2,7 @@ import {
 	PLUGIN_TRUST_POINTS,
 	PLUGIN_TRUST_SUMMARY,
 } from "@lib/plugins/consent";
+import { MANIFEST_FILE } from "@lib/plugins/loader";
 import { Effect } from "effect";
 import { type ChangeEvent, useRef, useState } from "react";
 import {
@@ -61,10 +62,12 @@ export function PluginsSection() {
 	const fileInputRef = useRef<HTMLInputElement>(null);
 
 	const installPasted = (): void => {
-		if (manifestText.trim() === "" || entryName.trim() === "") return;
+		const name = entryName.trim();
+		if (manifestText.trim() === "" || name === "") return;
+		if (name === MANIFEST_FILE) return;
 		installFromText("", {
-			"plugin.json": manifestText,
-			[entryName.trim()]: entryText,
+			[MANIFEST_FILE]: manifestText,
+			[name]: entryText,
 		});
 	};
 
@@ -211,7 +214,8 @@ export function PluginsSection() {
 						disabled={
 							!plugins.enabled ||
 							manifestText.trim() === "" ||
-							entryName.trim() === ""
+							entryName.trim() === "" ||
+							entryName.trim() === MANIFEST_FILE
 						}
 					>
 						Install pasted plugin
@@ -234,7 +238,8 @@ export function PluginsSection() {
 				<p className="text-xs text-neutral-500">
 					Picked files are keyed by their own names and must include
 					plugin.json. The entry file name above must match the manifest&apos;s
-					entry.
+					entry, and cannot be plugin.json itself — that name is the
+					manifest&apos;s.
 				</p>
 				{pickError === null ? null : (
 					<p className="text-sm text-red-400">{pickError}</p>
