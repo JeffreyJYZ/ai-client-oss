@@ -33,6 +33,8 @@ export const slotNotes: Record<string, string> = {
 	"settings.nav": "Settings' section navigation.",
 	"settings.sections":
 		"The Settings sections themselves; every built-in section and every plugin section is one contribution.",
+	"settings.plugin.controls":
+		"The controls a plugin contributes for its own row in the Plugins section. That row renders only the entries whose owner is the plugin itself, so a plugin's settings appear in its own row and nowhere else.",
 	"overlay.root":
 		"Where host-rendered overlays live: toasts, modals and confirms.",
 	"command.palette.results": "The command palette's result list.",

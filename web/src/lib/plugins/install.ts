@@ -1,6 +1,6 @@
 import { PluginLoadFailed } from "@lib/plugins/errors";
 import { MANIFEST_FILE, type PluginInstaller } from "@lib/plugins/loader";
-import { PLUGIN_STORE } from "@lib/plugins/source/web";
+import { PLUGIN_STORE, pluginDatabase } from "@lib/plugins/source/web";
 import { invoke } from "@tauri-apps/api/core";
 import { Effect } from "effect";
 
@@ -8,27 +8,21 @@ import { Effect } from "effect";
  * The write half of the web `PluginSource` (spec §6/§18): the same IndexedDB
  * store `source/web.ts` reads from, written to instead.
  *
- * **Why this is a second module rather than two methods on `source/web.ts`.**
- * `src/lib/plugins/source/**` belongs to Task 20 (the Tauri adapter and the
- * platform branch), and a Task 20 implementer is mid-edit in this tree, so the
- * read adapter could not be extended here without two writers on one file. The
- * two halves are therefore split by direction — reading in `source/web.ts`,
- * writing here — and the manager composes them (`runtime.ts`).
+ * **Why this is a second module rather than the read adapter's other method.**
+ * `PluginSource` (`loader.ts`) only reads — the loader never writes — so
+ * installing is a separate seam, `PluginInstaller`, and it carries a whole
+ * plugin as one record. The split is by direction: every reader lives under
+ * `source/**` (one per platform, chosen by `source/index.ts`), both writers live
+ * here, and the record they agree on is `{ id, manifest, files }`.
  *
- * **The disclosed hazard.** A record is `{ id, manifest, files }`, and both
- * halves must agree on the database name and the object store. The store name is
- * imported (one home, `source/web.ts`); the database name is *not* exported
- * there, so `DB_NAME` is repeated below and the upgrade path recreates the store
- * if this side opens the database first. Move the name into a shared module
- * (Task 20 or the next change to `source/**`) so the two cannot drift.
+ * **The database is not declared here.** Its name, version, object store and
+ * upgrade belong to the module that owns the schema, `source/web.ts`; this file
+ * imports that connection, so the two halves cannot drift onto two versions of
+ * one database — a mismatch which would list every installed plugin as nothing.
  *
  * Nothing here parses or validates: `loader.ts`'s `installPlugin` decodes the
  * manifest before calling, so an invalid plugin never reaches this file.
  */
-
-const DB_NAME = "ai-client-plugins";
-/** The schema version `source/web.ts` opens with; both must match. */
-const DB_VERSION = 1;
 
 /** One installed plugin's record, exactly as `source/web.ts` stores it. */
 interface StoredPlugin {
@@ -42,32 +36,6 @@ const loadFailed = (id: string, detail: string): PluginLoadFailed =>
 	new PluginLoadFailed({ detail, pluginId: id });
 
 /**
- * Open (creating on first run) the plugin database. `Effect.callback` keeps the
- * callback-based Web API inside Effect — the repo pattern for IndexedDB, never a
- * raw `Promise`.
- */
-const openDatabase = (): Effect.Effect<IDBDatabase, string> =>
-	Effect.callback<IDBDatabase, string>((resume) => {
-		if (typeof indexedDB === "undefined") {
-			resume(Effect.fail("IndexedDB unavailable"));
-			return;
-		}
-		const request = indexedDB.open(DB_NAME, DB_VERSION);
-		request.onupgradeneeded = () => {
-			const database = request.result;
-			if (!database.objectStoreNames.contains(PLUGIN_STORE)) {
-				database.createObjectStore(PLUGIN_STORE, { keyPath: "id" });
-			}
-		};
-		request.onsuccess = () => resume(Effect.succeed(request.result));
-		request.onerror = () =>
-			resume(Effect.fail(String(request.error ?? "IndexedDB open failed")));
-	});
-
-/** Memoized connection so every write reuses one database handle. */
-const cachedDatabase = Effect.cached(openDatabase());
-
-/**
  * Run one write against the store, resolving when the **transaction** commits
  * rather than when the request succeeds: a request that succeeded inside a
  * transaction that then aborts did not persist, and reporting it as installed
@@ -78,8 +46,7 @@ const withWriteStore = (
 	run: (store: IDBObjectStore) => void,
 ): Effect.Effect<void, PluginLoadFailed> =>
 	Effect.gen(function* () {
-		const open = yield* cachedDatabase;
-		const database = yield* open.pipe(
+		const database = yield* pluginDatabase.pipe(
 			Effect.mapError((detail) => loadFailed(id, detail)),
 		);
 		const transaction = yield* Effect.try({
