@@ -384,27 +384,68 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 		if (outcome.ok) publishHostEvent("plugin-loaded", { id });
 	};
 
+	/**
+	 * Run a prepared plugin's `setup` — but only while `entry` is still the entry
+	 * the load was planned for (spec §6/§9). {@link preparePlugin} hands back an
+	 * **open** scope, and the entry can change in the gap before `setup` runs:
+	 * `uninstall` runs on its own fiber and can `entries.delete(id)` while the
+	 * source is being prepared. Activating then would register the plugin's
+	 * contributions into a scope nothing will ever close — live and registered,
+	 * the store no longer tracking it. So on mismatch the prepared scope is closed
+	 * and `None` is returned, without activating.
+	 *
+	 * This is the **only** door to `deps.activate`; a handoff that calls it
+	 * directly reintroduces that orphan.
+	 */
+	const activateIfCurrent = (
+		id: string,
+		entry: Entry,
+		prepared: PreparedPlugin,
+	): Effect.Effect<Option.Option<LoadedPlugin>, PluginError, HostServices> =>
+		entries.get(id) === entry
+			? deps.activate(prepared).pipe(Effect.map(Option.some))
+			: Scope.close(prepared.scope, Exit.void).pipe(
+					Effect.as(Option.none<LoadedPlugin>()),
+				);
+
 	/** Load one plugin, turning every outcome — including a defect — into state. */
 	const loadStep = (entry: Entry): Effect.Effect<void, never, HostServices> => {
 		const id = entry.persisted.id;
 		const raw = entry.raw;
-		const decision: Effect.Effect<LoadedPlugin, PluginError, HostServices> =
-			raw === undefined
-				? Effect.fail(
-						new PluginLoadFailed({
-							detail: `plugin "${id}" is not installed, so there is nothing to load`,
-							pluginId: id,
-						}),
-					)
-				: deps.prepare(id, raw).pipe(Effect.flatMap(deps.activate));
+		const decision: Effect.Effect<
+			Option.Option<LoadedPlugin>,
+			PluginError,
+			HostServices
+		> = raw === undefined
+			? Effect.fail(
+					new PluginLoadFailed({
+						detail: `plugin "${id}" is not installed, so there is nothing to load`,
+						pluginId: id,
+					}),
+				)
+			: deps
+					.prepare(id, raw)
+					.pipe(
+						Effect.flatMap((prepared) =>
+							activateIfCurrent(id, entry, prepared),
+						),
+					);
 		return decision.pipe(
-			Effect.map((loaded): LoadOutcome => ({ ok: true, loaded })),
+			Effect.map(
+				(maybe): Option.Option<LoadOutcome> =>
+					Option.map(maybe, (loaded): LoadOutcome => ({ ok: true, loaded })),
+			),
 			Effect.catchCause((cause) =>
-				Effect.succeed<LoadOutcome>({ ok: false, detail: describe(cause) }),
+				Effect.succeed(
+					Option.some<LoadOutcome>({ ok: false, detail: describe(cause) }),
+				),
 			),
 			Effect.flatMap((outcome) =>
 				Effect.sync(() => {
-					applyLoad(id, entry, outcome);
+					// `None` means the entry was gone before the plugin activated,
+					// so there is no outcome to apply — and nothing was activated.
+					if (Option.isNone(outcome)) return;
+					applyLoad(id, entry, outcome.value);
 				}),
 			),
 		);
@@ -479,11 +520,11 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 	 * of this fiber — no repaint interleaves in practice — and is preferable to
 	 * the alternative a swap produced, a *permanent* retraction.
 	 *
-	 * The entry is re-checked **immediately after** the acquire, before anything
-	 * is committed: `uninstall` runs on its own fiber and can delete the entry
-	 * while the new source is being prepared, in which case the prepared scope is
-	 * closed and the step stops (activating it would register into a scope the
-	 * store no longer tracks).
+	 * The activation goes through {@link activateIfCurrent}, which closes the
+	 * prepared scope instead of activating when the entry has gone (or been
+	 * replaced) in the gap after the acquire — `uninstall` runs on its own fiber
+	 * and can delete the entry while the new source is being prepared, in which
+	 * case the reload commits nothing.
 	 */
 	const swapStep = (entry: Entry): Effect.Effect<void, never, HostServices> => {
 		const id = entry.persisted.id;
@@ -517,16 +558,6 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 					});
 				}
 				const prepared = outcome.prepared;
-				// The entry can be gone by now. `uninstall` runs on its own fiber
-				// and can delete it while the new source was being prepared, so
-				// activating here would register contributions into a scope the
-				// store no longer tracks — a live plugin it can never unload.
-				// Nothing has been committed yet (the old instance is untouched
-				// and `setup` has not run), so close the scope the reload would
-				// have activated and stop.
-				if (entries.get(id) !== entry) {
-					return Scope.close(prepared.scope, Exit.void);
-				}
 				return Effect.gen(function* () {
 					// The new source is acquired and imported, so the reload is
 					// committed from here: close the old instance, then run the new
@@ -545,26 +576,39 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 							),
 						);
 					}
-					const activated = yield* deps.activate(prepared).pipe(
-						Effect.map((loaded): LoadOutcome => ({ ok: true, loaded })),
+					// `activateIfCurrent` closes the prepared scope instead of
+					// activating when the entry has gone (or been replaced) — the
+					// reload then commits nothing and touches no state.
+					const activated = yield* activateIfCurrent(id, entry, prepared).pipe(
+						Effect.map(
+							(maybe): Option.Option<LoadOutcome> =>
+								Option.map(
+									maybe,
+									(loaded): LoadOutcome => ({ ok: true, loaded }),
+								),
+						),
 						Effect.catchCause((cause) =>
-							Effect.succeed<LoadOutcome>({
-								ok: false,
-								detail: describe(cause),
-							}),
+							Effect.succeed(
+								Option.some<LoadOutcome>({
+									ok: false,
+									detail: describe(cause),
+								}),
+							),
 						),
 					);
 					yield* Effect.sync(() => {
+						if (Option.isNone(activated)) return;
+						const outcome = activated.value;
 						if (entries.get(id) !== entry) return;
 						entry.pending = false;
-						if (activated.ok) {
-							entry.loaded = activated.loaded;
-							entry.manifest = activated.loaded.manifest;
+						if (outcome.ok) {
+							entry.loaded = outcome.loaded;
+							entry.manifest = outcome.loaded.manifest;
 							entry.error = undefined;
 							recordLog(
 								id,
 								"info",
-								`reloaded version ${activated.loaded.manifest.version}`,
+								`reloaded version ${outcome.loaded.manifest.version}`,
 							);
 							publish();
 							publishHostEvent("plugin-loaded", { id });
@@ -575,9 +619,9 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 						// an empty registry; recording the decision key stops the
 						// settle loop retrying an unchanged failure.
 						entry.loaded = undefined;
-						entry.error = activated.detail;
+						entry.error = outcome.detail;
 						entry.attempted = decisionKey(entry);
-						recordLog(id, "error", `reload failed: ${activated.detail}`);
+						recordLog(id, "error", `reload failed: ${outcome.detail}`);
 						publish();
 					});
 				});

@@ -893,6 +893,34 @@ describe("uninstall", () => {
 		expect(Effect.runSync(h.registries.ui.entries())).toEqual([]);
 	});
 
+	test("an uninstall that lands while the initial load prepares the same plugin leaves no ghost", async () => {
+		// The same window as the reload case, on the ordinary load path:
+		// `loadStep` prepares the source, then activates it, and `uninstall` can
+		// delete the entry in between. Activating then registers into a scope the
+		// store will never close. Same seam as the reload race.
+		let store: PluginsStore | undefined;
+		let armed = false;
+		const h = makeHarness({
+			onLoad: (id) => {
+				if (!armed) return;
+				armed = false;
+				store?.uninstall(id);
+			},
+		});
+		store = h.store;
+		h.store.start();
+		h.store.installFromText("", filesOf());
+		await tick();
+
+		armed = true;
+		h.store.setPluginsEnabled(true);
+		h.store.setPluginEnabled("t18.fixture", true);
+		await tick();
+
+		expect(h.store.getPlugins().plugins).toEqual([]);
+		expect(Effect.runSync(h.registries.ui.entries())).toEqual([]);
+	});
+
 	test("unloads, removes the files and drops the persisted entry", async () => {
 		const h = makeHarness();
 		h.store.start();
