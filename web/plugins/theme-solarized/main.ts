@@ -18,6 +18,9 @@ import { createElement, useState } from "react";
  * - the **`settings` registry** renders a plugin section
  *   (`host.settings.registerSection`) that looks like a built-in one, because it
  *   is the same `settings.sections` slot;
+ * - the **component kit**: the toggle is `host.ui.kit.Button` — the app's own
+ *   `Button`, on the app's React instance — so the section's control matches a
+ *   built-in's without copying a single Tailwind class;
  * - **persistence**: the on/off choice is stored with `host.storage`, which
  *   rides `Settings.plugins[].data` inside the app's own settings blob, so a
  *   page reload re-applies the theme with nothing clicked.
@@ -75,23 +78,24 @@ export default {
 			order: 95,
 			component: function SolarizedSection() {
 				const [on, setOn] = useState(readApplied());
+				// The body renders *inside* the host's section chrome
+				// (`settings.registerSection` wraps it in the kit's `Section`), so
+				// the kit component this section needs is the control: `Button` is
+				// the app's own, and takes no Tailwind class. `FieldRow` is
+				// deliberately not used — it is a column field row (`LABEL` above
+				// a control) and this is one inline action, so a wrong component
+				// is not forced in just to prove the kit.
+				const { Button } = host.ui.kit;
 				return createElement(
-					"label",
+					Button,
 					{
-						className:
-							"flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500",
-					},
-					createElement("input", {
-						type: "checkbox",
-						checked: on,
-						className: "h-4 w-4 accent-neutral-300",
-						onChange: (event: { target: { checked: boolean } }) => {
-							const next = event.target.checked;
+						onClick: () => {
+							const next = !on;
 							setOn(next);
 							setApplied(next);
 						},
-					}),
-					"Apply the Solarized colour variables",
+					},
+					on ? "Turn off the Solarized theme" : "Apply the Solarized theme",
 				);
 			},
 		});
