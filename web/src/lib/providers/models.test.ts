@@ -116,9 +116,9 @@ describe("testModel isolates a plugin protocol's own members", () => {
 	});
 
 	test("a plugin header value whose own `String` throws is still a typed message", async () => {
-		// Verified against the installed runtime: `fetch` rejects with the raw
-		// plugin-supplied header value when its coercion throws, so the
-		// rejection reason is plugin code too.
+		// Verified against the installed runtime: when a plugin-supplied header
+		// value's own coercion throws, `fetch` rejects with the value that
+		// coercion threw — so the rejection reason is plugin code too.
 		const s = services();
 		register(
 			s,
