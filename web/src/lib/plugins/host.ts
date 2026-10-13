@@ -2,6 +2,7 @@ import { type Db, db } from "@lib/db";
 import { isDesktop } from "@lib/platform";
 import { PluginFault } from "@lib/plugins/errors";
 import { type HostEvent, type SlotId, slotIdSchema } from "@lib/plugins/ids";
+import { reportingLogger } from "@lib/plugins/log";
 import { makeNotifyService, type NotifyService } from "@lib/plugins/notify";
 import {
 	type Disposable,
@@ -312,7 +313,9 @@ export const makeHost = (
 		// The platform bridge, narrowed to this plugin: on desktop the plugin
 		// gets a handle bound to its own id, on web `Option.none()`.
 		native: Option.map(nativeHandle, (handle) => handle.forPlugin(pluginId)),
-		log: makeLogger(pluginId),
+		// Wrapped, not replaced: `host.log` still reaches the console, and every
+		// line is also kept for the Plugins section's log panel (spec §9).
+		log: reportingLogger(pluginId, makeLogger(pluginId)),
 		on: (event, handler) => {
 			const handle = subscribeHostEvent(event, handler, pluginId);
 			onUnload(scope, handle.dispose);

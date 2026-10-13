@@ -238,3 +238,79 @@ export const loadPlugin = (
  */
 export const unloadPlugin = (plugin: LoadedPlugin): Effect.Effect<void> =>
 	Scope.close(plugin.scope, Exit.void);
+
+/** The one file an install must carry (spec §6) — the manifest's own name. */
+export const MANIFEST_FILE = "plugin.json";
+
+/**
+ * The **write** half of the platform source adapter (spec §6/§18). `PluginSource`
+ * only reads, because the loader only reads; installing needs the other
+ * direction, and it is a separate seam so a test — and the manager — can hold an
+ * install without an IndexedDB or a plugin directory.
+ *
+ * `manifest` is the decoded value, passed alongside the raw `files` because
+ * that is what a record holds: the manifest as a value for the loader to decode,
+ * and every file's text for the plugin to read.
+ */
+export interface PluginInstaller {
+	readonly write: (
+		id: string,
+		manifest: unknown,
+		files: Readonly<Record<string, string>>,
+	) => Effect.Effect<void, PluginLoadFailed>;
+	readonly remove: (id: string) => Effect.Effect<void, PluginLoadFailed>;
+}
+
+/**
+ * Validate a plugin's files and hand them to the installer (spec §6/§9). This
+ * is the one place an install is decoded, so every entry point — pasted text, a
+ * URL, a file picker — validates identically: the `plugin.json` text is parsed,
+ * decoded against `manifestSchema`, and only then written.
+ *
+ * `id` is the caller's own name for what it is installing, or `""` when it does
+ * not have one (a paste, whose id can only come from the manifest). A non-empty
+ * `id` that disagrees with the manifest is refused rather than written under a
+ * name the manifest does not describe — nothing reaches the installer on any
+ * refusal path.
+ */
+export const installPlugin = (
+	id: string,
+	files: Readonly<Record<string, string>>,
+	installer: PluginInstaller,
+): Effect.Effect<PluginManifest, PluginError> =>
+	Effect.gen(function* () {
+		const text = files[MANIFEST_FILE];
+		if (typeof text !== "string") {
+			return yield* new ManifestInvalid({
+				detail: `the install carries no "${MANIFEST_FILE}": a plugin install is a record of its files, keyed by file name`,
+				pluginId: id,
+			});
+		}
+
+		const raw = yield* Effect.try({
+			try: () => JSON.parse(text) as unknown,
+			catch: (cause) =>
+				new ManifestInvalid({
+					detail: `"${MANIFEST_FILE}" is not valid JSON: ${String(cause)}`,
+					pluginId: id,
+				}),
+		});
+
+		const manifest = yield* decodeManifest(raw);
+
+		if (id !== "" && manifest.id !== id) {
+			return yield* new ManifestInvalid({
+				detail: `the manifest's id "${manifest.id}" does not match the install's id "${id}"; nothing was written`,
+				pluginId: id,
+			});
+		}
+
+		yield* installer.write(manifest.id, raw, files);
+		return manifest;
+	});
+
+/** Delete an installed plugin's files (spec §6). */
+export const removePlugin = (
+	id: string,
+	installer: PluginInstaller,
+): Effect.Effect<void, PluginLoadFailed> => installer.remove(id);

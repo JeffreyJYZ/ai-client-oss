@@ -29,6 +29,7 @@ export const slotIds = [
 	"settings.root",
 	"settings.nav",
 	"settings.sections",
+	"settings.plugin.controls",
 	"overlay.root",
 	"command.palette.results",
 ] as const;

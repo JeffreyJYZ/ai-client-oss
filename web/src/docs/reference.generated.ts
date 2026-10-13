@@ -170,7 +170,7 @@ export const reference: DocReference = {
 				{
 					"name": "Host",
 					"kind": "interface",
-					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; readonly ui: HostRegistry<Contribution>; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; readonly themes: HostRegistry<RegistryEntry>; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, absent until Task 20 (spec §7). */ readonly native: Option.Option<NativeHandle>; /** Scoped logging (spec §2). */ readonly log: Logger; /** Subscribe to a host event; the handler stops when the plugin unloads. */ readonly on: ( event: HostEvent, handler: (payload: unknown) => void, ) => Disposable; }",
+					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; readonly ui: HostRegistry<Contribution>; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; readonly themes: HostRegistry<RegistryEntry>; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, narrowed to this plugin; `Option.none()` on web (spec §7). */ readonly native: Option.Option<NativeHandle>; /** Scoped logging (spec §2). */ readonly log: Logger; /** Subscribe to a host event; the handler stops when the plugin unloads. */ readonly on: ( event: HostEvent, handler: (payload: unknown) => void, ) => Disposable; }",
 					"description": "The surface a plugin is compiled against (spec §2). Every method that adds something returns a `Disposable`, whose removal is attached to that plugin's `Scope` — closing the scope is unload, so a disabled plugin leaves no trace. Two kinds of member live here, deliberately split by signature. The **synchronous registries** (`ui`, `commands`, `settings`, `tools`, `providers`, `pipeline`, `renderers`, `themes`) register now and read as Effects/Streams. The **services** a plugin calls for behaviour (`chat`, `db`, `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface, populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with the plugin's `Scope`.",
 					"members": [
 						"version",
@@ -903,17 +903,23 @@ export const reference: DocReference = {
 				{
 					"name": "NativeHandle",
 					"kind": "interface",
-					"signature": "export interface NativeHandle { /** Absolute path of the plugin's scoped data directory (spec §7). */ readonly dataDir: string; }",
-					"description": "The desktop-only native surface (spec §7): the scoped data directory and the file commands the Tauri bridge exposes. Task 20 supplies a real handle; until then `host.native` is `Option.none()`, so a plugin checks the `Option` rather than calling a method that silently does nothing.",
+					"signature": "export interface NativeHandle { /** * The same bridge narrowed to one plugin id. The host calls this with the * plugin it is building, which is what binds the handle; calling it with * another id is possible (see the type's warning) but the API never does. */ readonly forPlugin: (pluginId: string) => NativeHandle; /** Absolute path of the plugin's scoped data directory, created on use. */ readonly dataDir: Effect.Effect<string, string>; /** Read a file inside the scoped data directory. */ readonly read: (relPath: string) => Effect.Effect<string, string>; /** Write a file inside the scoped data directory. */ readonly write: ( relPath: string, contents: string, ) => Effect.Effect<void, string>; /** List the names inside the scoped data directory, or a subdirectory. */ readonly list: (relPath: string) => Effect.Effect<readonly string[], string>; /** Delete a file or directory inside the scoped data directory. */ readonly remove: (relPath: string) => Effect.Effect<void, string>; /** * Send a request through the Rust shell, bypassing the browser's CORS limit * the way `fetch_url` does. The `net` capability is **not enforceable** (the * webview has a global `fetch`); this reuses the app's own `http_request` * command and is a convenience, never a gate. */ readonly http: (request: { readonly method: \"GET\" | \"POST\"; readonly url: string; readonly headers?: Readonly<Record<string, string>>; readonly body?: string; }) => Effect.Effect<string, string>; }",
+					"description": "The desktop-only native surface (spec §7): the scoped data directory and the file commands the Tauri bridge exposes. The host narrows the platform bridge to the current plugin with {@link NativeHandle.forPlugin}, so a plugin only ever names its own `plugin-data/<id>/`; Rust re-checks every resolved path after canonicalizing it. **`plugin-data` is path-scoped in Rust; it is not a sandbox.** A plugin is full-trust code (spec's threat model): it can call the raw command with any id, and the `http` member rides the same `net` that is **unenforceable** because the webview has a global `fetch`. The consent UI states exactly this.",
 					"members": [
-						"dataDir"
+						"forPlugin",
+						"dataDir",
+						"read",
+						"write",
+						"list",
+						"remove",
+						"http"
 					]
 				},
 				{
 					"name": "nativeHandle",
 					"kind": "const",
 					"signature": "export const nativeHandle: Option.Option<NativeHandle>;",
-					"description": "The native handle, absent until the desktop bridge lands (Task 20).",
+					"description": "The platform's native bridge (spec §7), chosen by `isDesktop` exactly as the db adapter is in `lib/db/index.ts`: the desktop shell's real handle, or `Option.none()` on the web build, which has no filesystem. `host.native` is this value narrowed to the current plugin, so a plugin checks the `Option` rather than calling a method that silently does nothing.",
 					"members": []
 				},
 				{
@@ -1111,15 +1117,15 @@ export const reference: DocReference = {
 				{
 					"name": "resolveTool",
 					"kind": "const",
-					"signature": "export const resolveTool = (name: string): Effect.Effect<Option.Option<Tool>, never, HostServices> => …",
-					"description": "The registered tool called `name`, or `none`.",
+					"signature": "export const resolveTool = (name: string): Effect.Effect<Option.Option<ToolEntry>, never, HostServices> => …",
+					"description": "The registered tool called `name`, or `none` — the **entry**, not the bare `Tool`: it carries `owner`, the plugin that registered it, so a caller that isolates a fault can name the plugin alongside the tool (the same widening `resolveProvider` makes, for the same reason).",
 					"members": []
 				},
 				{
 					"name": "executeTool",
 					"kind": "const",
 					"signature": "export const executeTool = (name: string, call: ToolCallData, ctx: ToolExecCtx = {}): Effect.Effect<ToolOutcome, never, HostServices> => …",
-					"description": "Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown name used to fall through into the fetch path, which existed only because there were two tools and no registry; with a registry a miss is its own case and fails with its own sentence. The invariant is preserved — a string result either way, never an exception out of the loop. The execution is **failure-isolated** (spec §9): a third-party tool whose `execute` throws, or returns a failed/defected effect, is a logged `PluginFault` and a failed `ToolOutcome` — never a defect that takes the turn down. An interruption is re-raised, so a stopped turn stays a stop. `ctx` defaults to an empty context: the turn-scoped values (the TinyFish key) are the caller's to pass, and the loop passes the turn's own context. The default exists only so a caller that needs nothing (`executeTool(name, call)`) need not build one.",
+					"description": "Execute one tool call (spec §5). **Spec refinement, deliberate:** an unknown name used to fall through into the fetch path, which existed only because there were two tools and no registry; with a registry a miss is its own case and fails with its own sentence. The invariant is preserved — a string result either way, never an exception out of the loop. The execution is **failure-isolated** (spec §9): a third-party tool whose `execute` throws, or returns a failed/defected effect, is a logged `PluginFault` — naming the plugin that registered the tool, through {@link resolveTool}'s entry — and a failed `ToolOutcome`, never a defect that takes the turn down. An interruption is re-raised, so a stopped turn stays a stop. `ctx` defaults to an empty context: the turn-scoped values (the TinyFish key) are the caller's to pass, and the loop passes the turn's own context. The default exists only so a caller that needs nothing (`executeTool(name, call)`) need not build one.",
 					"members": []
 				}
 			]
@@ -1207,6 +1213,10 @@ export const reference: DocReference = {
 			"description": "The Settings sections themselves; every built-in section and every plugin section is one contribution."
 		},
 		{
+			"id": "settings.plugin.controls",
+			"description": "A named UI region a contribution can render into."
+		},
+		{
 			"id": "overlay.root",
 			"description": "Where host-rendered overlays live: toasts, modals and confirms."
 		},
@@ -1256,9 +1266,9 @@ export const reference: DocReference = {
 	"manifestFields": [
 		{
 			"name": "id",
-			"schema": "z.string().min(1)",
+			"schema": "z .string() .regex( PLUGIN_ID_PATTERN, \"a plugin id may use only letters, digits, '.', '_' and '-', with no leading or trailing '.'\", )",
 			"required": true,
-			"description": ""
+			"description": "One plain path component — the allowlist in `PLUGIN_ID_PATTERN`, mirrored by `safe_id` in `web/src-tauri/src/lib.rs`, so a bad id fails here at install rather than at first use in the native bridge."
 		},
 		{
 			"name": "name",
