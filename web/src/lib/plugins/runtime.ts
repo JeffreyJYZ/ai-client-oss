@@ -14,6 +14,7 @@ import type {
 } from "@lib/plugins/loader";
 import { moduleImporter } from "@lib/plugins/moduleImport";
 import { pluginSource } from "@lib/plugins/source";
+import { listen } from "@tauri-apps/api/event";
 import { Effect, ManagedRuntime } from "effect";
 
 /**
@@ -35,6 +36,55 @@ export { moduleImporter } from "@lib/plugins/moduleImport";
  * globals are set for that plugin, which is why it is not a static value.
  */
 export { pluginSource } from "@lib/plugins/source";
+
+/**
+ * The Tauri event the desktop watcher (spec §6, `lib.rs`) emits when a plugin's
+ * source changes. Rust owns the string; this is its one JS reader.
+ */
+export const PLUGIN_CHANGED_EVENT = "plugin-changed";
+
+/** The desktop watcher's payload. `id` is untrusted: it crosses the IPC boundary. */
+interface PluginChangedPayload {
+	readonly id?: unknown;
+}
+
+/**
+ * Subscribe to the desktop watcher's `plugin-changed` events (spec §6), calling
+ * `handler` with the id of the plugin whose source changed, and return the
+ * unsubscriber.
+ *
+ * On the web build there is no watcher — plugin source lives in IndexedDB and no
+ * file-system change can happen under it — so this is a no-op that reports
+ * nothing; the Plugins section's manual action is the web build's reload door.
+ *
+ * `listen` is a promise, so it is wrapped in `Effect` (the subsystem is Effect
+ * all the way down, hence no `await`), and a failed subscription is a logged
+ * warning rather than a throw: hot reload is a convenience and the app must run
+ * without it. The payload is untrusted, so a missing or non-string `id` is
+ * dropped rather than dispatched.
+ */
+export const subscribePluginChanges = (
+	handler: (pluginId: string) => void,
+): Effect.Effect<() => void> =>
+	isDesktop
+		? Effect.tryPromise({
+				try: () =>
+					listen<PluginChangedPayload>(PLUGIN_CHANGED_EVENT, (event) => {
+						const id = event.payload?.id;
+						if (typeof id === "string" && id !== "") handler(id);
+					}),
+				catch: (cause) =>
+					new PluginLoadFailed({
+						detail: `could not subscribe to "${PLUGIN_CHANGED_EVENT}": ${String(cause)}`,
+					}),
+			}).pipe(
+				Effect.tapError((error) => Effect.logWarning(error)),
+				Effect.map((unlisten): (() => void) => () => {
+					void unlisten();
+				}),
+				Effect.orElseSucceed(() => () => {}),
+			)
+		: Effect.succeed(() => {});
 
 /**
  * The install adapter (spec §6/§18), re-exported here for the same reason: one

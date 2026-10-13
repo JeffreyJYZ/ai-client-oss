@@ -30,6 +30,12 @@
 	// Records the plugin-scoped writes a proof drives through `host.native`, so
 	// the transcript shows what actually reached the (stubbed) Rust command.
 	window.__t20PluginWrites = [];
+	// The plugin-changed event surface (T21). `listen` calls
+	// `plugin:event|listen` with the handler `transformCallback` returned; this
+	// stub's `transformCallback` is the identity, so the stored `handler` is the
+	// real function, and `window.__t21Fire` drives it the way Rust's `emit` would.
+	window.__t21Listeners = {};
+	window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
 	window.__TAURI_INTERNALS__ = {
 		invoke: (cmd, args) => {
 			if (cmd === "plugin:app|version") return Promise.resolve("0.2.3");
@@ -49,7 +55,9 @@
 				]);
 			}
 			if (cmd === "plugin_read_file") {
-				return Promise.resolve("export default { setup() {} }");
+				return Promise.resolve(
+					'export default { setup(host) { host.log.info("t20 fixture loaded"); } }',
+				);
 			}
 			if (cmd === "plugin_data_dir") {
 				return Promise.resolve("/tmp/ai-client-stub/plugin-data/" + args.id);
@@ -61,11 +69,24 @@
 			if (cmd === "plugin_fs_read") return Promise.resolve("stub data");
 			if (cmd === "plugin_fs_list") return Promise.resolve(["a.txt"]);
 			if (cmd === "plugin_fs_delete") return Promise.resolve(null);
+			if (cmd === "plugin:event|listen") {
+				const list = (window.__t21Listeners[args.event] ??= []);
+				list.push(args.handler);
+				return Promise.resolve(1);
+			}
+			if (cmd === "plugin:event|unlisten") return Promise.resolve(null);
 			return Promise.reject(
 				new Error("desktop stub: " + cmd + " is not implemented"),
 			);
 		},
 		transformCallback: (cb) => cb,
+	};
+	// Deliver one event to every stub listener, exactly as an `emit` would. The
+	// event id shape matches `@tauri-apps/api/event`'s `Event<T>`.
+	window.__t21Fire = (event, payload) => {
+		const list = window.__t21Listeners[event] ?? [];
+		for (const handler of list) handler({ event, id: 0, payload });
+		return list.length;
 	};
 	window.fetch = (input, init) => {
 		const url = typeof input === "string" ? input : input.url;

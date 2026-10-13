@@ -8,6 +8,7 @@ import {
 	installFromText,
 	installFromUrl,
 	PLUGIN_SOURCE_MAX_CHARS,
+	reloadAll,
 	setPluginsEnabled,
 	usePlugins,
 } from "@/state/plugins";
@@ -142,15 +143,30 @@ export function PluginsSection() {
 			{plugins.plugins.length === 0 ? (
 				<p className="text-sm text-neutral-500">Nothing installed.</p>
 			) : (
-				<ul className="flex flex-col gap-2">
-					{plugins.plugins.map((plugin) => (
-						<PluginRow
-							key={plugin.state.id}
-							plugin={plugin}
-							master={plugins.enabled}
-						/>
-					))}
-				</ul>
+				<div className="flex flex-col gap-2">
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							onClick={reloadAll}
+							disabled={!plugins.enabled}
+							title="Re-read every installed plugin's files and load it again"
+						>
+							Reload plugins
+						</Button>
+						<span className="text-xs text-neutral-500">
+							Re-reads each plugin&apos;s files. A reload whose new source is
+							invalid keeps the running version and reports why.
+						</span>
+					</div>
+					<ul className="flex flex-col gap-2">
+						{plugins.plugins.map((plugin) => (
+							<PluginRow
+								key={plugin.state.id}
+								plugin={plugin}
+								master={plugins.enabled}
+							/>
+						))}
+					</ul>
+				</div>
 			)}
 
 			<div className="flex flex-col gap-3 border-t border-neutral-800 pt-3">

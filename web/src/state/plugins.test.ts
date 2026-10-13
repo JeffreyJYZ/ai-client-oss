@@ -86,6 +86,10 @@ interface Harness {
 	readonly unloads: readonly string[];
 	readonly settings: () => Settings;
 	readonly notifications: () => number;
+	/** Per-plugin entry text; mutate it to simulate an edit of the source. */
+	readonly entrySources: Map<string, string>;
+	/** `load:<id>` / `unload:<id>` in the order they were asked for. */
+	readonly trace: readonly string[];
 }
 
 const makeHarness = (options: HarnessOptions = {}): Harness => {
@@ -98,6 +102,11 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 	const installed = new Map<string, { files: Record<string, string> }>();
 	const loads: string[] = [];
 	const unloads: string[] = [];
+	const trace: string[] = [];
+	/** Entry text per plugin id, so a test can change a plugin's source. */
+	const entrySources = new Map<string, string>();
+	const sourceText = (id: string): string =>
+		entrySources.get(id) ?? "export default { setup() {} }";
 	const failing = new Set(options.failLoadFor ?? []);
 	const component: ComponentType<Record<string, unknown>> = () => null;
 
@@ -114,7 +123,7 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 
 	const source: PluginSource = {
 		list: () => Effect.succeed([]),
-		read: () => Effect.succeed("export default { setup() {} }"),
+		read: (id) => Effect.succeed(sourceText(id)),
 	};
 
 	/** The module a plugin id's entry evaluates to: one header marker. */
@@ -156,19 +165,25 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 			// it is planned — a failed load counts too.
 			Effect.suspend(() => {
 				loads.push(id);
+				trace.push(`load:${id}`);
 				return loadPlugin(raw, {
 					source,
-					importer: failing.has(id)
-						? {
-								importSource: () =>
-									Effect.fail(
+					// The importer reads the text the source returned, so a changed
+					// `entrySources` entry is what a reload actually sees — and a
+					// `BROKEN` marker stands in for source that cannot be imported.
+					importer: {
+						importSource: (text) =>
+							failing.has(id) || text.includes("BROKEN")
+								? Effect.fail(
 										new PluginLoadFailed({
-											detail: `plugin "${id}" refused to load`,
+											detail: failing.has(id)
+												? `plugin "${id}" refused to load`
+												: `plugin "${id}" failed to import main.js: the source is not a module`,
 											pluginId: id,
 										}),
-									),
-							}
-						: { importSource: () => Effect.succeed(moduleOf(id)) },
+									)
+								: Effect.succeed(moduleOf(id)),
+					},
 					hostFor: (pluginId, scope) => makeHost(registries, pluginId, scope),
 					timeout: Duration.millis(200),
 				});
@@ -178,6 +193,7 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 				Effect.tap(() =>
 					Effect.sync(() => {
 						unloads.push(loaded.manifest.id);
+						trace.push(`unload:${loaded.manifest.id}`);
 					}),
 				),
 			),
@@ -197,6 +213,8 @@ const makeHarness = (options: HarnessOptions = {}): Harness => {
 		unloads,
 		settings: () => settings,
 		notifications: () => notifications,
+		entrySources,
+		trace,
 	};
 };
 
@@ -536,6 +554,125 @@ describe("enable and disable", () => {
 		expect(h.loads).toEqual(["t18.fixture", "t18.fixture"]);
 		expect(h.unloads).toEqual(["t18.fixture"]);
 		expect(Effect.runSync(h.registries.ui.entries()).length).toBe(1);
+	});
+});
+
+describe("reload", () => {
+	/** Bring one plugin up and return its live contribution list. */
+	const bringUp = async (
+		h: Harness,
+		id = "t18.fixture",
+	): Promise<{
+		readonly entries: () => readonly { readonly owner: string }[];
+	}> => {
+		h.store.start();
+		h.store.installFromText("", filesOf(id === "t18.fixture" ? {} : { id }));
+		await tick();
+		h.store.setPluginsEnabled(true);
+		h.store.setPluginEnabled(id, true);
+		await tick();
+		return { entries: () => Effect.runSync(h.registries.ui.entries()) };
+	};
+
+	test("reload loads the new version before it unloads the old", async () => {
+		const h = makeHarness();
+		const { entries } = await bringUp(h);
+		const first = entries()[0];
+		expect(first).toBeDefined();
+
+		h.entrySources.set("t18.fixture", "export default { setup() {} } /* v2 */");
+		h.store.reload("t18.fixture");
+		await tick();
+
+		expect(only(h.store).status).toBe("loaded");
+		// The order is the invariant: the fresh instance is up before the old
+		// scope is closed, so no frame exists with the plugin absent.
+		expect(h.trace).toEqual([
+			"load:t18.fixture",
+			"load:t18.fixture",
+			"unload:t18.fixture",
+		]);
+		const after = entries();
+		expect(after.length).toBe(1);
+		expect(after[0]).not.toBe(first);
+	});
+
+	test("a reload whose new source is invalid keeps the old version loaded, registered and working", async () => {
+		const h = makeHarness();
+		const { entries } = await bringUp(h);
+		const first = entries()[0];
+		expect(entries().length).toBe(1);
+
+		h.entrySources.set("t18.fixture", "BROKEN — this is not a module");
+		h.store.reload("t18.fixture");
+		await tick();
+
+		const plugin = only(h.store);
+		// Still up, still registered, and the reason the reload failed is reported.
+		expect(plugin.status).toBe("loaded");
+		expect(plugin.error ?? "").toContain("failed to import");
+		// The old scope was never closed, and the live contribution is the very
+		// same object — not a replacement, not nothing.
+		expect(h.unloads).toEqual([]);
+		const after = entries();
+		expect(after.length).toBe(1);
+		expect(after[0]).toBe(first);
+		expect(
+			getLogSnapshot()
+				.map((entry) => entry.message)
+				.join("\n"),
+		).toContain("reload failed");
+	});
+
+	test("a failed reload leaves every other plugin untouched", async () => {
+		const h = makeHarness();
+		h.store.start();
+		h.store.installFromText("", filesOf());
+		h.store.installFromText("", filesOf({ id: "t18.other", name: "Other" }));
+		await tick();
+		h.store.setPluginsEnabled(true);
+		h.store.setPluginEnabled("t18.fixture", true);
+		h.store.setPluginEnabled("t18.other", true);
+		await tick();
+
+		const owners = (): readonly string[] =>
+			Effect.runSync(h.registries.ui.entries()).map((entry) => entry.owner);
+		expect([...owners()].sort()).toEqual(["t18.fixture", "t18.other"]);
+
+		h.entrySources.set("t18.fixture", "BROKEN");
+		h.store.reload("t18.fixture");
+		await tick();
+
+		const byId = new Map(
+			h.store.getPlugins().plugins.map((plugin) => [plugin.state.id, plugin]),
+		);
+		expect(byId.get("t18.fixture")?.status).toBe("loaded");
+		expect(byId.get("t18.other")?.status).toBe("loaded");
+		expect([...owners()].sort()).toEqual(["t18.fixture", "t18.other"]);
+		// Nothing was unloaded, not even the plugin whose reload failed.
+		expect(h.unloads).toEqual([]);
+	});
+
+	test("reloadAll reloads every installed plugin in one pass", async () => {
+		const h = makeHarness();
+		h.store.start();
+		h.store.installFromText("", filesOf());
+		h.store.installFromText("", filesOf({ id: "t18.other", name: "Other" }));
+		await tick();
+		h.store.setPluginsEnabled(true);
+		h.store.setPluginEnabled("t18.fixture", true);
+		h.store.setPluginEnabled("t18.other", true);
+		await tick();
+		expect(h.trace).toEqual(["load:t18.fixture", "load:t18.other"]);
+
+		h.store.reloadAll();
+		await tick();
+
+		// Each plugin gets exactly one fresh load and one old-scope close.
+		expect(h.loads.filter((id) => id === "t18.fixture").length).toBe(2);
+		expect(h.loads.filter((id) => id === "t18.other").length).toBe(2);
+		expect([...h.unloads].sort()).toEqual(["t18.fixture", "t18.other"]);
+		expect(Effect.runSync(h.registries.ui.entries()).length).toBe(2);
 	});
 });
 

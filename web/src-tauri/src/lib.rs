@@ -1,8 +1,10 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
-use std::time::Duration;
-use tauri::Manager;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::time::{Duration, SystemTime};
+use tauri::{Emitter, Manager};
 
 /// Settings live at the root of the app data dir; one file per conversation.
 const SETTINGS_FILE: &str = "settings.json";
@@ -13,6 +15,15 @@ const PLUGINS_DIR: &str = "plugins";
 
 /// Per-plugin scoped data: `<app data>/plugin-data/<id>/` (spec §7).
 const PLUGIN_DATA_DIR: &str = "plugin-data";
+
+/// The Tauri event the watcher emits when a plugin's source changes (spec §6).
+const PLUGIN_CHANGED_EVENT: &str = "plugin-changed";
+
+/// How often the plugins directory is rescanned. Polling keeps the watcher
+/// dependency-free — `notify` is not a direct dependency and this task forbids
+/// adding one — and a plugin source edit is a human gesture, so a one-second
+/// poll is plenty.
+const PLUGIN_WATCH_INTERVAL: Duration = Duration::from_millis(1000);
 
 /// Whole-request deadline: a hung host must fail the fetch rather than
 /// park the command — and the UI awaiting it — indefinitely.
@@ -378,6 +389,165 @@ fn plugin_fs_delete(app: tauri::AppHandle, id: String, rel_path: String) -> Resu
     }
 }
 
+/* --------------------------------------------------------------- watcher */
+
+/// One source file's identity: enough to notice an edit without reading it.
+type FileStamp = (SystemTime, u64);
+
+/// Editor/temp files a save can leave beside the real source; a change to one is
+/// not a plugin change.
+fn is_editor_artefact(name: &str) -> bool {
+    name.starts_with('.')
+        || name.ends_with('~')
+        || name.ends_with(".swp")
+        || name.ends_with(".swx")
+        || name.ends_with(".tmp")
+}
+
+/// The plugin id a changed path belongs to, or `None` when the change is not a
+/// plugin-source change worth reloading (spec §6). This is the watcher's whole
+/// relevance rule, split out so it can be unit-tested without a live watcher:
+///
+/// - the path must be a **file** at or below `plugins/<id>/…` — so a change
+///   under the sibling `plugin-data/` tree is not a plugin change, and neither
+///   is a change to the `plugins` directory itself;
+/// - `<id>` must pass the same allowlist the commands use, so a stray file
+///   directly in `plugins/` or a `.hidden` directory is ignored;
+/// - no component may be an editor/temp artefact.
+fn changed_plugin(plugins_root: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(plugins_root).ok()?;
+    let mut components = rel.components();
+    let id = match components.next()? {
+        std::path::Component::Normal(name) => name.to_str()?,
+        _ => return None,
+    };
+    if safe_id(id).is_err() {
+        return None;
+    }
+    let mut saw_file = false;
+    for component in components {
+        let name = match component {
+            std::path::Component::Normal(name) => name.to_str()?,
+            _ => return None,
+        };
+        if is_editor_artefact(name) {
+            return None;
+        }
+        saw_file = true;
+    }
+    if !saw_file {
+        // The plugin directory itself, not a file inside it.
+        return None;
+    }
+    Some(id.to_string())
+}
+
+/// Every file under `root`, keyed by absolute path. Directories are not
+/// recorded: a directory's mtime moves when its files do, so files alone are
+/// enough and a directory-only touch does not spuriously reload.
+fn scan_plugins(root: &Path) -> BTreeMap<PathBuf, FileStamp> {
+    let mut files = BTreeMap::new();
+    collect_files(root, &mut files);
+    files
+}
+
+fn collect_files(dir: &Path, out: &mut BTreeMap<PathBuf, FileStamp>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = entry.metadata() else {
+            continue;
+        };
+        if meta.is_dir() {
+            collect_files(&path, out);
+        } else if let Ok(modified) = meta.modified() {
+            out.insert(path, (modified, meta.len()));
+        }
+    }
+}
+
+/// The distinct plugin ids whose files differ between two scans — added, removed
+/// or modified. A path that is not a plugin source change (`changed_plugin`) is
+/// dropped here, so the caller only ever sees ids worth reloading.
+fn changed_ids(
+    before: &BTreeMap<PathBuf, FileStamp>,
+    after: &BTreeMap<PathBuf, FileStamp>,
+    plugins_root: &Path,
+) -> Vec<String> {
+    let mut ids: BTreeSet<String> = BTreeSet::new();
+    for (path, stamp) in after {
+        if before.get(path) != Some(stamp) {
+            if let Some(id) = changed_plugin(plugins_root, path) {
+                ids.insert(id);
+            }
+        }
+    }
+    for path in before.keys() {
+        if !after.contains_key(path) {
+            if let Some(id) = changed_plugin(plugins_root, path) {
+                ids.insert(id);
+            }
+        }
+    }
+    ids.into_iter().collect()
+}
+
+/// Owns the background polling thread. `Drop` sets the stop flag, so the watcher
+/// cannot outlive the app that manages it, and a single managed instance means
+/// the thread cannot be started twice and leak across reloads.
+struct PluginWatcher {
+    stop: Arc<AtomicBool>,
+}
+
+impl PluginWatcher {
+    fn start(app: tauri::AppHandle) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&stop);
+        let root = match app_data_dir(&app) {
+            Ok(dir) => dir.join(PLUGINS_DIR),
+            Err(e) => {
+                log::warn!("plugin watcher disabled: {e}");
+                return Self { stop };
+            }
+        };
+        let spawned = std::thread::Builder::new()
+            .name("plugin-watcher".into())
+            .spawn(move || {
+                // Seed from the current state so files that already exist are
+                // not reported as changes on the first tick.
+                let mut before = scan_plugins(&root);
+                while !flag.load(Ordering::Relaxed) {
+                    std::thread::sleep(PLUGIN_WATCH_INTERVAL);
+                    if flag.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let after = scan_plugins(&root);
+                    for id in changed_ids(&before, &after, &root) {
+                        let payload = serde_json::json!({ "id": id });
+                        if let Err(e) = app.emit(PLUGIN_CHANGED_EVENT, payload) {
+                            log::warn!(
+                                "plugin watcher could not emit {PLUGIN_CHANGED_EVENT}: {e}"
+                            );
+                        }
+                    }
+                    before = after;
+                }
+            });
+        if let Err(e) = spawned {
+            log::warn!("plugin watcher could not start: {e}");
+        }
+        Self { stop }
+    }
+}
+
+impl Drop for PluginWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+    }
+}
+
 /// One shared client for every fetch: the connection pool and TLS
 /// sessions are reused across calls, and `reqwest::Client` is designed
 /// to be shared, not rebuilt per request.
@@ -597,6 +767,138 @@ mod scope_tests {
     }
 }
 
+#[cfg(test)]
+mod watcher_tests {
+    use super::{changed_ids, changed_plugin, scan_plugins};
+    use std::fs;
+    use std::path::{Path, PathBuf};
+
+    /// A fresh temp root per test — no new dependency, so no `tempfile`.
+    fn temp_root(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "ai-client-plugin-watch-{}-{tag}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("create temp root");
+        dir
+    }
+
+    fn cleanup(root: &Path) {
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn a_plugin_file_is_a_plugin_change() {
+        let root = temp_root("plugin-file");
+        assert_eq!(
+            changed_plugin(&root, &root.join("acme.theme").join("main.js")).as_deref(),
+            Some("acme.theme")
+        );
+        assert_eq!(
+            changed_plugin(
+                &root,
+                &root.join("acme.theme").join("assets").join("x.png")
+            )
+            .as_deref(),
+            Some("acme.theme")
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn a_data_dir_or_temp_file_is_not_a_plugin_change() {
+        let app_data = temp_root("ignored");
+        let plugins = app_data.join("plugins");
+        // The scoped data dir is a sibling of `plugins/`, so a path under it
+        // does not even strip against the watcher's root. Checked first: it is
+        // the strongest form of the rule.
+        let data = app_data
+            .join("plugin-data")
+            .join("acme.theme")
+            .join("state.json");
+        assert_eq!(changed_plugin(&plugins, &data), None);
+
+        // Temp/editor artefacts under a plugin are not source changes.
+        for name in [
+            ".DS_Store",
+            "main.js~",
+            "main.js.swp",
+            "main.js.swx",
+            ".main.js.tmp",
+        ] {
+            assert_eq!(
+                changed_plugin(&plugins, &plugins.join("acme.theme").join(name)),
+                None,
+                "{name} must be ignored"
+            );
+        }
+        // A file directly in `plugins/` has no plugin id.
+        assert_eq!(changed_plugin(&plugins, &plugins.join("stray.js")), None);
+        // The plugin directory itself, not a file inside it.
+        assert_eq!(
+            changed_plugin(&plugins, &plugins.join("acme.theme")),
+            None
+        );
+        // A directory name that is not a valid plugin id.
+        assert_eq!(
+            changed_plugin(&plugins, &plugins.join("bad id").join("main.js")),
+            None
+        );
+        cleanup(&app_data);
+    }
+
+    #[test]
+    fn a_real_edit_is_reported_by_the_scan_and_a_temp_file_is_not() {
+        let root = temp_root("scan");
+        let plugin = root.join("acme.theme");
+        fs::create_dir_all(&plugin).expect("create plugin dir");
+        fs::write(plugin.join("plugin.json"), "{}").expect("write manifest");
+        let before = scan_plugins(&root);
+
+        // Nothing changed yet.
+        assert!(changed_ids(&before, &scan_plugins(&root), &root).is_empty());
+
+        // An edit to the entry is a change for exactly that plugin.
+        fs::write(plugin.join("main.js"), "export default {}").expect("write entry");
+        assert_eq!(
+            changed_ids(&before, &scan_plugins(&root), &root),
+            vec!["acme.theme".to_string()]
+        );
+
+        // A temp file an editor left behind is not a change.
+        let after = scan_plugins(&root);
+        fs::write(plugin.join("main.js~"), "backup").expect("write temp");
+        assert!(changed_ids(&after, &scan_plugins(&root), &root).is_empty());
+
+        // A whole plugin directory appearing is a change for its id.
+        fs::create_dir_all(root.join("acme.other")).expect("create second plugin");
+        fs::write(root.join("acme.other").join("plugin.json"), "{}").expect("write manifest");
+        assert_eq!(
+            changed_ids(&after, &scan_plugins(&root), &root),
+            vec!["acme.other".to_string()]
+        );
+        cleanup(&root);
+    }
+
+    #[test]
+    fn a_data_dir_write_is_invisible_to_the_scan() {
+        // The watcher scans only `plugins/`; a write under `plugin-data/` must
+        // not appear at all, the strongest form of "does not trigger a reload".
+        let app_data = temp_root("data-invisible");
+        let plugins = app_data.join("plugins");
+        fs::create_dir_all(plugins.join("acme.theme")).expect("create plugin dir");
+        let before = scan_plugins(&plugins);
+
+        let data = app_data.join("plugin-data").join("acme.theme");
+        fs::create_dir_all(&data).expect("create data dir");
+        fs::write(data.join("state.json"), "{}").expect("write data file");
+
+        assert!(changed_ids(&before, &scan_plugins(&plugins), &plugins).is_empty());
+        cleanup(&app_data);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -629,6 +931,10 @@ pub fn run() {
                         .build(),
                 )?;
             }
+            // The plugins directory watcher (spec §6), desktop-only by virtue of
+            // living in the shell. Managed, so dropping the app drops it and the
+            // polling thread stops at its next tick.
+            app.manage(PluginWatcher::start(app.handle().clone()));
             Ok(())
         })
         .run(tauri::generate_context!())

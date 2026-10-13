@@ -15,7 +15,12 @@ import {
 	type PluginManifest,
 	type PluginState,
 } from "@lib/plugins/manifest";
-import { loadDeps, pluginInstaller, runtime } from "@lib/plugins/runtime";
+import {
+	loadDeps,
+	pluginInstaller,
+	runtime,
+	subscribePluginChanges,
+} from "@lib/plugins/runtime";
 import { publishHostEvent } from "@lib/plugins/services";
 import { pluginSource } from "@lib/plugins/source";
 import { Cause, Duration, Effect, Option } from "effect";
@@ -150,6 +155,7 @@ export interface PluginsStore {
 	readonly uninstall: (id: string) => void;
 	readonly setPluginEnabled: (id: string, on: boolean) => void;
 	readonly reload: (id: string) => void;
+	readonly reloadAll: () => void;
 }
 
 /** One plugin's live bookkeeping. Mutated in place; never handed to React. */
@@ -177,7 +183,7 @@ interface Entry {
 /** One outstanding lifecycle decision for one plugin. */
 interface Step {
 	readonly entry: Entry;
-	readonly action: "load" | "unload";
+	readonly action: "load" | "unload" | "swap";
 }
 
 /** A load's two outcomes, kept as data so the effect never fails. */
@@ -434,6 +440,97 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 	};
 
 	/**
+	 * Reload one plugin by **swapping**, never by unloading first (spec §6/§9).
+	 * The new version is loaded into its own fresh scope while the current one is
+	 * still live; only once the new load has succeeded is the old scope closed.
+	 * A reload whose new source is invalid therefore leaves the plugin exactly as
+	 * it was — running, registered, and reporting the error — never half-unloaded,
+	 * and every other plugin is untouched.
+	 *
+	 * The registration order is what makes the swap seamless: the new load's
+	 * registrations replace the old one's by id (`Registry.add` replaces in
+	 * place), so no frame exists in which the plugin's contributions are absent,
+	 * and the old scope's close then removes only the ids the new version no
+	 * longer registers.
+	 *
+	 * The one case this cannot cover, stated rather than hidden: a new `setup`
+	 * that registers an entry and *then* throws. The failed load's scope closes
+	 * and disposes that entry by identity, but the old entry with the same id was
+	 * already evicted when the new one replaced it, so that one contribution is
+	 * lost while the old plugin's scope is still open. A bad **import** — a syntax
+	 * error, a missing default export, a bare specifier, which is the shape an
+	 * invalid source actually takes — registers nothing and is fully protected.
+	 */
+	const swapStep = (entry: Entry): Effect.Effect<void, never, HostServices> => {
+		const id = entry.persisted.id;
+		const raw = entry.raw;
+		const previous = entry.loaded;
+		const decision: Effect.Effect<LoadedPlugin, PluginError, HostServices> =
+			raw === undefined
+				? Effect.fail(
+						new PluginLoadFailed({
+							detail: `plugin "${id}" is not installed, so there is nothing to reload`,
+							pluginId: id,
+						}),
+					)
+				: deps.load(id, raw);
+
+		return decision.pipe(
+			Effect.map((loaded): LoadOutcome => ({ ok: true, loaded })),
+			Effect.catchCause((cause) =>
+				Effect.succeed<LoadOutcome>({ ok: false, detail: describe(cause) }),
+			),
+			Effect.flatMap((outcome) => {
+				if (!outcome.ok) {
+					// The failed load closed its own scope, so nothing new remains.
+					// The old instance was never touched: it keeps running and the
+					// reason is reported.
+					return Effect.sync(() => {
+						if (entries.get(id) !== entry) return;
+						entry.pending = false;
+						entry.error = outcome.detail;
+						recordLog(id, "error", `reload failed: ${outcome.detail}`);
+						publish();
+					});
+				}
+				const next = outcome.loaded;
+				return Effect.gen(function* () {
+					// Adopt the new instance first, so the plugin is never absent;
+					// then close the old scope. A state read mid-reload sees a live
+					// plugin.
+					yield* Effect.sync(() => {
+						if (entries.get(id) !== entry) return;
+						entry.loaded = next;
+						entry.manifest = next.manifest;
+						entry.error = undefined;
+						recordLog(id, "info", `reloaded version ${next.manifest.version}`);
+						publish();
+					});
+					if (previous !== undefined) {
+						yield* deps.unload(previous).pipe(
+							Effect.catchCause((cause) =>
+								Effect.sync(() => {
+									recordLog(
+										id,
+										"warn",
+										`the previous version did not unload cleanly: ${describe(cause)}`,
+									);
+								}),
+							),
+						);
+					}
+					yield* Effect.sync(() => {
+						if (entries.get(id) !== entry) return;
+						entry.pending = false;
+						publish();
+						publishHostEvent("plugin-loaded", { id });
+					});
+				});
+			}),
+		);
+	};
+
+	/**
 	 * Everything a load or unload decision depends on: the master switch, the
 	 * entry's revision (bumped by a persisted change or a reload) and whether the
 	 * source has listed it. A decision already taken with these inputs is not
@@ -452,16 +549,18 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 		const plan: Step[] = [];
 		for (const entry of entries.values()) {
 			if (entry.pending) continue;
+			const shouldRun = enabled && entry.persisted.enabled;
 			if (entry.forced) {
-				// An explicit reload: unload first, and the ordinary rule below
-				// loads it again on the next round.
+				// An explicit reload: swap the live instance for a fresh one with
+				// no unloaded gap (`swapStep`). A plugin that is not currently
+				// running has nothing to swap, so it falls through to the ordinary
+				// rule and is loaded by it.
 				entry.forced = false;
-				if (entry.loaded !== undefined) {
-					plan.push({ entry, action: "unload" });
+				if (shouldRun && entry.loaded !== undefined) {
+					plan.push({ entry, action: "swap" });
 					continue;
 				}
 			}
-			const shouldRun = enabled && entry.persisted.enabled;
 			if (shouldRun && entry.loaded === undefined) {
 				if (!listed) continue;
 				if (entry.attempted === decisionKey(entry)) continue;
@@ -506,7 +605,9 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 						(step) =>
 							step.action === "load"
 								? loadStep(step.entry)
-								: unloadStep(step.entry),
+								: step.action === "unload"
+									? unloadStep(step.entry)
+									: swapStep(step.entry),
 						{ concurrency: 1 },
 					);
 					plan = planOf();
@@ -664,12 +765,48 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 		reconcile();
 	};
 
+	/**
+	 * Reload one plugin from its source (spec §6): re-list the manifests — a
+	 * reload may be a changed `plugin.json`, which the source lists verbatim —
+	 * then force a swap of that plugin's live instance. The entry **text** is
+	 * re-read by the loader on every load, so a changed entry is picked up
+	 * whether or not the manifest moved.
+	 */
 	const reload = (id: string): void => {
-		const entry = entries.get(id);
-		if (entry === undefined || entry.pending) return;
-		entry.forced = true;
-		entry.revision += 1;
-		settle();
+		deps.run(
+			Effect.gen(function* () {
+				const manifests = yield* deps.listManifests();
+				yield* Effect.sync(() => {
+					applyManifests(manifests);
+					const entry = entries.get(id);
+					if (entry === undefined || entry.pending) return;
+					entry.forced = true;
+					entry.revision += 1;
+				});
+				yield* Effect.sync(settle);
+			}),
+		);
+	};
+
+	/**
+	 * Reload every plugin (spec §6): the manual door for the web build, which has
+	 * no watcher, and for a desktop watcher miss. One listing, then one forced
+	 * swap per plugin, worked serially by the settle loop.
+	 */
+	const reloadAll = (): void => {
+		deps.run(
+			Effect.gen(function* () {
+				const manifests = yield* deps.listManifests();
+				yield* Effect.sync(() => {
+					applyManifests(manifests);
+					for (const entry of entries.values()) {
+						entry.forced = true;
+						entry.revision += 1;
+					}
+				});
+				yield* Effect.sync(settle);
+			}),
+		);
 	};
 
 	const uninstall = (id: string): void => {
@@ -722,43 +859,54 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 	};
 
 	/**
-	 * List what is installed and decode it (spec §9): a manifest the source holds
-	 * is listed even with nothing persisted, and one that fails to decode is
-	 * listed *with its reason* rather than dropped. A manifest with no usable id
-	 * cannot be addressed at all, so it is reported in the log instead.
+	 * Fold a listing of the source's manifests into the entries (spec §9): each
+	 * listed plugin gets its raw manifest and its decoded shape, and a manifest
+	 * that fails to decode is listed *with its reason* rather than dropped. A
+	 * manifest with no usable id cannot be addressed at all, so it is reported in
+	 * the log instead. `listed` is set here because this is where the store first
+	 * learns what is installed — and only then may a load be attempted.
+	 *
+	 * Split out of {@link refresh} because a reload re-lists the source too (a
+	 * changed `plugin.json` is a change the desktop watcher reports) and both
+	 * paths must fold a listing identically.
 	 */
+	const applyManifests = (manifests: readonly unknown[]): void => {
+		for (const raw of manifests) {
+			const parsed = manifestSchema.safeParse(raw);
+			const id = parsed.success ? parsed.data.id : idIn(raw);
+			if (id === null) {
+				recordLog(
+					undefined,
+					"warn",
+					"an installed plugin has no usable id in its manifest and could not be listed",
+				);
+				continue;
+			}
+			const entry = entryOf(id);
+			entry.raw = raw;
+			if (parsed.success) {
+				// A previous *decode* error is cleared by a manifest that now
+				// decodes; a load error is not, because the load never succeeded
+				// and nothing about that changed.
+				if (entry.manifest === null) entry.error = undefined;
+				entry.manifest = parsed.data;
+			} else {
+				entry.manifest = null;
+				entry.error = String(parsed.error);
+			}
+		}
+		// Only now does the store know what is installed, so only now may a
+		// load be attempted (see `listed`).
+		listed = true;
+		publish();
+	};
+
+	/** List what is installed, fold it in, then reconcile the live half. */
 	const refresh = (): Effect.Effect<void> =>
 		Effect.gen(function* () {
 			const manifests = yield* deps.listManifests();
 			yield* Effect.sync(() => {
-				for (const raw of manifests) {
-					const parsed = manifestSchema.safeParse(raw);
-					const id = parsed.success ? parsed.data.id : idIn(raw);
-					if (id === null) {
-						recordLog(
-							undefined,
-							"warn",
-							"an installed plugin has no usable id in its manifest and could not be listed",
-						);
-						continue;
-					}
-					const entry = entryOf(id);
-					entry.raw = raw;
-					if (parsed.success) {
-						// A previous *decode* error is cleared by a manifest that now
-						// decodes; a load error is not, because the load never
-						// succeeded and nothing about that changed.
-						if (entry.manifest === null) entry.error = undefined;
-						entry.manifest = parsed.data;
-					} else {
-						entry.manifest = null;
-						entry.error = String(parsed.error);
-					}
-				}
-				// Only now does the store know what is installed, so only now may a
-				// load be attempted (see `listed`).
-				listed = true;
-				publish();
+				applyManifests(manifests);
 				reconcile();
 			});
 		});
@@ -782,6 +930,7 @@ export const makePluginsStore = (deps: PluginsDeps): PluginsStore => {
 		uninstall,
 		setPluginEnabled,
 		reload,
+		reloadAll,
 	};
 };
 
@@ -858,6 +1007,13 @@ const store = makePluginsStore(realDeps);
 // reconcile what is already known, then list what is installed.
 store.start();
 
+// Listen for the desktop watcher's change events (spec §6). Rust names the
+// plugin whose source changed; the manager owns the swap, so the subscription is
+// wired here — `runtime.ts` already exports the seam and this module already
+// depends on it. On the web build there is no watcher, so the subscription is a
+// no-op and the section's manual action is the web build's reload door.
+runtime.runFork(subscribePluginChanges(store.reload));
+
 /** The Plugins section's snapshot. */
 export const usePlugins = store.usePlugins;
 export const getPlugins = store.getPlugins;
@@ -868,3 +1024,4 @@ export const installFromUrl = store.installFromUrl;
 export const uninstall = store.uninstall;
 export const setPluginEnabled = store.setPluginEnabled;
 export const reload = store.reload;
+export const reloadAll = store.reloadAll;
