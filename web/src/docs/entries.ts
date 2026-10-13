@@ -39,6 +39,12 @@ export const surfaceModules: readonly SurfaceModule[] = [
 			"The `Host` object a plugin's `setup` receives — the app and API versions, and one registry per kind.",
 	},
 	{
+		path: "src/lib/plugins/kit.ts",
+		label: "Component kit",
+		summary:
+			"The app's own UI primitives a plugin composes (`host.ui.kit`), re-exported by identity from `@/ui/kit`.",
+	},
+	{
 		path: "src/lib/plugins/manifest.ts",
 		label: "Manifest",
 		summary:

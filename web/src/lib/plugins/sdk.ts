@@ -14,6 +14,7 @@
 export * from "./commands";
 export * from "./host";
 export * from "./ids";
+export * from "./kit";
 export * from "./manifest";
 export * from "./notify";
 export * from "./pipeline";

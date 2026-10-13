@@ -170,8 +170,8 @@ export const reference: DocReference = {
 				{
 					"name": "Host",
 					"kind": "interface",
-					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; readonly ui: HostRegistry<Contribution>; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; readonly themes: HostRegistry<RegistryEntry>; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, narrowed to this plugin; `Option.none()` on web (spec §7). */ readonly native: Option.Option<NativeHandle>; /** Scoped logging (spec §2). */ readonly log: Logger; /** Subscribe to a host event; the handler stops when the plugin unloads. */ readonly on: ( event: HostEvent, handler: (payload: unknown) => void, ) => Disposable; }",
-					"description": "The surface a plugin is compiled against (spec §2). Every method that adds something returns a `Disposable`, whose removal is attached to that plugin's `Scope` — closing the scope is unload, so a disabled plugin leaves no trace. Two kinds of member live here, deliberately split by signature. The **synchronous registries** (`ui`, `commands`, `settings`, `tools`, `providers`, `pipeline`, `renderers`, `themes`) register now and read as Effects/Streams. The **services** a plugin calls for behaviour (`chat`, `db`, `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface, populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with the plugin's `Scope`.",
+					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; /** * The slot registry, plus the component kit (spec §4). `ui.kit` is the app's * own primitives — buttons, a panel, the foldable `<details>` section, a * field row, the markdown renderer and the shared class strings — so plugin * UI matches a built-in's without copying Tailwind classes. */ readonly ui: HostRegistry<Contribution> & { readonly kit: PluginKit }; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; /** * The theme service (spec §4/§5): register a theme and, unlike a bare * registry, **apply** one. Every plugin's `host.themes` and the app's own * are facades over one core, so a plugin's apply is the built-in's apply — * the same stylesheet and the same `data-theme` marker. */ readonly themes: ThemeService; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, narrowed to this plugin; `Option.none()` on web (spec §7). */ readonly native: Option.Option<NativeHandle>…",
+					"description": "The surface a plugin is compiled against (spec §2). Every method that adds something returns a `Disposable`, whose removal is attached to that plugin's `Scope` — closing the scope is unload, so a disabled plugin leaves no trace. Two kinds of member live here, deliberately split by signature. The **synchronous registries** (`ui`, `commands`, `settings`, `tools`, `providers`, `pipeline`, `renderers`) register now and read as Effects/Streams; `themes` is the one typed service that both registers and applies. The **services** a plugin calls for behaviour (`chat`, `db`, `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface, populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with the plugin's `Scope`.",
 					"members": [
 						"version",
 						"ui",
@@ -194,8 +194,8 @@ export const reference: DocReference = {
 				{
 					"name": "HostServicesShape",
 					"kind": "interface",
-					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; }",
-					"description": "What `HostServices` provides: the versions the host reports, plus one registry per kind (spec §3). Registries are created once in `HostLayer`'s construction, so the whole app shares one collection per kind. The service members that carry no per-plugin state (`chat`, `db`, `storage`, `on`, `log`, `native`) are not held here — they live in `services.ts` and are bound per plugin in `makeHost`. Neither `keybindings` nor `renderers` is a registry: a command carries its own keybinding (`commands.ts` is the source of truth), and a renderer is a `ui` contribution resolved through `useComponent`. The app version is host data, not a registry — it is resolved once at boot (`runtime.ts` builds this layer), which is the only place with the async Tauri read in hand, and carried here so `makeHost` can report it without a parameter no later task could fill.",
+					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; /** The app's one theme core; `makeHost` binds it to each plugin. */ readonly themesService: ReturnType<typeof makeThemeService>; }",
+					"description": "What `HostServices` provides: the versions the host reports, one registry per kind, and the one theme service (spec §3). Registries are created once in `HostLayer`'s construction, so the whole app shares one collection per kind; `themesService` is created there too, for the same reason — one `<style>` element and one `data-theme` marker for the whole app, with `makeHost` handing each plugin a facade over it rather than a service of its own. The service members that carry no per-plugin state (`chat`, `db`, `storage`, `on`, `log`, `native`) are not held here — they live in `services.ts` and are bound per plugin in `makeHost`. Neither `keybindings` nor `renderers` is a registry: a command carries its own keybinding (`commands.ts` is the source of truth), and a renderer is a `ui` contribution resolved through `useComponent`. The app version is host data, not a registry — it is resolved once at boot (`runtime.ts` builds this layer), which is the only place with the async Tauri read in hand, and carried here so `makeHost` can report it without a parameter no later task could fill.",
 					"members": [
 						"version",
 						"ui",
@@ -204,7 +204,8 @@ export const reference: DocReference = {
 						"pipeline",
 						"commands",
 						"settings",
-						"themes"
+						"themes",
+						"themesService"
 					]
 				},
 				{
@@ -234,7 +235,7 @@ export const reference: DocReference = {
 					"name": "HostLayer",
 					"kind": "const",
 					"signature": "export const HostLayer: Layer.Layer<HostServices>;",
-					"description": "The host service layer (spec §3): the app version is resolved here, once, and every registry is created here, once, so the runtime that consumes this layer is the one place registries come from.",
+					"description": "The host service layer (spec §3): the app version is resolved here, once, and every registry **and the one theme core** are created here, once, so the runtime that consumes this layer is the one place they come from — and there is a single theme core from boot, before any built-in or plugin registers.",
 					"members": []
 				},
 				{
@@ -298,6 +299,34 @@ export const reference: DocReference = {
 					"kind": "type",
 					"signature": "export type HostEvent = z.infer<typeof hostEventSchema>;",
 					"description": "",
+					"members": []
+				},
+				{
+					"name": "PluginKit",
+					"kind": "interface",
+					"signature": "export interface PluginKit { readonly Button: typeof uiKit.Button; readonly Panel: typeof uiKit.Panel; readonly Section: typeof uiKit.Section; readonly FieldRow: typeof uiKit.FieldRow; /** The app's markdown renderer (sanitized model output). */ readonly Markdown: typeof Markdown; /** Join class names, dropping the falsy ones. */ readonly cls: typeof uiKit.cls; readonly INPUT: string; readonly LABEL: string; readonly BUTTON: string; readonly BUTTON_PLAIN: string; readonly CONTROL: string; /** The app's standard section chrome; `Section` already defaults to it. */ readonly SECTION: string; /** The app's standard section summary row; `Section` already defaults to it. */ readonly SECTION_SUMMARY: string; }",
+					"description": "The kit as a plugin sees it (spec §4's `ui.kit`).",
+					"members": [
+						"Button",
+						"Panel",
+						"Section",
+						"FieldRow",
+						"Markdown",
+						"cls",
+						"INPUT",
+						"LABEL",
+						"BUTTON",
+						"BUTTON_PLAIN",
+						"CONTROL",
+						"SECTION",
+						"SECTION_SUMMARY"
+					]
+				},
+				{
+					"name": "pluginKit",
+					"kind": "const",
+					"signature": "export const pluginKit: PluginKit;",
+					"description": "The one kit object the host hands every plugin. A single module-level value, so two plugins (and the built-ins) share one identity — a per-plugin copy could drift the moment the kit is billed as \"the app's own\".",
 					"members": []
 				},
 				{
@@ -998,11 +1027,12 @@ export const reference: DocReference = {
 				{
 					"name": "ThemeService",
 					"kind": "interface",
-					"signature": "export interface ThemeService { /** Register a theme; disposing the handle unregisters it. */ readonly register: (theme: ThemeDefinition) => Disposable; /** Apply a registered theme by id. An unknown id leaves the defaults on. */ readonly apply: (id: string) => Effect.Effect<void>; /** The active theme's id, or `Option.none()` when the defaults are in force. */ readonly active: () => Effect.Effect<Option.Option<string>>; /** Reconcile with one registry snapshot: drop an active theme that is gone. */ readonly sync: (entries: readonly RegistryEntry[]) => Effect.Effect<void>; /** Reconcile on every registry change; fork this for the plugin-unload path. */ readonly run: () => Effect.Effect<void>; }",
-					"description": "The theme registry a plugin drives (spec §5).",
+					"signature": "export interface ThemeService { /** Register a theme; disposing the handle unregisters it. */ readonly register: (theme: ThemeDefinition) => Disposable; /** Apply a registered theme by id. An unknown id leaves the defaults on. */ readonly apply: (id: string) => Effect.Effect<void>; /** * Restore the `:root` defaults: remove the active theme's variables, its * stylesheet and its marker. The inverse of {@link apply}, and what a * toggling plugin calls to switch a theme back off. */ readonly clear: () => Effect.Effect<void>; /** The active theme's id, or `Option.none()` when the defaults are in force. */ readonly active: () => Effect.Effect<Option.Option<string>>; /** Reconcile with one registry snapshot: drop an active theme that is gone. */ readonly sync: (entries: readonly RegistryEntry[]) => Effect.Effect<void>; /** Reconcile on every registry change; fork this for the plugin-unload path. */ readonly run: () => Effect.Effect<void>; }",
+					"description": "The theme service a plugin drives (spec §5).",
 					"members": [
 						"register",
 						"apply",
+						"clear",
 						"active",
 						"sync",
 						"run"
@@ -1011,8 +1041,8 @@ export const reference: DocReference = {
 				{
 					"name": "makeThemeService",
 					"kind": "const",
-					"signature": "export const makeThemeService = (themes: HostRegistry<RegistryEntry>, dom: ThemeDom = browserThemeDom()): ThemeService => …",
-					"description": "The theme service over one registry (spec §3's `ThemeRegistry`). The applied state is the DOM's — there is one `documentElement` — so the service keeps only which theme it put there, and every method that touches it is an `Effect.sync`.",
+					"signature": "export const makeThemeService = (registry: Registry<RegistryEntry>, dom: ThemeDom = browserThemeDom()): ThemeServiceCore => …",
+					"description": "The app's one theme core over its `themes` registry (spec §3). `dom` is the seam the writes go to — the real element path ({@link browserThemeDom}) in the app, a recorded object in tests. **One instance, many facades.** The active theme, the `<style>` element and the `data-theme` marker are the core's, created once by `HostLayer`; every caller gets a {@link ThemeServiceCore.forPlugin} facade over that same core, so `host.themes.apply` for a plugin is the built-in's apply, and no second service with its own stylesheet can exist. `register` is the one member that differs per caller: it is bound to the caller's registry view, so a theme is owned by the plugin that registered it and is collected when its scope closes.",
 					"members": []
 				},
 				{
@@ -1026,7 +1056,7 @@ export const reference: DocReference = {
 					"name": "applyTheme",
 					"kind": "const",
 					"signature": "export const applyTheme = (id: string): Effect.Effect<void> => …",
-					"description": "Apply a theme by id (spec §5).",
+					"description": "Apply a theme by id (spec §5), through the one core.",
 					"members": []
 				},
 				{
@@ -1214,7 +1244,7 @@ export const reference: DocReference = {
 		},
 		{
 			"id": "settings.plugin.controls",
-			"description": "A named UI region a contribution can render into."
+			"description": "The controls a plugin contributes for its own row in the Plugins section. That row renders only the entries whose owner is the plugin itself, so a plugin's settings appear in its own row and nowhere else."
 		},
 		{
 			"id": "overlay.root",
