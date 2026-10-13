@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.2.3"
+version = "0.3.0"
 description = "Open-source desktop AI client"
 authors = ["JeffreyJYZ"]
 license = "GPL-3.0-only"
