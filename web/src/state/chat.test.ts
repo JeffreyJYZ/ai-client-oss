@@ -9,6 +9,7 @@ import {
 } from "@lib/plugins/host";
 import type { Disposable, RegistryEntry } from "@lib/plugins/registry";
 import { runtime } from "@lib/plugins/runtime";
+import { subscribeHostEvent } from "@lib/plugins/services";
 import type { Tool, ToolOutcome } from "@lib/plugins/tools";
 import { chatcompletions } from "@lib/providers/chatCompletions";
 import { FETCH_URL_NAME } from "@lib/providers/presets";
@@ -52,18 +53,37 @@ const shoutTool: Tool = {
 		}),
 };
 
-/** A fresh wait budget per poll: the turn runs on the subsystem runtime's fiber. */
-const waitFor = async <A>(
-	probe: () => A | undefined,
-	timeoutMs = 2000,
-): Promise<A> => {
-	const deadline = Date.now() + timeoutMs;
-	for (;;) {
-		const value = probe();
-		if (value !== undefined) return value;
-		if (Date.now() > deadline) throw new Error("timed out waiting for a body");
-		await Bun.sleep(5);
-	}
+/**
+ * Wait for the turn's own completion signal, not a wall-clock deadline.
+ *
+ * `send` forks the turn on the subsystem runtime, and `finalize` publishes
+ * `turn-end` on every exit path (success, failure, abort) once the turn is
+ * over. The capturing provider assigns its body **synchronously** inside its
+ * `send`, before the stream is consumed, so the body is always set by the time
+ * `turn-end` arrives — subscribing before `send` means the event cannot be
+ * missed.
+ *
+ * Nothing here compares wall-clock times, so a machine sleep or a process
+ * pause cannot make the wait give up while the turn is still in flight. That
+ * is exactly what the replaced deadline did: `Date.now() + 2000` was already
+ * in the past when a sleeping machine resumed, so a turn that needs ~150 ms on
+ * an idle machine was reported as a 2 s timeout. The wait is bounded by the
+ * runtime's own step — the signal a pause cannot defeat — not by elapsed time.
+ *
+ * It still detects a body that never arrives: `turn-end` fires on every exit
+ * path, so the wait always settles, and `sentBody` throws when the body is
+ * still unset at that point.
+ */
+const subscribeTurnEnd = (): {
+	readonly done: Promise<void>;
+	readonly dispose: () => void;
+} => {
+	let settle: () => void = () => {};
+	const done = new Promise<void>((resolve) => {
+		settle = resolve;
+	});
+	const subscription = subscribeHostEvent("turn-end", () => settle());
+	return { done, dispose: () => subscription.dispose() };
 };
 
 /** The three helpers a body is inspected with (the `presets.test.ts` shape). */
@@ -147,8 +167,17 @@ const sentBody = async (
 		...settings,
 	});
 	try {
-		send("hello", []);
-		return await waitFor(capture.body);
+		// Subscribe before starting the turn so its `turn-end` cannot be missed.
+		const turn = subscribeTurnEnd();
+		try {
+			send("hello", []);
+			await turn.done;
+			const body = capture.body();
+			if (body === undefined) throw new Error("timed out waiting for a body");
+			return body;
+		} finally {
+			turn.dispose();
+		}
 	} finally {
 		providerHandle.dispose();
 		setSettings({
