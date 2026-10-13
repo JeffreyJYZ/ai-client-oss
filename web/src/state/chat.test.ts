@@ -1,0 +1,207 @@
+import { describe, expect, test } from "bun:test";
+import { emptyProviderConfig } from "@lib/db";
+import { registerToolBuiltins } from "@lib/plugins/builtin/tools";
+import {
+	type Host,
+	HostServices,
+	type HostServicesShape,
+	makeHost,
+} from "@lib/plugins/host";
+import type { Disposable, RegistryEntry } from "@lib/plugins/registry";
+import { runtime } from "@lib/plugins/runtime";
+import type { Tool, ToolOutcome } from "@lib/plugins/tools";
+import { chatcompletions } from "@lib/providers/chatCompletions";
+import { FETCH_URL_NAME } from "@lib/providers/presets";
+import type { Chunk, SendCtx } from "@lib/providers/types";
+import { Effect, Exit, Scope, Stream } from "effect";
+import { send } from "@/state/chat";
+import { getSettings, setSettings } from "@/state/settings";
+
+/**
+ * The announcement claim, on the real request path. T19's `custom-tool`
+ * example registers `shout` through `host.tools.register`; this drives the real
+ * `send` turn over a provider whose only change is where the body goes. The
+ * **outgoing request body** is `chatcompletions.send`'s own first line —
+ * `buildRequest(ctx.prev ?? template, ctx)` — so capturing it *is* the wire
+ * claim, with no HTTP, no `vite build` and no browser.
+ *
+ * The tools registry read, the `beforeSend` pipeline and the tool loop all run
+ * for real: the tools are added to the runtime's own registry through the same
+ * host a plugin gets, exactly as the loader would.
+ */
+
+/** The tool T19's example registers, through the same public API. */
+const shoutTool: Tool = {
+	declaration: {
+		name: "shout",
+		description: "Uppercase the given text.",
+		parameters: {
+			type: "object",
+			properties: {
+				text: { type: "string", description: "The text to shout." },
+			},
+			required: ["text"],
+		},
+	},
+	execute: (): Effect.Effect<ToolOutcome> =>
+		Effect.succeed({
+			result: "HELLO",
+			marker: "🔧 shout → HELLO",
+			failed: false,
+			input: null,
+		}),
+};
+
+/** A fresh wait budget per poll: the turn runs on the subsystem runtime's fiber. */
+const waitFor = async <A>(
+	probe: () => A | undefined,
+	timeoutMs = 2000,
+): Promise<A> => {
+	const deadline = Date.now() + timeoutMs;
+	for (;;) {
+		const value = probe();
+		if (value !== undefined) return value;
+		if (Date.now() > deadline) throw new Error("timed out waiting for a body");
+		await Bun.sleep(5);
+	}
+};
+
+/** The three helpers a body is inspected with (the `presets.test.ts` shape). */
+const toolsOf = (body: unknown): readonly Record<string, unknown>[] =>
+	(body as { readonly tools?: readonly Record<string, unknown>[] }).tools ?? [];
+
+const namesOf = (body: unknown): readonly unknown[] =>
+	toolsOf(body).map((entry) => {
+		const nested = entry.function;
+		return typeof nested === "object" && nested !== null
+			? (nested as { readonly name?: unknown }).name
+			: entry.name;
+	});
+
+/** A plugin host on the runtime's own registries, closable to remove its entries. */
+const withHost = (
+	pluginId: string,
+): { readonly host: Host; readonly close: () => void } => {
+	const services: HostServicesShape = runtime.runSync(HostServices);
+	const scope = Effect.runSync(Scope.make());
+	return {
+		host: makeHost(services, pluginId, scope),
+		close: () => Effect.runSync(Scope.close(scope, Exit.void)),
+	};
+};
+
+const addProvider = (protocol: string, provider: unknown): Disposable =>
+	runtime.runSync(
+		Effect.flatMap(HostServices, (services) =>
+			services.providers.add({
+				id: protocol,
+				owner: "t24",
+				...(provider as Record<string, unknown>),
+			} as unknown as RegistryEntry),
+		),
+	);
+
+/**
+ * The real `chatcompletions` provider with the one line that reaches the wire
+ * kept and the HTTP call replaced by an empty stream. `finalize` ends the turn
+ * on the first empty round, so one turn, one body.
+ */
+const captureProvider = (): {
+	readonly body: () => unknown;
+	readonly provider: unknown;
+} => {
+	let sent: unknown;
+	return {
+		body: () => sent,
+		provider: {
+			...chatcompletions,
+			send: (ctx: SendCtx) =>
+				Effect.sync(() => {
+					sent = chatcompletions.buildRequest(
+						(ctx.prev ?? chatcompletions.template) as never,
+						ctx,
+					);
+					return Stream.empty as Stream.Stream<Chunk, string>;
+				}),
+		},
+	};
+};
+
+/** Run one real turn against a capturing provider and return the body it sent. */
+const sentBody = async (
+	protocol: string,
+	settings: { readonly fetchToolEnabled?: boolean } = {},
+): Promise<unknown> => {
+	const capture = captureProvider();
+	const providerHandle = addProvider(protocol, capture.provider);
+	const before = getSettings();
+	setSettings({
+		providers: [
+			{
+				...emptyProviderConfig("t24-provider"),
+				protocol,
+				baseUrl: "https://example.com/v1",
+			},
+		],
+		activeProviderId: "t24-provider",
+		...settings,
+	});
+	try {
+		send("hello", []);
+		return await waitFor(capture.body);
+	} finally {
+		providerHandle.dispose();
+		setSettings({
+			providers: before.providers,
+			activeProviderId: before.activeProviderId,
+			fetchToolEnabled: before.fetchToolEnabled,
+		});
+	}
+};
+
+describe("tools on the outgoing body, through a real turn", () => {
+	test("a tool registered through host.tools.register is announced, in the protocol's envelope", async () => {
+		const builtin = withHost("app.builtin");
+		// The real built-in registrar: `fetch_url` is in the registry too.
+		registerToolBuiltins(builtin.host);
+		const plugin = withHost("t24.custom-tool");
+		plugin.host.tools.register(shoutTool);
+
+		try {
+			const body = await sentBody(`t24-wire-${crypto.randomUUID()}`);
+
+			// The built-in is announced once (by policy, not by its registry
+			// copy) and the plugin's tool follows it, declared as chat/completions
+			// wants a function.
+			expect(namesOf(body)).toEqual([FETCH_URL_NAME, "shout"]);
+			expect(toolsOf(body).at(-1)).toEqual({
+				type: "function",
+				function: {
+					name: "shout",
+					description: shoutTool.declaration.description,
+					parameters: shoutTool.declaration.parameters,
+				},
+			});
+		} finally {
+			plugin.close();
+			builtin.close();
+		}
+	});
+
+	test("with the fetch tool off, the registry copy does not resurrect it", async () => {
+		const builtin = withHost("app.builtin");
+		registerToolBuiltins(builtin.host);
+		const plugin = withHost("t24.custom-tool");
+		plugin.host.tools.register(shoutTool);
+
+		try {
+			const body = await sentBody(`t24-wire-${crypto.randomUUID()}`, {
+				fetchToolEnabled: false,
+			});
+			expect(namesOf(body)).toEqual(["shout"]);
+		} finally {
+			plugin.close();
+			builtin.close();
+		}
+	});
+});

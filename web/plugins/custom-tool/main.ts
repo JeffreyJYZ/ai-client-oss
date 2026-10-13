@@ -12,8 +12,11 @@ import { Effect } from "effect";
  *
  * What it proves:
  *
- * - **`tools.register`**: a tool enters the registry with a declaration (the
- *   name, description and JSON Schema the model is handed) and an executor;
+ * - **`tools.register` announces the tool to the model**: the request body's
+ *   `tools` array is built by `requestTools` in `lib/providers/presets.ts`,
+ *   which reads the host's tools registry — so the declaration below (the name,
+ *   description and JSON Schema the model is handed) reaches the wire without
+ *   the plugin doing anything but registering;
  * - **execution end to end**: when the model emits a call for `shout`, the loop
  *   resolves it through the registry, runs the executor, and feeds the result
  *   back into the replayed body — paired with the call by its `tool_call_id`;
@@ -22,22 +25,11 @@ import { Effect } from "effect";
  *   `tool_call` without its matching result (the dangling-call 400), and the
  *   turn survives.
  *
- * ---------------------------------------------------------------------------
- * The gap this example hits.
- *
- * `tools.register` makes a tool **executable** but not **announceable**: the
- * wire body's `tools` array is built by `requestTools` in
- * `lib/providers/presets.ts` from host policy (`ctx.search`, `ctx.fetchTool`,
- * `ctx.tinyfishApiKey`) — it never reads the tools registry. So the model is
- * never told `shout` exists. The `declare` stage below is the natural
- * workaround (rewrite the outgoing body's `tools`), and the transcript proves
- * it does **not** work either: `buildRequest` re-runs inside `SendMsg` and
- * overwrites `tools` with `requestTools(...)` before the request is sent.
- * Nothing a plugin can register declares a tool on the wire.
- *
- * The stage is kept in the example so the transcript shows the attempt and the
- * refutation; only execution and the veto are actually exercised end to end.
- * ---------------------------------------------------------------------------
+ * A plugin cannot declare a tool on the wire itself: `buildRequest` re-runs
+ * inside `SendMsg` and rebuilds `tools` from host policy plus the registry, so
+ * a `transformBody` stage that appends a declaration is overwritten before the
+ * request is sent. Registration is the one mechanism, which is why this example
+ * registers and declares nothing else.
  */
 
 const TOOL_NAME = "shout";
@@ -105,29 +97,12 @@ const vetoStage: Omit<PipelineEntry, "owner"> = {
 		}),
 };
 
-/**
- * The (failed) declaration workaround: add the tool to the outgoing body's
- * `tools`. `buildRequest` overwrites that key before sending, so this is
- * recorded as a negative result, not a mechanism.
- */
-const declareStage: Omit<PipelineEntry, "owner"> = {
-	id: "example.custom-tool.declare",
-	kind: "transformBody",
-	run: (body: unknown, _meta: unknown) =>
-		Effect.sync(() => {
-			if (!isRecord(body)) return body;
-			const existing = Array.isArray(body.tools) ? body.tools : [];
-			return { ...body, tools: [...existing, toolDeclaration] };
-		}),
-};
-
 export default {
 	setup(host: Host) {
 		host.tools.register(tool);
 		// `pipeline` is the bare registry; `id`, `kind` and `run` on a typed
 		// variable are what a plugin passes (see the guide's typing note).
 		host.pipeline.register(vetoStage);
-		host.pipeline.register(declareStage);
 
 		host.log.info(
 			`custom-tool loaded; registered "${TOOL_NAME}" and an onToolCall veto`,

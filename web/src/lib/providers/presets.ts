@@ -1,3 +1,4 @@
+import type { ToolDeclaration } from "@lib/plugins/tools";
 import type { ProtocolName } from "@lib/providers";
 import type {
 	SearchKind,
@@ -98,11 +99,76 @@ export const searchKindFor = (baseUrl: string): SearchKind | null => {
  */
 type WireProtocol = "anthropic" | "responses" | "chatcompletions";
 
+/**
+ * One tool declaration in the envelope `protocol` wants: chat/completions
+ * nests it under `function`, the Responses API takes the flat function shape,
+ * and Anthropic declares it with `input_schema`. Every built-in and every
+ * **registered** tool goes through here, so a plugin's tool reaches the model
+ * in exactly the shape the app's own tools do.
+ *
+ * This is also the mechanism question for a function tool, and it is answered
+ * differently from search's. A function tool is executed by the app's own tool
+ * loop, not by the endpoint, so what the endpoint must support is only the
+ * *declaration* its protocol carries — and every protocol in {@link
+ * WireProtocol} can carry one. There is therefore no `searchKindFor`-style
+ * endpoint gate here: every endpoint the app ships (and any plugin protocol
+ * built on one of these three) is sent function declarations. A server-side
+ * search tool is the opposite — the endpoint runs it — which is why it alone is
+ * gated on the endpoint's own mechanism.
+ */
+const functionTool = (
+	protocol: WireProtocol,
+	declaration: ToolDeclaration,
+): unknown => {
+	if (protocol === "anthropic") {
+		return {
+			name: declaration.name,
+			description: declaration.description,
+			input_schema: declaration.parameters,
+		};
+	}
+	if (protocol === "responses") {
+		return {
+			type: "function",
+			name: declaration.name,
+			description: declaration.description,
+			parameters: declaration.parameters,
+		};
+	}
+	return {
+		type: "function",
+		function: {
+			name: declaration.name,
+			description: declaration.description,
+			parameters: declaration.parameters,
+		},
+	};
+};
+
 /** The built-in URL-fetch tool's name on the wire. */
 export const FETCH_URL_NAME = "fetch_url";
 
 /** The client-side web-search tool's name on the wire. */
 export const WEB_SEARCH_NAME = "web_search";
+
+/**
+ * The wire names whose declaration **host policy** owns, never the registry: the
+ * built-in page fetch (the provider's `fetch_url` toggle) and the client-side
+ * `web_search` (a TinyFish key + the provider's search toggle, and only where
+ * the endpoint has no server-side search of its own). Both built-ins are
+ * registered in the tools registry too, so without this a request would declare
+ * each of them twice — once from policy and once from the registry — and
+ * turning the fetch toggle off would leave the registry copy announcing a tool
+ * the user disabled.
+ *
+ * The rule is by **name** because the wire identity is the name: a plugin
+ * cannot take either name anyway (`registerTool` is first-wins and the built-ins
+ * register at boot), so the same set reads as "the declarations policy owns".
+ */
+const policyToolNames: ReadonlySet<string> = new Set([
+	FETCH_URL_NAME,
+	WEB_SEARCH_NAME,
+]);
 
 /**
  * What makes the model use the tool at the right moment: it
@@ -127,35 +193,14 @@ const fetchUrlParameters = {
 
 /**
  * The built-in `fetch_url` tool in the envelope the
- * protocol wants: chat/completions nests it under
- * `function`, the Responses API takes the flat function
- * shape, and Anthropic declares it with `input_schema`.
+ * protocol wants (see {@link functionTool}).
  */
-export const fetchUrlTool = (protocol: WireProtocol): unknown => {
-	if (protocol === "anthropic") {
-		return {
-			name: FETCH_URL_NAME,
-			description: FETCH_URL_DESCRIPTION,
-			input_schema: fetchUrlParameters,
-		};
-	}
-	if (protocol === "responses") {
-		return {
-			type: "function",
-			name: FETCH_URL_NAME,
-			description: FETCH_URL_DESCRIPTION,
-			parameters: fetchUrlParameters,
-		};
-	}
-	return {
-		type: "function",
-		function: {
-			name: FETCH_URL_NAME,
-			description: FETCH_URL_DESCRIPTION,
-			parameters: fetchUrlParameters,
-		},
-	};
-};
+export const fetchUrlTool = (protocol: WireProtocol): unknown =>
+	functionTool(protocol, {
+		name: FETCH_URL_NAME,
+		description: FETCH_URL_DESCRIPTION,
+		parameters: fetchUrlParameters,
+	});
 
 /**
  * What makes the model use the search tool: it returns
@@ -180,35 +225,14 @@ const webSearchParameters = {
 
 /**
  * The client-side `web_search` tool in the envelope the
- * protocol wants: chat/completions nests it under
- * `function`, the Responses API takes the flat function
- * shape, and Anthropic declares it with `input_schema`.
+ * protocol wants (see {@link functionTool}).
  */
-export const webSearchTool = (protocol: WireProtocol): unknown => {
-	if (protocol === "anthropic") {
-		return {
-			name: WEB_SEARCH_NAME,
-			description: WEB_SEARCH_DESCRIPTION,
-			input_schema: webSearchParameters,
-		};
-	}
-	if (protocol === "responses") {
-		return {
-			type: "function",
-			name: WEB_SEARCH_NAME,
-			description: WEB_SEARCH_DESCRIPTION,
-			parameters: webSearchParameters,
-		};
-	}
-	return {
-		type: "function",
-		function: {
-			name: WEB_SEARCH_NAME,
-			description: WEB_SEARCH_DESCRIPTION,
-			parameters: webSearchParameters,
-		},
-	};
-};
+export const webSearchTool = (protocol: WireProtocol): unknown =>
+	functionTool(protocol, {
+		name: WEB_SEARCH_NAME,
+		description: WEB_SEARCH_DESCRIPTION,
+		parameters: webSearchParameters,
+	});
 
 /**
  * True when the request should declare TinyFish's
@@ -233,9 +257,23 @@ const hasTinyFishSearch = (ctx: SendCtx): boolean => {
  * The tools one request carries: the endpoint's web-search
  * declaration plus the built-in `fetch_url` tool when the
  * request asks for it (`ctx.fetchTool`), plus TinyFish's
- * client-side `web_search` where it applies. `undefined` when
- * nothing applies, so a request with no mechanism sends no
- * `tools` key at all.
+ * client-side `web_search` where it applies, plus every
+ * other **registered** tool (`ctx.registeredTools`).
+ * `undefined` when nothing applies, so a request with no
+ * mechanism sends no `tools` key at all.
+ *
+ * The first three are host policy and keep their own gates; a registered tool
+ * is announced because its plugin registered it. The two are governed
+ * differently because the app executes them differently: `fetch_url` and the
+ * client-side `web_search` are the app's own capabilities, so the user's
+ * toggles decide whether the model may ask for them, while a plugin tool's
+ * registry entry **is** its enablement — the loader disposes a plugin's
+ * contributions on unload, so an entry's presence already means the plugin is
+ * enabled and its tool is callable. Declaring it needs no second permission.
+ *
+ * The policy-owned names are dropped from `registeredTools` (see
+ * {@link policyToolNames}), which is what keeps a built-in declared once and
+ * keeps a disabled fetch tool off the wire.
  */
 export const requestTools = (
 	ctx: SendCtx,
@@ -247,10 +285,14 @@ export const requestTools = (
 	const tinyfishSearch = hasTinyFishSearch(ctx)
 		? [webSearchTool(protocol)]
 		: undefined;
+	const registered = (ctx.registeredTools ?? [])
+		.filter((declaration) => !policyToolNames.has(declaration.name))
+		.map((declaration) => functionTool(protocol, declaration));
 	const tools = [
 		...(search ?? []),
 		...(fetchTool ?? []),
 		...(tinyfishSearch ?? []),
+		...registered,
 	];
 	return tools.length === 0 ? undefined : tools;
 };

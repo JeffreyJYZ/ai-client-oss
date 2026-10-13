@@ -1,3 +1,4 @@
+import type { ToolDeclaration } from "@lib/plugins/tools";
 import type { Effect, Stream } from "effect";
 import type { z } from "zod";
 
@@ -116,6 +117,20 @@ export interface SendCtx {
 	 * no search declaration and the app's own fetch only.
 	 */
 	readonly tinyfishApiKey?: string;
+	/**
+	 * The **registered** tools this request announces — read once per turn from
+	 * the host's tool registry and threaded here because `buildRequest` is pure
+	 * and synchronous. Each entry is a tool's own wire declaration, so the name,
+	 * description and JSON Schema a request declares are exactly what the model
+	 * loop resolves a call through. Absent or empty declares none.
+	 *
+	 * The registry's policy-governed built-ins are expected to be in here too:
+	 * `requestTools` drops the names host policy owns (`fetch_url`, the
+	 * client-side `web_search`) when it assembles the body, so a caller passes
+	 * every entry and those two are instead declared from `ctx.fetchTool` and
+	 * `ctx.tinyfishApiKey` — never twice, and never when their toggle is off.
+	 */
+	readonly registeredTools?: readonly ToolDeclaration[];
 	/** Per-conversation system prompt; absent/blank sends none. */
 	readonly systemPrompt?: string;
 	/**

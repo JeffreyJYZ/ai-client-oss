@@ -1,6 +1,7 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
 import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
+import { HostServices } from "@lib/plugins/host";
 import {
 	composeTurnBody,
 	type PipelineMeta,
@@ -15,7 +16,11 @@ import {
 	publishHostEvent,
 	registerChatStore,
 } from "@lib/plugins/services";
-import { executeTool } from "@lib/plugins/tools";
+import {
+	executeTool,
+	type ToolDeclaration,
+	toolDeclarationSchema,
+} from "@lib/plugins/tools";
 import { searchKindFor } from "@lib/providers/presets";
 import type {
 	AttachmentPart,
@@ -83,6 +88,39 @@ const prevByConversationProtocol = new Map<string, unknown>();
 /** Composite key scoping a conversation's `prev` body to one protocol. */
 const prevKey = (conversationId: string, protocol: string): string =>
 	`${conversationId}\u0000${protocol}`;
+
+/**
+ * Every tool the host's registry holds, as the declarations a request
+ * announces — read once per turn, on the turn's own runtime.
+ *
+ * Only `tools.ts` writes `ToolEntry`s, so this reads the generic
+ * `RegistryEntry` at that shape; and it validates each declaration on the way
+ * out exactly as `registerTool` does on the way in, because a plugin is untyped
+ * JavaScript at this boundary. A declaration that does not parse is skipped,
+ * never serialized to the model.
+ *
+ * The **registry is the enablement**: the loader disposes a plugin's
+ * contributions when it unloads, so an entry's presence already means that
+ * plugin is enabled and its tool can be called. That is why a registered tool
+ * needs no toggle of its own, where `fetch_url` and the client-side
+ * `web_search` — the app's own capabilities — are governed by user settings.
+ * Filtering the policy-owned names out is `requestTools`'s job when it
+ * assembles the body, so this read stays a plain registry read.
+ */
+export const registeredToolDeclarations: Effect.Effect<
+	readonly ToolDeclaration[],
+	never,
+	HostServices
+> = Effect.gen(function* () {
+	const services = yield* HostServices;
+	const entries = yield* services.tools.entries();
+	return entries.flatMap((entry) => {
+		const parsed = toolDeclarationSchema.safeParse(
+			(entry as { readonly declaration?: unknown }).declaration,
+		);
+		return parsed.success ? [parsed.data] : [];
+	});
+});
 
 let activeFiber: Fiber.Fiber<Exit.Exit<void, string>, never> | undefined;
 
@@ -587,10 +625,13 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 		// `beforeSend` augments or rewrites the turn's context, or aborts the
 		// turn (spec §5). Inside the run, so a stage may await a host service;
-		// `none` fails the turn, whose error row `finalize` writes.
+		// `none` fails the turn, whose error row `finalize` writes. The
+		// registered tools ride the ctx from here on, so `beforeSend` sees them
+		// and every round's rebuild of the body re-declares exactly them.
+		const registeredTools = yield* registeredToolDeclarations;
 		const outgoing = yield* runPipeline(
 			"beforeSend",
-			{ ...baseCtx, prev },
+			{ ...baseCtx, prev, registeredTools },
 			meta,
 		);
 		if (Option.isNone(outgoing)) return yield* Effect.fail(ABORTED_TURN);
