@@ -51,6 +51,9 @@ A semantic dedupe/similarity engine; vector recall or embeddings (all live memor
 One new field, deliberately a single list rather than two:
 
 ```ts
+// MemoryEntry, defined in lib/memoryNotes.ts. Deliberately NOT named `MemoryNote`:
+// db/types.ts already exports `MemoryNote` for the legacy {id, text, createdAt, source}
+// shape, which stays (the legacy array keeps being written).
 memoryNotes: Array<{
   id: string;
   content: string;
@@ -89,7 +92,7 @@ The Memories section **moves out of `Settings.tsx` into a registered section** (
 1. **No refusal defects the turn.** A tool that throws, and a refusal, both leave the turn alive with a readable outcome.
 2. **No marker truncates a message.** A complete block mid-prose keeps everything before and after it; a reply merely *quoting* a partial marker renders whole; a stream ending in a partial tag neither chops the text nor loses a complete block; an **unterminated** block is dropped with a log line, never half-stored.
 3. **Revert is honest.** One step per call; empty history is a refusal with a message.
-4. **The agent cannot destroy.** No tool reaches purge; a soft-deleted memory is restorable after any number of tool calls.
+4. **The agent cannot destroy live content.** No tool reaches purge, and no tool can delete a live note. A soft-deleted note is restorable within the recently-deleted cap — the cap evicts **oldest-first**, so restoration is bounded by that constant rather than unbounded, and the cap's existence is the only reason a tool can indirectly age a deleted note out.
 5. **The migration is one-shot and additive.** Legacy ids become unique, slug-safe ids; the legacy array is untouched; running it twice changes nothing.
 6. **An older app is unaffected.** New fields are ignored, and the legacy array is still written.
 
