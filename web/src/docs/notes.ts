@@ -10,7 +10,7 @@ import type { DocCapability, DocEvent, DocSlot } from "@/docs/types";
 
 export const slotNotes: Record<string, string> = {
 	"ui.root.layout":
-		"The root layout. The default shell is itself the default contribution, so replacing it takes over the whole app — and that means owning the way back to the Plugins manager: the host keeps it registered, but a layout that renders no `settings.root` shows it nowhere.",
+		"The root layout. The default shell is itself the default contribution, so replacing it takes over the whole app — and that means owning the way back to the Plugins manager: the host keeps it registered, but a layout that renders no `settings.root` shows it nowhere. The way back is guaranteed for built-in **area** toggles; a layout, or a per-contribution toggle that removes the route, owns that choice.",
 	"app.sidebar": "The conversation sidebar.",
 	"app.sidebar.actions": "Actions in the sidebar's header row.",
 	"app.header": "The top bar.",

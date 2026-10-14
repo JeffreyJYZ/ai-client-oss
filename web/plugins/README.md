@@ -92,7 +92,7 @@ A registered tool is **announced, not merely callable**: the host reads the tool
 
 The slot map is `web/src/lib/plugins/ids.ts` (`slotIds`, one `as const` tuple → schema **and** type) and is rendered on the generated reference page. A contribution renders wherever the host component puts `<Slot id="…">`; a component id (`ui.markdown`) is resolved by `useComponent`, not a slot.
 
-- **Replacing `ui.root.layout` owns the way back.** A root layout takes over the whole app, and the host guarantees only that the Plugins manager stays *registered*, not that your layout shows it: a layout that renders no `settings.root` (the surface the manager's section renders into) shows the manager nowhere. Render a route to it yourself.
+- **Replacing `ui.root.layout` owns the way back.** A root layout takes over the whole app, and the host guarantees only that the Plugins manager stays *registered*, not that your layout shows it: a layout that renders no `settings.root` (the surface the manager's section renders into) shows the manager nowhere. Render a route to it yourself. That guarantee is an **area**-level one — turning off any built-in area leaves the container's surface and the manager registered — while a layout, or a per-contribution toggle that removes the route, owns that choice.
 
 ### Typing your `host`
 
