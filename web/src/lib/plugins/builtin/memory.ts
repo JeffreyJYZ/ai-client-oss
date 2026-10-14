@@ -15,6 +15,7 @@ import {
 	setSettings,
 	subscribe as subscribeSettings,
 } from "@/state/settings";
+import { MemorySection } from "@/ui/memory/MemorySection";
 
 /**
  * The `app.memory` area: the five memory tools, registered only while memory is
@@ -38,8 +39,10 @@ import {
  * into every later suite, order-dependently). The app wires its real store in
  * {@link appMemorySettings}.
  *
- * Task 5 adds the Memory settings section to {@link registerMemoryBuiltins},
- * which is why the tool half is its own function.
+ * Task 5 routes the Memory **settings section** through
+ * {@link registerMemoryBuiltins} too, which is why the tool half is its own
+ * function: the section is always registered with the area, the tools only while
+ * the flag is on.
  */
 
 /** The five wire names, in registration order. */
@@ -402,10 +405,23 @@ export const registerMemoryTools = (host: Host): void => {
 };
 
 /**
- * The `app.memory` area's registrar. Task 5 adds the Memory settings section
- * here — a `host.ui.register` into `settings.sections`, moving it off the
- * `app.settings` area — which is why the tools are their own step.
+ * The `app.memory` area's registrar: the five tools, and the Memory settings
+ * section that owns them.
+ *
+ * The section is registered **unconditionally** (while the area is on): it
+ * carries the `memoriesEnabled` switch, so gating it on that same flag would
+ * hide the only way to turn memory back on. The tools' own gate is inside
+ * {@link registerMemoryTools}. The section keeps the `settings.sections` slot
+ * and `order: 70` it had under `app.settings`, so the page renders exactly where
+ * it did — only its owner changed, which is what makes toggling this area take
+ * the section with it.
  */
 export const registerMemoryBuiltins = (host: Host): void => {
 	registerMemoryTools(host);
+	host.ui.register({
+		id: "settings.section.memory",
+		slot: "settings.sections",
+		component: MemorySection,
+		order: 70,
+	});
 };

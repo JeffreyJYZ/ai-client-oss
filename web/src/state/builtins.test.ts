@@ -1192,7 +1192,10 @@ describe("the manager rides the locked core", () => {
 			(entry) => entry.slot === "settings.sections",
 		);
 
-		// The move kept the order: the nine Settings sections, then the manager.
+		// The move kept the render order: every section that lands in
+		// `settings.sections` by its explicit `order`, then the manager. Memory
+		// rides `app.memory` now (its area owns it) but still sorts here at 70;
+		// the order, not the owning area, is what this list pins.
 		expect(sections.map((entry) => entry.id)).toEqual([
 			"settings.section.notices",
 			"settings.section.providers",
