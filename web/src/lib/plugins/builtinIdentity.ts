@@ -68,8 +68,11 @@ export const BUILTIN_IDENTITIES = [
 	{
 		id: "app.shell",
 		label: "Shell",
+		// With the shell off the container does not go blank: `ui/MinimalHost.tsx`
+		// renders the Plugins manager plus a line naming what is off (the
+		// reachability fix), so the sentence must not claim an empty container.
 		description:
-			"The default layout, header and notice strips — with this off the container is left empty, which is the intended bare-host state, not a broken app.",
+			"The default layout, the header and the notice strips; with this off the container renders its minimal host surface instead — the Plugins manager, the way back, and a line naming what is off.",
 		locked: false,
 	},
 	{
