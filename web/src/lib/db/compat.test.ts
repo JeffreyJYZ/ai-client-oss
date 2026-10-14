@@ -180,8 +180,8 @@ describe("the pre-plugin settings blob reads under the current schema", () => {
 		);
 	});
 
-	test("the migration registry ships empty and substance is untouched", async () => {
-		expect([...migrations]).toEqual([]);
+	test("the shipped registry carries the memory migration, and substance is untouched", async () => {
+		expect([...migrations].map((m) => m.to)).toEqual([DATA_VERSION]);
 
 		const withoutField = await run(
 			readSettings(JSON.stringify(settingsFixture)),
@@ -189,21 +189,23 @@ describe("the pre-plugin settings blob reads under the current schema", () => {
 		expect(withoutField.kind).toBe("ok");
 		if (withoutField.kind !== "ok") return;
 
-		// No `dataVersion` on disk: the zod default lifts the blob to the
-		// current version, and the substance is byte-for-byte the fixture.
+		// No `dataVersion` on disk: the shipped migration carries the blob to
+		// the current version and seeds `memoryNotes` from `memories`, while
+		// every key the frozen fixture carried is byte-for-byte intact.
 		expect(withoutField.settings.dataVersion).toBe(DATA_VERSION);
+		expect(withoutField.settings.memoryNotes).toHaveLength(
+			settingsFixture.memories.length,
+		);
 		expect(prePluginsSubstance(withoutField.settings)).toEqual(settingsFixture);
 
-		// An explicit `dataVersion: 0` with an empty registry has nothing to
-		// migrate, so its version is left as stored — nothing changes (spec
-		// §13: the machinery is the deliverable; the next schema change adds a
-		// member with a real `to`).
+		// An explicit `dataVersion: 0` has the same one migration pending, so it
+		// too lands at the current version with substance intact.
 		const atZero = await run(
 			readSettings(JSON.stringify({ ...settingsFixture, dataVersion: 0 })),
 		);
 		expect(atZero.kind).toBe("ok");
 		if (atZero.kind !== "ok") return;
-		expect(atZero.settings.dataVersion).toBe(0);
+		expect(atZero.settings.dataVersion).toBe(DATA_VERSION);
 		expect(prePluginsSubstance(atZero.settings)).toEqual(settingsFixture);
 	});
 });

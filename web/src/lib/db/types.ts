@@ -1,4 +1,5 @@
 import { DATA_VERSION } from "@lib/db/migrate";
+import type { MemoryEntry } from "@lib/memoryNotes";
 import { pluginStateSchema } from "@lib/plugins/manifest";
 import type { ProtocolName } from "@lib/providers";
 import type { AttachmentPart } from "@lib/providers/types";
@@ -86,6 +87,30 @@ export const memoryNoteSchema = z.object({
 export type MemoryNote = z.infer<typeof memoryNoteSchema>;
 
 /**
+ * One entry of the note store (`lib/memoryNotes.ts`) as persisted. Annotated
+ * with T1's `MemoryEntry`, so a renamed or retyped field here is a compile
+ * error; a field this schema does not declare would instead be *stripped* at
+ * parse time, so a round-trip test in `migrate.test.ts` pins the full key set
+ * (five tasks consume `MemoryEntry` directly). Named `memoryEntrySchema`
+ * because `memoryNoteSchema` above is the legacy `{id, text, createdAt,
+ * source}` shape, which stays (the legacy array keeps being written).
+ */
+export const memoryEntrySchema: z.ZodType<MemoryEntry> = z.object({
+	id: z.string(),
+	content: z.string(),
+	updatedAt: z.number(),
+	/** Present = soft-deleted; the UI and `memory_list` filter on it. */
+	deletedAt: z.number().optional(),
+	/** Previous contents, newest last. Required: every write we make sets it. */
+	history: z.array(
+		z.object({
+			content: z.string(),
+			at: z.number(),
+		}),
+	),
+});
+
+/**
  * Canonical persisted settings shape. `src/lib/db` owns this so `lib` never has
  * to depend on `state`; the settings store imports it from `@lib/db`. Defaults
  * seed one empty provider and point `activeProviderId` at it.
@@ -105,6 +130,15 @@ export const Settings = z.object({
 	profiles: z.array(profileSchema).default([]),
 	/** Durable notes for the whole app, one list sent with every request. */
 	memories: z.array(memoryNoteSchema).default([]),
+	/**
+	 * The note store (see `lib/memoryNotes.ts`): one list, with a
+	 * soft-deleted entry marked by `deletedAt` rather than held in a
+	 * second array. Additive and optional on disk — a blob without
+	 * it reads as no notes, and an older app ignores it — so nothing
+	 * is required to migrate on its own account; `db/migrate.ts` only
+	 * seeds it from the legacy `memories` array.
+	 */
+	memoryNotes: z.array(memoryEntrySchema).default([]),
 	/** Off = no notes injected into requests and none recorded from replies. */
 	memoriesEnabled: z.boolean().default(true),
 	/**
