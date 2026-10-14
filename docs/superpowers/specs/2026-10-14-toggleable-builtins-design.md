@@ -50,7 +50,7 @@ Motivation, in the requester's words: *"built ins shld be able to be turned off,
 ### The locked core
 
 - **Locked** (never disableable, and *not* touched by the bare preset): the **container/substrate** that hosts a layout, and the **Plugins manager** section — the way back.
-- **Everything else toggles, including `app.shell`.** With the shell off, the container renders an empty surface: a legitimate "bare host" state, and the documented meaning of turning the shell off. (`app.settings` toggles too; only the manager inside it is locked.)
+- **Everything else toggles, including `app.shell`.** With the shell off, the container renders a **minimal host surface** — the route back to the manager, plus a line naming what is currently off — and **not** a blank page. (This was originally written as "an empty surface" and T6's browser proof measured why that is wrong: with the bare preset and a genuinely empty container, the manager is *registered* but **unreachable**, so a bare app would be recoverable only by editing stored data — precisely the state this spec forbids. The locked container is what guarantees the way back, so it must render something that reaches it. "The substrate alone" elsewhere in this document means this minimal surface, not nothing.) (`app.settings` toggles too; only the manager inside it is locked.)
 - Locked-ness is enforced **in the store** (a refused toggle with a message), so a future UI cannot bypass it.
 
 ### Persistence
