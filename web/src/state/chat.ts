@@ -1,6 +1,12 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
-import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
+import {
+	type ExtractedMemories,
+	extractMemories,
+	memoryLogLines,
+	memoryPrompt,
+	recordMemories,
+} from "@lib/memory";
 import { HostServices } from "@lib/plugins/host";
 import {
 	composeTurnBody,
@@ -259,15 +265,18 @@ const pushMarker = (raw: RawText, line: string): void => {
 };
 
 /**
- * Raw text accumulation shared with `appendChunk`. Memory tags are
+ * Raw text accumulation shared with `appendChunk`. Memory blocks are
  * stripped from the visible text, so the raw accumulation is the
  * single source both the visible text and the next-turn seed derive
- * from: re-extracting over the whole accumulation is idempotent, and
- * a tag split across chunks still never reaches the UI or the store.
- * Markers are kept apart from it — at the stripped answer length
- * each was inserted at — so the transcript interleaves them with the
- * answer text while the accumulation itself stays marker-free (a
- * marker is display-only and must never reach the wire).
+ * from: re-extracting over the whole accumulation is idempotent, and a
+ * complete block never reaches the UI or the store. A *partial* tag is
+ * ordinary prose and does render, so a marker split across chunks can
+ * appear for the frame that carries it — the spec's chosen trade,
+ * because chopping it would truncate real text. Markers are kept apart
+ * from it — at the stripped answer length each was inserted at — so the
+ * transcript interleaves them with the answer text while the
+ * accumulation itself stays marker-free (a marker is display-only and
+ * must never reach the wire).
  */
 interface RawText {
 	value: string;
@@ -342,16 +351,32 @@ const appendMarker = (
 };
 
 /**
- * Persist memory notes the model ended its reply with. Pure merge through
- * `mergeMemories`, then the settings store; a no-op when the reply carried
- * none or the feature is off.
+ * Persist memory notes the model ended its reply with. The tag path is the
+ * documented fallback for endpoints that cannot be sent tool declarations, so
+ * it routes through T1's single mutator (`recordMemories`) exactly as the five
+ * memory tools do: a complete block adds one entry to the note store under a
+ * generated id **and** mirrors the same dedupe decision into the legacy
+ * `memories` array. The malformed (unterminated) block `extractMemories`
+ * dropped is logged **here**, once, where the reply is stored — never on the
+ * streaming render path, which would fire per frame. A no-op when the reply
+ * carried none or the feature is off.
  */
-const commitMemories = (additions: readonly string[]): void => {
-	if (additions.length === 0) return;
+const commitMemories = (extracted: ExtractedMemories): void => {
+	for (const line of memoryLogLines(extracted)) {
+		Effect.runFork(Effect.logWarning(line));
+	}
+	if (extracted.memories.length === 0) return;
 	const settings = getSettings();
 	if (!settings.memoriesEnabled) return;
+	const recorded = recordMemories(
+		settings.memories,
+		settings.memoryNotes,
+		extracted.memories,
+		Date.now(),
+	);
 	setSettings({
-		memories: [...mergeMemories(settings.memories, additions, Date.now())],
+		memories: [...recorded.memories],
+		memoryNotes: [...recorded.notes],
 	});
 };
 
@@ -361,7 +386,7 @@ const finalize = (
 	protocol: string,
 	exit: Exit.Exit<void, string>,
 	next: unknown,
-	memories: readonly string[],
+	extracted: ExtractedMemories,
 ): void => {
 	// A newer send (or a `stop`) invalidated this run; its finalizer must not
 	// touch shared state, or it would clobber the new stream's status/`prev`.
@@ -370,7 +395,7 @@ const finalize = (
 	streamConversationId = undefined;
 	if (Exit.isSuccess(exit)) {
 		prevByConversationProtocol.set(prevKey(conversationId, protocol), next);
-		commitMemories(memories);
+		commitMemories(extracted);
 	} else if (!Cause.hasInterruptsOnly(exit.cause)) {
 		// The turn failed: drop the stored body so the next turn
 		// rebuilds from the transcript — which carries this turn's
@@ -495,10 +520,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	const settings = getSettings();
 	// The memory section is composed for the wire only: the conversation's own
-	// `systemPrompt` never changes, and with no notes (or the feature off)
+	// `systemPrompt` never changes, and with no live notes (or the feature off)
 	// `memoryPrompt` is "" so the request is byte-identical to before.
 	const memory = settings.memoriesEnabled
-		? memoryPrompt(settings.memories)
+		? memoryPrompt(settings.memoryNotes)
 		: "";
 
 	// The TinyFish key rides the request's ctx (it decides
@@ -773,7 +798,7 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 							// stripped), appended to the body the tool
 							// loop extended.
 							appendAssistant(wire, reply),
-							extracted.memories,
+							extracted,
 						);
 					}),
 				),
