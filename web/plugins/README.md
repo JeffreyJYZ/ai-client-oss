@@ -92,6 +92,8 @@ A registered tool is **announced, not merely callable**: the host reads the tool
 
 The slot map is `web/src/lib/plugins/ids.ts` (`slotIds`, one `as const` tuple → schema **and** type) and is rendered on the generated reference page. A contribution renders wherever the host component puts `<Slot id="…">`; a component id (`ui.markdown`) is resolved by `useComponent`, not a slot.
 
+- **Replacing `ui.root.layout` owns the way back.** A root layout takes over the whole app, and the host guarantees only that the Plugins manager stays *registered*, not that your layout shows it: a layout that renders no `settings.root` (the surface the manager's section renders into) shows the manager nowhere. Render a route to it yourself.
+
 ### Typing your `host`
 
 `host.ui`, `host.ui.kit`, `host.settings`, `host.tools`, `host.renderers` and `host.themes` are typed. `host.commands`, `host.providers` and `host.pipeline` are the generic `HostRegistry<RegistryEntry>`: pass your entry as a **typed variable** (not a fresh literal) and it type-checks; the runtime stores whatever fields you put on it. The typed helpers (`registerCommand`, `registerProvider`) are host-module exports a plugin cannot reach at runtime — but `host.themes` is the typed theme service itself, so apply/clear/active are on `host`.
