@@ -38,7 +38,7 @@ Motivation, in the requester's words: *"built ins shld be able to be turned off,
 ### Units and identities
 
 - Each area gets a **stable id**, in the same allowlist spirit as plugin ids but its own schema (different domain, and the plugin rule was written after a real containment bug — no shared denylist): `app.shell`, `app.transcript`, `app.composer`, `app.overlay`, `app.settings`, `app.themes`, `app.tools`, `app.commands`, `app.providers`.
-- A **contribution** inside an area is identified by the id the registry already uses for it: a slot id plus the contribution's own id, a tool's wire name, a command id, a settings section id. **No new identity scheme** — if a contribution has no id today, the registry that holds it gains one rather than the toggle layer inventing a parallel namespace.
+- A **contribution** inside an area is identified by the id its registry already holds for it — **the entry's own `id`**, whatever that entry's kind (a UI/command/provider/pipeline entry's `id`, a tool's `declaration.name`, a theme's `id`, a settings section's `id`, a renderer's `kind`). **No new identity scheme**, and **nothing derived**: an earlier draft said "a slot id plus the contribution's own id", which would have made every per-contribution toggle silently match nothing, since the gate keys on the registry entry's `id` alone. If a contribution had no id, the registry that holds it would gain one rather than the toggle layer inventing a parallel namespace.
 
 ### Registration, teardown, reconcile
 
