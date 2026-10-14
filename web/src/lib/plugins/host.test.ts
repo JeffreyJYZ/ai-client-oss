@@ -155,6 +155,30 @@ describe("makeHost", () => {
 		expect(Effect.runSync(registries.tools.entries())).toEqual([]);
 	});
 
+	test("run owns a long-lived effect: closing the scope interrupts it", async () => {
+		const registries = services();
+		const pluginScope = scope();
+		const host = makeHost(registries, "p1", pluginScope);
+
+		let live = 0;
+		host.run(
+			Effect.gen(function* () {
+				live += 1;
+				return yield* Effect.never;
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						live -= 1;
+					}),
+				),
+			),
+		);
+		expect(live, "the effect is running").toBe(1);
+
+		await Effect.runPromise(Scope.close(pluginScope, Exit.void));
+		expect(live, "the scope close interrupted it").toBe(0);
+	});
+
 	test("carries the plugin API version and one distinct registry per kind", () => {
 		const registries = services();
 		const host: Host = makeHost(registries, "p1", scope());

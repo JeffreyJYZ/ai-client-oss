@@ -58,6 +58,29 @@ export interface BuiltinsReconciler {
 }
 
 /**
+ * Close one area's scope, reporting — never re-raising — a faulting finalizer.
+ * `Scope.close`'s typed error is `never`, so a finalizer that dies escapes as a
+ * defect: at boot that travels out of `runtime.runPromise` and leaves a blank
+ * app. A defect is logged against the area id and the reconcile carries on; the
+ * finalizers that did run have already undone their own work.
+ */
+const closeQuietly = (
+	areaId: string,
+	scope: Scope.Closeable,
+): Effect.Effect<void> =>
+	Scope.close(scope, Exit.void).pipe(
+		Effect.catchCause((cause) =>
+			Effect.sync(() =>
+				recordLog(
+					areaId,
+					"error",
+					`closing the built-in area "${areaId}" faulted: ${Cause.pretty(cause)}`,
+				),
+			),
+		),
+	);
+
+/**
  * The reconcile loop over injected seams.
  *
  * Two properties are the whole point, and both are load-bearing:
@@ -78,12 +101,13 @@ export const makeBuiltinsReconciler = (
 	const reconcile = (services: HostServicesShape): Effect.Effect<void> =>
 		Effect.gen(function* () {
 			// Tear down. Closing runs the finalizers the registries attached to
-			// this scope, so each area's entries — and its subscriptions and
-			// notify queues — are gone before anything re-registers.
+			// this scope, so each area's entries — and its subscriptions, notify
+			// queues and `host.run` fibres — are gone before anything
+			// re-registers.
 			const previous = live;
 			live = [];
 			for (const area of [...previous].reverse()) {
-				yield* Scope.close(area.scope, Exit.void);
+				yield* closeQuietly(area.id, area.scope);
 			}
 
 			// Register each enabled area into a scope of its own.
@@ -94,13 +118,13 @@ export const makeBuiltinsReconciler = (
 				const outcome = yield* Effect.exit(
 					Effect.try({
 						try: () => area.register(host),
-						catch: (cause) => cause,
+						catch: (cause) => String(cause),
 					}),
 				);
 				if (Exit.isFailure(outcome)) {
 					// Roll the failed area's partial work back, name the area, and
 					// continue: the other areas must still be registered.
-					yield* Scope.close(scope, Exit.void);
+					yield* closeQuietly(area.id, scope);
 					yield* Effect.sync(() =>
 						recordLog(
 							area.id,
@@ -159,6 +183,3 @@ export const reconcileBuiltins = (
 	}
 	return reconciler.reconcile(services);
 };
-
-/** The live areas right now, in registration order. */
-export const liveBuiltinAreas = reconciler.live;

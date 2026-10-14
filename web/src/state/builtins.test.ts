@@ -15,7 +15,7 @@ import {
 	makeHost,
 } from "@lib/plugins/host";
 import { clearLog, getLogSnapshot } from "@lib/plugins/log";
-import { Effect } from "effect";
+import { Effect, Scope } from "effect";
 import {
 	type BuiltinsDeps,
 	type BuiltinsSnapshot,
@@ -737,5 +737,116 @@ describe("reconcile", () => {
 			.map((entry) => entry.message)
 			.join("\n");
 		expect(messages).toContain("app.tools");
+	});
+
+	test("toggling app.themes repeatedly keeps exactly one live subscription", async () => {
+		const base = makeServices();
+		// Count the theme-reconciliation subscriptions that are live. The
+		// service's own `run` is the work each registration starts; the tracker
+		// decrements when that work ends, whether by completion or by the
+		// interruption a scope close performs. A registrar that starts it with a
+		// bare `Effect.runFork` earns no decrement, so this count grows by one
+		// per registration — which is exactly the accumulation under test.
+		let liveSubscriptions = 0;
+		const tracked: HostServicesShape = {
+			...base,
+			themesService: {
+				run: base.themesService.run,
+				forPlugin: (themes) => {
+					const facade = base.themesService.forPlugin(themes);
+					return {
+						...facade,
+						run: () => {
+							liveSubscriptions += 1;
+							return facade.run().pipe(
+								Effect.ensuring(
+									Effect.sync(() => {
+										liveSubscriptions -= 1;
+									}),
+								),
+							);
+						},
+					};
+				},
+			},
+		};
+
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, tracked);
+		expect(liveSubscriptions, "the first registration starts one").toBe(1);
+
+		for (let cycle = 0; cycle < 3; cycle += 1) {
+			enabled.set("app.themes", false);
+			await run(reconciler, tracked);
+			expect(liveSubscriptions, "off interrupts the subscription").toBe(0);
+
+			enabled.set("app.themes", true);
+			await run(reconciler, tracked);
+			expect(liveSubscriptions, "on starts exactly one").toBe(1);
+		}
+	});
+
+	test("a finalizer that throws is logged, not fatal to the reconcile", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const sabotaged = "app.overlay";
+
+		// A real scope finalizer that throws, added to one area's scope the same
+		// way the host adds its own (`Scope.addFinalizer`, provided the scope).
+		// It is the defect the tear-down guard must absorb: unguarded, the next
+		// reconcile's close dies and `runtime.runPromise` at boot rejects, which
+		// is a blank app.
+		const sabotagingMakeHost = (
+			service: HostServicesShape,
+			areaId: string,
+			areaScope: Scope.Scope,
+		): Host => {
+			if (areaId === sabotaged) {
+				Effect.runSync(
+					Effect.provideService(
+						Scope.addFinalizer(
+							areaScope,
+							Effect.die(new Error("finalizer boom")),
+						),
+						Scope.Scope,
+						areaScope,
+					),
+				);
+			}
+			return makeHost(service, areaId, areaScope);
+		};
+
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			makeHost: sabotagingMakeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		const baseline = registryIds(services);
+
+		clearLog();
+		// The next reconcile closes that scope first. Unguarded, this rejects.
+		await run(reconciler, services);
+
+		const after = registryIds(services);
+		// The loop continued: every area, the sabotaged one included, is live.
+		expect(after.ui).toEqual(baseline.ui);
+		expect(after.tools).toEqual(baseline.tools);
+		expect(after.commands).toEqual(baseline.commands);
+
+		// And the failure named the area whose teardown faulted.
+		const messages = getLogSnapshot()
+			.map((entry) => entry.message)
+			.join("\n");
+		expect(messages).toContain(sabotaged);
 	});
 });

@@ -34,7 +34,15 @@ import { makeThemeService, type ThemeService } from "@lib/plugins/themes";
 import { makeToolRegistry, type ToolRegistry } from "@lib/plugins/tools";
 import { runningVersion } from "@lib/updates";
 import appPackage from "@root/package.json";
-import { Context, Effect, Layer, Option, Scope, type Stream } from "effect";
+import {
+	Cause,
+	Context,
+	Effect,
+	Layer,
+	Option,
+	Scope,
+	type Stream,
+} from "effect";
 import type { ComponentType } from "react";
 
 /**
@@ -151,6 +159,20 @@ export interface Host {
 		event: HostEvent,
 		handler: (payload: unknown) => void,
 	) => Disposable;
+	/**
+	 * Run an effect for this plugin's lifetime (spec §2/§3). The plugin's
+	 * `Scope` owns the fibre: closing the scope — a plugin unload, or a built-in
+	 * area's reconcile teardown — interrupts the work, so a subscription or a
+	 * loop a plugin starts is torn down with the plugin instead of outliving it.
+	 * This is the correct way to start long-lived work; a bare
+	 * `Effect.runFork` is owned by nothing and never stops.
+	 *
+	 * Nothing is returned and nothing is awaited — the scope is the lifetime, so
+	 * a caller cannot leak a fibre by losing its handle. A fault is reported
+	 * through the host log and never thrown, because a fibre with no handle has
+	 * no caller to fail to.
+	 */
+	readonly run: <A, E>(effect: Effect.Effect<A, E>) => void;
 }
 
 /**
@@ -348,6 +370,30 @@ export const makeHost = (
 			const handle = subscribeHostEvent(event, handler, pluginId);
 			onUnload(scope, handle.dispose);
 			return handle;
+		},
+		run: (effect) => {
+			// Forked into this plugin's own scope, so closing it interrupts the
+			// work — the ownership a bare `Effect.runFork` cannot give. The
+			// `catchCause` re-raises interruption (a normal teardown is not a
+			// fault) and logs everything else: a fibre with no handle has no
+			// caller to fail to.
+			Effect.runSync(
+				Effect.forkIn(
+					effect.pipe(
+						Effect.catchCause((cause) =>
+							Cause.hasInterrupts(cause)
+								? Effect.failCause(cause)
+								: Effect.logWarning(
+										new PluginFault({
+											detail: `an effect started with host.run faulted: ${Cause.pretty(cause)}`,
+											pluginId,
+										}),
+									),
+						),
+					),
+					scope,
+				),
+			);
 		},
 	};
 };

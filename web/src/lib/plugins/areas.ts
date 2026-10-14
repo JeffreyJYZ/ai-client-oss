@@ -49,9 +49,10 @@ export interface BuiltinArea extends BuiltinIdentity {
 /**
  * The substrate's registrar. Deliberately empty in this task: Task 3 gives the
  * substrate its meaning — the container the registration/reconcile lifecycle
- * owns. Today every area registers through the one host `main.tsx` builds, so
- * the substrate has nothing of its own to register, and a non-empty body would
- * double-register another area's contributions.
+ * owns. Each area now registers through its own host, built per area by
+ * `builtin/index.ts`, and the substrate still has nothing of its own to
+ * register: a non-empty body would double-register another area's
+ * contributions.
  */
 const registerSubstrate = (): void => {};
 
