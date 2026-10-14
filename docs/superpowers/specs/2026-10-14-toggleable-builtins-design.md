@@ -49,7 +49,7 @@ Motivation, in the requester's words: *"built ins shld be able to be turned off,
 
 ### The locked core
 
-- **Locked** (never disableable, and *not* touched by the bare preset): the **container/substrate**, and — through what it registers — the **two surfaces that *are* the way back**: the container's minimal fallback (`ui/MinimalHost.tsx`) and the settings **surface** (`settings.root.shell`). The manager **section** rides the locked `app.builtins`; the settings **sections** stay `app.settings`' to toggle. The surface is locked because it hosts every section, the manager's included — with it gone there would be no route to any of them, so it is part of the way back rather than part of what `app.settings` may take away.
+- **Locked** (never disableable, and *not* touched by the bare preset): the **container/substrate** — through the surface it renders when there is no layout (`ui/MinimalHost.tsx`, mounted directly by `App.tsx`) and through what it registers (`settings.root.shell`, the settings **surface**). Those are the **two surfaces that *are* the way back**. The manager **section** rides the locked `app.builtins`; the settings **sections** stay `app.settings`' to toggle. The settings surface is locked because it hosts every section, the manager's included — with it gone there would be no route to any of them, so it is part of the way back rather than part of what `app.settings` may take away.
 - **Everything else toggles, including `app.shell`.** With the shell off, the container renders a **minimal host surface** — the route back to the manager, plus a line naming what is currently off — and **not** a blank page. (This was originally written as "an empty surface" and T6's browser proof measured why that is wrong: with the bare preset and a genuinely empty container, the manager is *registered* but **unreachable**, so a bare app would be recoverable only by editing stored data — precisely the state this spec forbids. "The substrate alone" elsewhere in this document means this minimal surface, not nothing.) A **plugin-contributed `ui.root.layout` that renders no `settings.root` shows the manager nowhere**, and that is by design: the plugin owns the UI, so a layout which removes the route back is the layout's choice, not a host failure. Registration is the host's guarantee; reachability is a property of whatever renders.
 - Locked-ness is enforced **in the store** (a refused toggle with a message), so a future UI cannot bypass it.
 
@@ -77,7 +77,7 @@ The Plugins section gains a **Built-ins** area:
 ### Testing
 
 - **Unit — store semantics:** locked refusal; absent-field default = all on; unknown-id tolerance; contribution-level filtering; toggle → reconcile → state.
-- **Invariant (the strongest tests):** with every built-in off, the rendered DOM equals the substrate alone; toggling an area off and back on returns the DOM to its prior state — the same shape as the phase gates that already compare DOM byte-for-byte.
+- **Invariant (the strongest tests), and the honest split:** *at unit level*, with every non-locked area off the **registries hold exactly the locked contributions** — a literal set, with the restore asserting identical counts — because no DOM renderer exists in the suite. The **DOM** half of this claim is the browser proof's job, not the unit suite's: an earlier draft said "the rendered DOM equals the substrate alone" and implied a unit test that was never going to exist.
 - **Browser proof:** each area's toggle on/off with a live page sentinel (so a reload cannot fake it); the bare preset; restore-all; and the manager staying reachable throughout.
 - **Rust:** unaffected — this is entirely a web-side surface. Stated here so the absence of a Rust test is a decision, not an oversight.
 - `cd web && bun run verify` and `cargo check --all-targets` stay green.
@@ -93,7 +93,7 @@ The Plugins section gains a **Built-ins** area:
 
 ## Risks and open questions
 
-- **Turning the shell off** yields an empty surface. Intended, and the manager stays reachable — but this is the one toggle whose "off" state a user might mistake for a broken app, so the row's description must say so plainly.
+- **Turning the shell off** leaves the container rendering the **minimal surface** — the route back plus a line naming what is off — and **not** an empty one: the blank version was measured, and it left the manager registered but unreachable. It remains the one toggle whose "off" state a user might mistake for a broken app, so the row's description must say plainly what appears instead; and a layout that replaces the root owns whether the way back is shown at all, which is the layout's choice rather than a host failure.
 - **Renaming a built-in contribution** orphans its toggle state. Harmless (ignored), but a future rename should note it.
 - **Ordering:** P2 will move the Memories UI out of `Settings.tsx` into a registered section; that move is P2's, not P1's, though P1 is what makes it matter.
 - **Reconcile cost:** closing and re-registering all areas on every toggle is cheap at this scale (nine registrars) and chosen for correctness; if it ever costs, per-area reconcile is already the natural next step.
