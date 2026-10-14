@@ -137,6 +137,24 @@ export const Settings = z.object({
 	 * backup untouched.
 	 */
 	plugins: z.array(pluginStateSchema).default([]),
+	/**
+	 * Per-built-in-area on/off state, plus a per-contribution drill-down
+	 * (`{ [areaId]: { enabled?, contributions?: { [contributionId]: boolean } } }`).
+	 * **Additive and optional: absent means every area and every contribution is
+	 * on**, so there is no migration and an older app opening this data ignores
+	 * the field entirely. An id that no longer exists is likewise ignored — the
+	 * store neither reads it as state nor prunes it — which makes a renamed
+	 * built-in contribution's stale state harmless.
+	 */
+	builtins: z
+		.record(
+			z.string(),
+			z.object({
+				enabled: z.boolean().optional(),
+				contributions: z.record(z.string(), z.boolean()).optional(),
+			}),
+		)
+		.optional(),
 });
 
 export type Settings = z.infer<typeof Settings>;
