@@ -82,7 +82,7 @@ A pasted/installed plugin's source is imported from a `Blob`, which is the **pro
 Every `register*` returns a `Disposable`; disposing removes exactly that entry. A contribution the host **refuses** yields this same inert handle: an unknown `slot` name, or a tool whose name collides with a built-in or whose `declaration`/`execute` is malformed, is dropped silently and only logged as a `PluginFault` — nothing throws, nothing renders, so a typo is invisible until you check the **Plugins log panel**. Closing your plugin's scope (disable/uninstall/reload) disposes **all** of them plus your `setup` handle — a disabled plugin must leave no trace, so retract anything you put on the document in `dispose`.
 
 - **Long-lived work: `host.run(effect)`** — the correct way to start it. The fibre is a child of your plugin's scope, so a disable or reload interrupts it; the interruption is re-raised, while any other cause is logged as a `PluginFault`. A bare `Effect.runFork` is owned by nothing and never stops.
-- **Built-ins are toggleable too.** A built-in area registers through this same API, and it is disabled the same way — the same scope close — so a contribution, a lifetime and a teardown behave identically for a built-in and for your plugin.
+- **Built-ins are toggleable too — except the two locked areas.** A built-in area registers through this same API, and it is disabled the same way — the same scope close — so a contribution, a lifetime and a teardown behave identically for a built-in and for your plugin. The two exceptions are the app container (`app.substrate`) and the Plugins manager (`app.builtins`), which are the irreducible core and cannot be turned off.
 
 ### Tools on the wire
 

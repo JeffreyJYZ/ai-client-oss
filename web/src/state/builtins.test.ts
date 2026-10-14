@@ -1041,7 +1041,7 @@ describe("per-contribution toggles", () => {
 
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
-			enabledOf: (areaId) => h.snapshot().builtins[areaId] === true,
+			enabledOf: (areaId) => areaEnabled(h.snapshot().builtins, areaId),
 			contributionEnabledOf: (areaId, contributionId) =>
 				contributionEnabled(h.snapshot().contributions, areaId, contributionId),
 			makeHost,
@@ -1078,7 +1078,7 @@ describe("per-contribution toggles", () => {
 
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
-			enabledOf: (areaId) => h.snapshot().builtins[areaId] === true,
+			enabledOf: (areaId) => areaEnabled(h.snapshot().builtins, areaId),
 			contributionEnabledOf: (areaId, contributionId) =>
 				contributionEnabled(h.snapshot().contributions, areaId, contributionId),
 			makeHost,

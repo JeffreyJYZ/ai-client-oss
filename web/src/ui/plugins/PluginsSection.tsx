@@ -21,6 +21,7 @@ import {
 	SECTION_SUMMARY_WRAP,
 	Section,
 } from "@/ui/kit";
+import { BuiltinsArea } from "@/ui/plugins/BuiltinsArea";
 import { PluginLog } from "@/ui/plugins/PluginLog";
 import { PluginRow } from "@/ui/plugins/PluginRow";
 
@@ -35,6 +36,12 @@ import { PluginRow } from "@/ui/plugins/PluginRow";
  * Install has three doors — pasted source, a URL, the file picker — into the
  * one install path the store owns, so validation and the size bound cannot
  * differ between them.
+ *
+ * The section also carries the **Built-ins** area (`BuiltinsArea.tsx`): the
+ * per-area and per-contribution toggles for the app's own areas. Those are
+ * independent of the master switch above — the switch gates installed plugins,
+ * while the built-ins are part of the app and default on — which the area states
+ * plainly so the two are not read as one.
  */
 
 const HEADING = "text-xs uppercase tracking-widest text-neutral-500";
@@ -145,6 +152,8 @@ export function PluginsSection() {
 					Plugins are off. Turn them on to install and run one.
 				</p>
 			)}
+
+			<BuiltinsArea />
 
 			{plugins.plugins.length === 0 ? (
 				<p className="text-sm text-neutral-500">Nothing installed.</p>
