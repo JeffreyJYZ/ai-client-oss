@@ -879,6 +879,83 @@ describe("reconcile", () => {
 	});
 });
 
+/* ------------------------------------------------------------------ the invariant */
+
+/**
+ * Task 6's invariant: with **every non-locked area off** the registries hold
+ * exactly the locked contributions and nothing else, and restoring the areas
+ * returns them to the ids and counts they had.
+ *
+ * This is a **count-based proxy** for the spec's "the substrate alone" (spec
+ * "Testing": "with every built-in off, the rendered DOM equals the substrate
+ * alone"). The suite reads registries, not the DOM, so the strongest claim it
+ * can hold is that no toggleable area's registrations survive a state in which
+ * every one of them is off; the DOM half is proven on the production bundle in
+ * the browser step, which is where a rendered page exists to compare.
+ *
+ * The enabled-state source here is the injected fake, not the store, so this
+ * test can hand the reconciler a state the store would refuse — a locked area
+ * off. That is deliberate: what is under test is what the reconcile does with
+ * the state it is given, and it is what makes the "exactly the locked
+ * contributions" clause non-vacuous (see the report's negative control).
+ */
+describe("the invariant: every non-locked area off leaves exactly the locked core", () => {
+	test("holds exactly the locked contributions, and restoring returns the prior ids", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		const before = registryIds(services);
+
+		// The bare-host state: every area a user can turn off, off; the two locked
+		// ones left on exactly as the store keeps them — which is the state the
+		// bare preset produces (the way back lives in `app.builtins`).
+		for (const area of BUILTIN_AREAS) {
+			if (area.locked !== true) enabled.set(area.id, false);
+		}
+		await run(reconciler, services);
+		const bare = registryIds(services);
+
+		// Exactly the locked contributions. The container owns no registry entry
+		// of its own, so the whole survivor set is the manager's one section —
+		// and every other registry is empty, not merely shorter.
+		expect(bare.ui, "the locked core's own entry survives").toEqual([
+			"settings.section.plugins",
+		]);
+		expect(bare.commands).toEqual([]);
+		expect(bare.tools).toEqual([]);
+		expect(bare.providers).toEqual([]);
+		expect(bare.themes).toEqual([]);
+		// No area registers a pipeline stage today, so this line is a guard for a
+		// future one rather than a live discriminator (stated plainly: it cannot
+		// fail against the current table).
+		expect(idsOf(Effect.runSync(services.pipeline.entries()))).toEqual([]);
+
+		// Owned by the locked area itself, so the survivor is the manager's own
+		// registration and not a leftover of a disabled area.
+		expect(idsOf(Effect.runSync(services.ui.ownedBy("app.builtins")))).toEqual([
+			"settings.section.plugins",
+		]);
+
+		// Restoring puts back identical ids, in identical order, and identical
+		// counts.
+		enabled.all();
+		await run(reconciler, services);
+		const after = registryIds(services);
+		expect(after).toEqual(before);
+		for (const name of REGISTRIES) {
+			expect(after[name].length, `${name} count`).toBe(before[name].length);
+		}
+	});
+});
+
 /* ---------------------------------------------------- per-contribution toggles */
 
 /* ----------------------------------------------------- the manager's home */
