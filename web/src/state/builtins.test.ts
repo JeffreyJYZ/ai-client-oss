@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
-import { BUILTIN_AREAS, LOCKED_BUILTIN_IDS } from "@lib/plugins/areas";
+import {
+	BUILTIN_IDENTITIES,
+	LOCKED_BUILTIN_IDS,
+} from "@lib/plugins/builtinIdentity";
 import { clearLog, getLogSnapshot } from "@lib/plugins/log";
 import {
 	type BuiltinsDeps,
 	type BuiltinsSnapshot,
 	type BuiltinsStore,
+	getBuiltinsSnapshot,
 	makeBuiltinsStore,
+	startBuiltins,
 } from "@/state/builtins";
 
 /**
@@ -35,6 +40,8 @@ interface Harness {
 	/** Write settings the way any other part of the app does. */
 	readonly write: (patch: Partial<Settings>) => void;
 	readonly notifications: () => number;
+	/** How many times the store subscribed to settings — a start count. */
+	readonly subscriptions: () => number;
 }
 
 const makeHarness = (initial: Settings = settingsDefaults()): Harness => {
@@ -42,6 +49,7 @@ const makeHarness = (initial: Settings = settingsDefaults()): Harness => {
 	const listeners = new Set<() => void>();
 	const patches: Partial<Settings>[] = [];
 	let notifications = 0;
+	let subscriptions = 0;
 
 	const write = (patch: Partial<Settings>): void => {
 		patches.push(patch);
@@ -56,6 +64,7 @@ const makeHarness = (initial: Settings = settingsDefaults()): Harness => {
 		readSettings: () => settings,
 		writeSettings: write,
 		subscribeSettings: (listener) => {
+			subscriptions += 1;
 			listeners.add(listener);
 			return () => {
 				listeners.delete(listener);
@@ -72,6 +81,7 @@ const makeHarness = (initial: Settings = settingsDefaults()): Harness => {
 		patches,
 		write,
 		notifications: () => notifications,
+		subscriptions: () => subscriptions,
 	};
 };
 
@@ -88,7 +98,7 @@ describe("defaults and unknown ids", () => {
 		h.store.start();
 
 		const snapshot = h.store.getBuiltinsSnapshot();
-		for (const area of BUILTIN_AREAS) {
+		for (const area of BUILTIN_IDENTITIES) {
 			expect(snapshot.builtins[area.id]).toBe(true);
 		}
 		expect(snapshot.contributions).toEqual({});
@@ -197,7 +207,7 @@ describe("the presets", () => {
 		expect(snapshot.builtins["app.builtins"]).toBe(true);
 		expect(snapshot.builtins["app.shell"]).toBe(false);
 		expect(snapshot.builtins["app.tools"]).toBe(false);
-		for (const area of BUILTIN_AREAS) {
+		for (const area of BUILTIN_IDENTITIES) {
 			expect(snapshot.builtins[area.id]).toBe(area.locked === true);
 		}
 
@@ -206,6 +216,34 @@ describe("the presets", () => {
 		expect(h.settings().builtins?.["app.builtins"]?.enabled).toBe(true);
 		expect(h.settings().builtins?.["app.shell"]?.enabled).toBe(false);
 		expect(snapshot.contributions["app.tools"]?.fetch_url).toBe(false);
+	});
+
+	test("a preset leaves an entry no area claims exactly as it found it", () => {
+		// Written by a *newer* app version, or left by a renamed area. The store
+		// must neither act on it nor rewrite it (spec "Persistence": unknown ids
+		// are ignored, which is what makes the field forward-compatible).
+		const stale = { enabled: false, contributions: { "old-tool": true } };
+		const h = makeHarness(
+			withBuiltins({
+				"app.migrated-away": stale,
+				"app.tools": { enabled: false, contributions: { fetch_url: false } },
+			}),
+		);
+		h.store.start();
+
+		h.store.applyBarePreset();
+		expect(h.settings().builtins?.["app.migrated-away"]).toEqual(stale);
+
+		h.store.restoreAllBuiltins();
+		expect(h.settings().builtins?.["app.migrated-away"]).toEqual(stale);
+		expect(JSON.stringify(h.settings().builtins?.["app.migrated-away"])).toBe(
+			JSON.stringify(stale),
+		);
+
+		// The areas the store does own were acted on.
+		const snapshot = h.store.getBuiltinsSnapshot();
+		expect(snapshot.builtins["app.shell"]).toBe(true);
+		expect(snapshot.contributions["app.tools"]?.fetch_url).toBe(true);
 	});
 
 	test("restore-all re-enables every area and every contribution", () => {
@@ -222,7 +260,7 @@ describe("the presets", () => {
 		h.store.restoreAllBuiltins();
 
 		const snapshot = h.store.getBuiltinsSnapshot();
-		for (const area of BUILTIN_AREAS) {
+		for (const area of BUILTIN_IDENTITIES) {
 			expect(snapshot.builtins[area.id]).toBe(true);
 		}
 		expect(snapshot.builtins["app.shell"]).toBe(true);
@@ -282,6 +320,29 @@ describe("toggles through the settings seam", () => {
 });
 
 describe("the snapshot React reads", () => {
+	test("start() latches, so a second call cannot double-subscribe", () => {
+		const h = makeHarness(withBuiltins({ "app.shell": { enabled: false } }));
+		h.store.start();
+		h.store.start();
+
+		expect(h.subscriptions()).toBe(1);
+		// The one subscription is live, not just counted.
+		h.write({ pluginsEnabled: true });
+		expect(h.snapshot().enabled).toBe(true);
+	});
+
+	test("the module's own door is reachable and idempotent", () => {
+		// The real store, not a harness: the module starts itself at import, and
+		// Task 3's boot may call this too — so it must be safe to call more than
+		// once, and the resolved state must cover every identity.
+		startBuiltins();
+		startBuiltins();
+
+		expect(Object.keys(getBuiltinsSnapshot().builtins)).toHaveLength(
+			BUILTIN_IDENTITIES.length,
+		);
+	});
+
 	test("is resolved before `start()`, and a toggle works without it", () => {
 		const h = makeHarness(withBuiltins({ "app.shell": { enabled: false } }));
 
@@ -347,7 +408,7 @@ describe("the snapshot React reads", () => {
 		const snapshot = h.store.getBuiltinsSnapshot();
 		expect(snapshot.enabled).toBe(true);
 		// The switch gates *installed* plugins only: every built-in stays on.
-		for (const area of BUILTIN_AREAS) {
+		for (const area of BUILTIN_IDENTITIES) {
 			expect(snapshot.builtins[area.id]).toBe(true);
 		}
 

@@ -1,5 +1,8 @@
 import type { Settings } from "@lib/db";
-import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
+import {
+	BUILTIN_IDENTITIES,
+	type BuiltinIdentity,
+} from "@lib/plugins/builtinIdentity";
 import { recordLog } from "@lib/plugins/log";
 import { useSyncExternalStore } from "react";
 import {
@@ -32,6 +35,12 @@ import {
  *
  * Registration is not this module's job: it holds and persists the state, and
  * Task 3's reconcile is what acts on it.
+ *
+ * The identities come from `builtinIdentity.ts` — a leaf importing nothing —
+ * rather than from `areas.ts`, which imports every registrar and through them
+ * the UI and the chat store. Reading them through the area table would make the
+ * Plugins section import the store that imports the section: a cycle into this
+ * module, whose bottom starts the store.
  */
 
 /** What the Plugins section reads. */
@@ -100,11 +109,11 @@ const resolve = (settings: Settings): BuiltinsSnapshot => {
 	const builtins: Record<string, boolean> = {};
 	const contributions: Record<string, Record<string, boolean>> = {};
 
-	for (const area of BUILTIN_AREAS) {
-		const entry = state[area.id];
-		builtins[area.id] = entry?.enabled !== false;
+	for (const identity of BUILTIN_IDENTITIES) {
+		const entry = state[identity.id];
+		builtins[identity.id] = entry?.enabled !== false;
 		const recorded = entry?.contributions;
-		if (recorded !== undefined) contributions[area.id] = { ...recorded };
+		if (recorded !== undefined) contributions[identity.id] = { ...recorded };
 	}
 
 	return { enabled: settings.pluginsEnabled, builtins, contributions };
@@ -199,8 +208,8 @@ export const makeBuiltinsStore = (deps: BuiltinsDeps): BuiltinsStore => {
 	};
 
 	/** The area a persisted id names, or `undefined` when the table has none. */
-	const areaOf = (id: string): BuiltinArea | undefined =>
-		BUILTIN_AREAS.find((area) => area.id === id);
+	const areaOf = (id: string): BuiltinIdentity | undefined =>
+		BUILTIN_IDENTITIES.find((identity) => identity.id === id);
 
 	/**
 	 * Whether a toggle must be refused, logging why it was when it is. Two
@@ -276,8 +285,11 @@ export const makeBuiltinsStore = (deps: BuiltinsDeps): BuiltinsStore => {
 	const applyBarePreset = (): void => {
 		const state = deps.readSettings().builtins ?? {};
 		const next: BuiltinsRecord = { ...state };
-		for (const area of BUILTIN_AREAS) {
-			next[area.id] = { ...next[area.id], enabled: area.locked === true };
+		for (const identity of BUILTIN_IDENTITIES) {
+			next[identity.id] = {
+				...next[identity.id],
+				enabled: identity.locked === true,
+			};
 		}
 		write(next);
 	};
@@ -286,22 +298,24 @@ export const makeBuiltinsStore = (deps: BuiltinsDeps): BuiltinsStore => {
 	 * Turn everything back on (spec, goal 5). The recorded overrides are set to
 	 * on rather than dropped: "restore all" reverses the toggles, and an id that
 	 * no longer exists stays inert either way.
+	 *
+	 * Only the areas the identity list names are touched: an entry no area claims
+	 * (a newer app version's, or a renamed area's) is carried through **unchanged**,
+	 * exactly as {@link applyBarePreset} carries it — rewriting it would mutate
+	 * state this build does not own, which is the opposite of the field's
+	 * forward-compatibility (spec "Persistence": unknown ids are ignored).
 	 */
 	const restoreAllBuiltins = (): void => {
 		const state = deps.readSettings().builtins ?? {};
-		const next: BuiltinsRecord = {};
-		for (const areaId of Object.keys(state)) {
-			const entry = state[areaId] ?? {};
-			const contributions = entry.contributions;
-			next[areaId] = {
-				...entry,
+		const next: BuiltinsRecord = { ...state };
+		for (const identity of BUILTIN_IDENTITIES) {
+			const contributions = next[identity.id]?.contributions;
+			next[identity.id] = {
 				enabled: true,
-				contributions:
-					contributions === undefined ? undefined : allOn(contributions),
+				...(contributions === undefined
+					? {}
+					: { contributions: allOn(contributions) }),
 			};
-		}
-		for (const area of BUILTIN_AREAS) {
-			if (next[area.id] === undefined) next[area.id] = { enabled: true };
 		}
 		write(next);
 	};
@@ -330,9 +344,24 @@ const realDeps: BuiltinsDeps = {
 
 const store = makeBuiltinsStore(realDeps);
 
-// Subscribe to settings once, at import: hydration is asynchronous, so this
-// catches the stored value whenever it arrives. Nothing is registered here —
-// Task 3's reconcile is what turns this state into live areas.
+/**
+ * Start the store: subscribe to the settings store so hydration and every later
+ * change refresh the snapshot. **Idempotent** — `start()` returns immediately
+ * once it has run, so a second call (a caller who is unsure, or a future import
+ * cycle that evaluates this module's tail twice) cannot double-subscribe or
+ * re-publish.
+ *
+ * The module starts itself at import, so the app needs to call nothing: by the
+ * time React mounts, hydration is already being watched. This export is the
+ * explicit door for a boot path that wants the order stated — Task 3's
+ * `main.tsx` wiring may call it next to its `reconcileBuiltins(services)`, and
+ * the call is then a no-op rather than a second start. Nothing is registered
+ * here either way: Task 3's reconcile is what turns this state into live areas.
+ */
+export const startBuiltins = (): void => {
+	store.start();
+};
+
 store.start();
 
 /** The Plugins section's built-in snapshot. */
