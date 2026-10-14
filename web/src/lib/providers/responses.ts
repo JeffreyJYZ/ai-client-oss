@@ -181,5 +181,8 @@ export const responses = {
 				ctx,
 			),
 			bearerHeaders(ctx.apiKey),
+			// The conversation's session id, for an endpoint that needs one
+			// (`x-opencode-session`).
+			ctx.conversationId,
 		),
 } satisfies Provider<ResponsesSend>;

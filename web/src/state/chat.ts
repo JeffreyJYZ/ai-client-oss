@@ -516,6 +516,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		apiUrl: active.baseUrl,
 		apiKey: active.apiKey,
 		model: active.model,
+		// The conversation this turn belongs to, so an endpoint that needs a
+		// per-conversation session header is sent this conversation's own id.
+		conversationId,
 		parts,
 		// Tools live on the provider, not globally: the accepted shape is
 		// endpoint-specific (OpenAI's built-in is rejected elsewhere).

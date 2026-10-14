@@ -1,3 +1,5 @@
+import { sessionHeadersFor } from "@lib/providers/presets";
+import { chatTransport } from "@lib/providers/transport";
 import type { Chunk } from "@lib/providers/types";
 import { Effect, Stream } from "effect";
 
@@ -461,41 +463,57 @@ export const bearerHeaders = (
 	return headers;
 };
 
+/**
+ * The assembled request headers: the endpoint's own set plus, for an OpenCode
+ * host, that endpoint's session header (see `sessionHeadersFor`) — keyed on the
+ * request URL, so it reaches exactly the hosts that need it and never another
+ * endpoint. One place, so the desktop and web transports are sent identical
+ * headers.
+ */
+export const chatHeaders = (
+	url: string,
+	headers: Record<string, string>,
+	conversationId: string | undefined,
+): Record<string, string> =>
+	conversationId === undefined
+		? headers
+		: { ...headers, ...sessionHeadersFor(url, conversationId) };
+
+/**
+ * Send one turn's request and return its stream of chunks.
+ *
+ * The request itself goes through {@link chatTransport}: on the desktop the
+ * shell makes it, because a webview cannot send this POST to a host that
+ * refuses its CORS preflight; in a browser it is the app's own `fetch`, exactly
+ * as it always was. Either way the transport hands back the status and the
+ * body's text, and this is the only place the body is parsed — so the desktop
+ * path cannot drift from the web one.
+ */
 export const sendStream = (
 	url: string,
 	body: unknown,
 	headers: Record<string, string>,
+	conversationId?: string,
 ): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 	Effect.gen(function* () {
-		const response = yield* Effect.tryPromise({
-			try: () =>
-				fetch(url, {
-					method: "POST",
-					headers,
-					body: JSON.stringify(body),
-				}),
-			catch: (cause) => String(cause),
-		});
+		const response = yield* chatTransport(
+			url,
+			chatHeaders(url, headers, conversationId),
+			JSON.stringify(body),
+		);
 
 		if (!response.ok) {
-			const detail = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: () => "",
-			});
+			const detail = yield* response.text;
 			return yield* Effect.fail(`HTTP ${response.status}: ${detail}`);
 		}
 
-		const raw = response.body;
-		if (raw === null) return yield* Effect.fail("response has no body");
-
-		return Stream.fromReadableStream<Uint8Array, string>({
-			evaluate: () => raw,
-			onError: (cause) => String(cause),
-		}).pipe(
-			Stream.decodeText(),
+		return response.chunks.pipe(
 			Stream.splitLines,
 			Stream.mapEffect(parseLineSafe),
 			Stream.filter((chunk): chunk is Chunk => chunk !== null),
 			accumulateToolCalls,
+			// A caller that stops consuming the stream (a stopped turn) abandons
+			// the request with it, rather than leaving it open.
+			Stream.ensuring(response.cancel),
 		);
 	});

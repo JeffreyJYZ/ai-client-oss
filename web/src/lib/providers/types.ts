@@ -134,6 +134,15 @@ export interface SendCtx {
 	/** Per-conversation system prompt; absent/blank sends none. */
 	readonly systemPrompt?: string;
 	/**
+	 * The conversation this request belongs to — the store's own id for it,
+	 * threaded from `state/chat.ts` (`send` already holds it) so a request to an
+	 * endpoint that needs a per-conversation session (OpenCode's
+	 * `x-opencode-session`) is sent that conversation's own stable id (see
+	 * `sessionHeadersFor`). Absent only for a request that belongs to no
+	 * conversation, e.g. the Settings connection probe.
+	 */
+	readonly conversationId?: string;
+	/**
 	 * Set by the tool loop from its second round on: the request
 	 * replays the body round 1 sent, which already carries the
 	 * turn's user message, so `buildRequest` must not append

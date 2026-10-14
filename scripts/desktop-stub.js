@@ -11,6 +11,12 @@
  * The two values below (`0.2.3`, `9.9.9`) are arbitrary on purpose — the point is
  * that the version comparison runs and produces a notice, not what it says.
  *
+ * Task 25 extended it for the chat transport: `chat_stream` answers with a
+ * scripted SSE body (override with `window.__t25Script`, a list of body runs)
+ * and `window.__t25ChatStreams` / `window.__t25Cancels` record what the app
+ * sent; set `window.__t25Open = true` to leave a request open, so a stopped turn
+ * and its `chat_stream_cancel` are observable.
+ *
  * Traps, all expected rather than bugs:
  * - With this stub the Tauri **db** adapter is the selected one and every `db_*`
  *   command rejects, so settings and conversations fall back to in-memory
@@ -31,11 +37,28 @@
 	// the transcript shows what actually reached the (stubbed) Rust command.
 	window.__t20PluginWrites = [];
 	// The plugin-changed event surface (T21). `listen` calls
-	// `plugin:event|listen` with the handler `transformCallback` returned; this
-	// stub's `transformCallback` is the identity, so the stored `handler` is the
-	// real function, and `window.__t21Fire` drives it the way Rust's `emit` would.
+	// `plugin:event|listen` with the id `transformCallback` returned; this
+	// stub's `transformCallback` keeps the callback under that id (as the real
+	// Tauri installs it under a `__TAURI_CALLBACK_<id>__` global), so the stored
+	// `handler` is an id and `window.__t21Fire` resolves it.
 	window.__t21Listeners = {};
 	window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: () => {} };
+	// Every callback `transformCallback` handed out, by id. A `Channel` needs
+	// this: its `id` is that return value and it serializes to
+	// `__CHANNEL__:<id>` (see `@tauri-apps/api`'s `Channel`).
+	const callbacks = new Map();
+	let callbackSeq = 0;
+	const transformCallback = (callback) => {
+		const id = (callbackSeq += 1);
+		callbacks.set(id, callback);
+		return id;
+	};
+	// The chat transport (T25). `window.__t25ChatStreams` records every
+	// `chat_stream` the app sent, and `window.__t25Cancels` every cancel, so a
+	// proof can assert what reached the (stubbed) shell. `window.__t25Script`
+	// overrides the scripted SSE body.
+	window.__t25ChatStreams = [];
+	window.__t25Cancels = [];
 	window.__TAURI_INTERNALS__ = {
 		invoke: (cmd, args) => {
 			if (cmd === "plugin:app|version") return Promise.resolve("0.2.3");
@@ -75,17 +98,72 @@
 				return Promise.resolve(1);
 			}
 			if (cmd === "plugin:event|unlisten") return Promise.resolve(null);
+			// The streaming chat transport (T25). Messages are delivered the way
+			// Rust's `Channel` delivers them — each carrying the index it was
+			// sent with, then an `end` marker — and the command stays open until
+			// the app cancels it, so the cancel path is observable.
+			if (cmd === "chat_stream") {
+				window.__t25ChatStreams.push({
+					requestId: args.requestId,
+					url: args.url,
+					headers: args.headers,
+					body: args.body,
+				});
+				const channel = args.onEvent;
+				const deliver = callbacks.get(channel.id);
+				const script = window.__t25Script ?? [
+					'data: {"choices":[{"delta":{"content":"stub reply"}}]}\n\n',
+					"data: [DONE]\n\n",
+				];
+				// A request left open (`window.__t25Open`) relays its status and
+				// one body run, then stops: the stream is live until the app
+				// abandons it, so the cancel path is observable.
+				const open = window.__t25Open === true;
+				const queue = [
+					{ type: "status", status: 200 },
+					...(open ? script.slice(0, 1) : script).map((text) => ({
+						type: "chunk",
+						text,
+					})),
+					...(open ? [] : [{ type: "end" }]),
+				];
+				// Messages are delivered one task at a time, exactly as Rust's
+				// channel does, and the command settles **after** them — the
+				// reverse order would make the transport's backstop terminal
+				// (offered when the command settles) beat the status.
+				let index = 0;
+				const step = () => {
+					const message = queue.shift();
+					if (message === undefined || !deliver) return;
+					deliver({ index, message });
+					index += 1;
+					setTimeout(step, 0);
+				};
+				setTimeout(step, 0);
+				if (open) return new Promise(() => {});
+				return new Promise((resolve) => {
+					setTimeout(resolve, 40);
+				});
+			}
+			if (cmd === "chat_stream_cancel") {
+				window.__t25Cancels.push(args.requestId);
+				return Promise.resolve(null);
+			}
 			return Promise.reject(
 				new Error("desktop stub: " + cmd + " is not implemented"),
 			);
 		},
-		transformCallback: (cb) => cb,
+		transformCallback,
+		unregisterCallback: (id) => callbacks.delete(id),
 	};
 	// Deliver one event to every stub listener, exactly as an `emit` would. The
 	// event id shape matches `@tauri-apps/api/event`'s `Event<T>`.
 	window.__t21Fire = (event, payload) => {
 		const list = window.__t21Listeners[event] ?? [];
-		for (const handler of list) handler({ event, id: 0, payload });
+		for (const id of list) {
+			const handler = callbacks.get(id);
+			if (handler) handler({ event, id: 0, payload });
+		}
 		return list.length;
 	};
 	window.fetch = (input, init) => {

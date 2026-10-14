@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use tauri::{Emitter, Manager};
 
@@ -681,6 +681,208 @@ async fn http_request(
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
+/* --------------------------------------------------------- streamed chat */
+
+/// One message the desktop chat transport relays to the frontend, **in order**.
+///
+/// The status is relayed before a byte of the body is read, so the caller can
+/// tell a non-2xx apart without accumulating anything. A failure that happens
+/// *before* the status is the command's own `Err` (the caller has no stream to
+/// consume yet); after it, it is a terminal `Error` message, so the caller's
+/// stream has one source of truth for how it ended. `End` is that source for a
+/// body relayed whole.
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase", tag = "type")]
+enum StreamMessage {
+    /// The response's status, relayed before its body.
+    Status { status: u16 },
+    /// One run of the response body, decoded to text (see [`take_text`]).
+    Chunk { text: String },
+    /// The body could not be relayed to its end.
+    Error { message: String },
+    /// The body was relayed to its end.
+    End,
+}
+
+/// Move every complete UTF-8 character out of `buffer`, leaving a truncated tail
+/// behind for the next chunk.
+///
+/// A response body is a byte stream, so a multi-byte character can straddle two
+/// chunks; decoding each chunk on its own (`String::from_utf8_lossy`) would
+/// corrupt it into replacement characters. This is the incremental decode the
+/// web path already gets from `TextDecoder`: an incomplete tail is carried to
+/// the next chunk, and a genuinely invalid byte becomes U+FFFD.
+fn take_text(buffer: &mut Vec<u8>) -> String {
+    let mut out = String::new();
+    loop {
+        match std::str::from_utf8(buffer) {
+            Ok(text) => {
+                out.push_str(text);
+                buffer.clear();
+                break;
+            }
+            Err(e) => {
+                let valid = e.valid_up_to();
+                // `valid_up_to` is a UTF-8 boundary, so the prefix decodes.
+                out.push_str(std::str::from_utf8(&buffer[..valid]).unwrap_or_default());
+                match e.error_len() {
+                    // An incomplete tail: hold it for the next chunk.
+                    None => {
+                        buffer.drain(..valid);
+                        break;
+                    }
+                    // Invalid bytes: replace them, as the decoder does.
+                    Some(len) => {
+                        out.push('\u{FFFD}');
+                        buffer.drain(..valid + len);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Read a response body to its end, relaying each decoded run through `send`.
+/// The body is never held whole: every chunk is handed over as it arrives, so a
+/// long reply starts rendering before the endpoint has finished writing it.
+async fn relay_body(
+    response: &mut reqwest::Response,
+    url: &str,
+    send: &mut impl FnMut(StreamMessage) -> Result<(), String>,
+) -> Result<(), String> {
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        let chunk = response
+            .chunk()
+            .await
+            .map_err(|e| format!("failed to read response from {url}: {e}"))?;
+        let Some(chunk) = chunk else { break };
+        pending.extend_from_slice(&chunk);
+        let text = take_text(&mut pending);
+        if !text.is_empty() {
+            send(StreamMessage::Chunk { text }).map_err(|e| e.to_string())?;
+        }
+    }
+    // A body that ends mid-character: decode the tail lossily rather than
+    // dropping it, exactly as the web path's `TextDecoder` flush does.
+    if !pending.is_empty() {
+        send(StreamMessage::Chunk {
+            text: String::from_utf8_lossy(&pending).into_owned(),
+        })
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Relay one chat request: the status, then the body in order, decoded to text.
+///
+/// The sink is a closure rather than the [`tauri::ipc::Channel`] itself, so a
+/// test can drive this with a real TCP server and a plain closure (a `Channel`
+/// needs a running app); [`chat_stream`] is then only the wiring. Everything
+/// before the status is this function's `Err`; once the status is out, a
+/// failure is relayed as a terminal `Error` message and the function returns
+/// `Ok`, so the caller's stream can never end without saying how.
+async fn relay(
+    url: &str,
+    headers: &HashMap<String, String>,
+    body: &str,
+    mut send: impl FnMut(StreamMessage) -> Result<(), String>,
+) -> Result<(), String> {
+    let client = http_client()?;
+    let mut request = client.post(url);
+    for (name, value) in headers {
+        request = request.header(name.as_str(), value.as_str());
+    }
+    let mut response = request
+        .body(body.to_string())
+        .send()
+        .await
+        .map_err(|e| format!("failed to send POST {url}: {e}"))?;
+
+    let status = response.status().as_u16();
+    // A send that fails here means the frontend is gone: there is no one left
+    // to fail for, so the channel error is not propagated as a request error.
+    let _ = send(StreamMessage::Status { status });
+
+    match relay_body(&mut response, url, &mut send).await {
+        Ok(()) => {
+            let _ = send(StreamMessage::End);
+        }
+        Err(message) => {
+            let _ = send(StreamMessage::Error { message });
+        }
+    }
+    Ok(())
+}
+
+/// In-flight streaming requests, by the caller's own request id, so the
+/// frontend can abort one. The abort handle is detached from the task (the
+/// command awaits the task and so cannot keep it); aborting drops the task at
+/// its next await, which drops the `reqwest::Response` and closes the
+/// connection — the request is gone, not merely ignored.
+#[derive(Default)]
+struct ChatStreams(Mutex<HashMap<String, Box<dyn Fn() + Send + Sync>>>);
+
+/// `POST url` with `headers` and `body`, streaming the response back through
+/// `on_event`: the status first, then the body as text chunks, then `End` (or a
+/// terminal `Error`).
+///
+/// This is the desktop chat transport. It exists because a webview cannot make
+/// this request at all against a host that answers no CORS preflight for it —
+/// the preflight is refused, the POST is never sent. It is a **separate**
+/// command from `http_request`, which `fetch_url` depends on whole-response at
+/// a time.
+#[tauri::command]
+async fn chat_stream(
+    state: tauri::State<'_, ChatStreams>,
+    request_id: String,
+    url: String,
+    headers: HashMap<String, String>,
+    body: String,
+    on_event: tauri::ipc::Channel<StreamMessage>,
+) -> Result<(), String> {
+    let task = tauri::async_runtime::spawn(async move {
+        relay(&url, &headers, &body, move |message| {
+            on_event
+                .send(message)
+                .map_err(|e| format!("failed to relay a streamed message: {e}"))
+        })
+        .await
+    });
+
+    // Registered before the await, so a cancel arriving while the response is
+    // still open finds it.
+    let abort = task.inner().abort_handle();
+    if let Ok(mut streams) = state.0.lock() {
+        streams.insert(request_id.clone(), Box::new(move || abort.abort()));
+    }
+    let outcome = task.await;
+    if let Ok(mut streams) = state.0.lock() {
+        streams.remove(&request_id);
+    }
+
+    match outcome {
+        Ok(result) => result,
+        // Aborted: the caller abandoned the turn, so the request being gone is
+        // the intended outcome, not an error to report.
+        Err(tauri::Error::JoinError(e)) if e.is_cancelled() => Ok(()),
+        Err(e) => Err(format!("the streaming request faulted: {e}")),
+    }
+}
+
+/// Abort an in-flight [`chat_stream`]. A request id the map does not hold is a
+/// no-op, so cancelling an already-finished (or already-cancelled) request is
+/// safe.
+#[tauri::command]
+fn chat_stream_cancel(state: tauri::State<'_, ChatStreams>, request_id: String) {
+    if let Ok(mut streams) = state.0.lock() {
+        if let Some(abort) = streams.remove(&request_id) {
+            abort();
+        }
+    }
+}
+
 #[cfg(test)]
 mod scope_tests {
     use super::{resolve_within, safe_id};
@@ -958,11 +1160,214 @@ mod watcher_tests {
     }
 }
 
+#[cfg(test)]
+mod stream_tests {
+    use super::{relay, take_text, StreamMessage};
+    use std::collections::HashMap;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    /// Long enough for a handshake and a few local writes; every wait below is
+    /// bounded by it, so a mistake fails the test instead of hanging it.
+    const PATIENCE: Duration = Duration::from_secs(10);
+
+    /// Read the request head (up to the blank line) so the response can be
+    /// written while the client is still sending its body.
+    fn read_head(socket: &mut TcpStream) {
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        while socket.read_exact(&mut byte).is_ok() {
+            head.push(byte[0]);
+            if head.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+    }
+
+    fn write_chunk(socket: &mut TcpStream, text: &str) {
+        write!(socket, "{:x}\r\n{text}\r\n", text.len()).expect("write a chunk");
+    }
+
+    /// A server that answers one request with `status` and a chunked body it
+    /// holds until the test releases it — so the test can prove the status is
+    /// relayed **before** any of the body exists.
+    fn serve(status: u16, chunks: &'static [&'static str]) -> (u16, mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a port");
+        let port = listener.local_addr().expect("read the port").port();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept the request");
+            read_head(&mut socket);
+            let reason = if status == 200 { "OK" } else { "Not Found" };
+            write!(
+                socket,
+                "HTTP/1.1 {status} {reason}\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n"
+            )
+            .expect("write the response head");
+            socket.flush().expect("flush the head");
+            go_rx
+                .recv_timeout(PATIENCE)
+                .expect("the test releases the body");
+            for chunk in chunks {
+                write_chunk(&mut socket, chunk);
+                socket.flush().expect("flush a chunk");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            socket.write_all(b"0\r\n\r\n").expect("end the body");
+            socket.flush().expect("flush the end");
+        });
+        (port, go_tx, handle)
+    }
+
+    /// Relay one scripted response and return every relayed message in order.
+    fn relay_scripted(status: u16, chunks: &'static [&'static str]) -> Vec<StreamMessage> {
+        let (port, go, server) = serve(status, chunks);
+        let (tx, rx) = mpsc::channel::<StreamMessage>();
+        let client = std::thread::spawn(move || {
+            let url = format!("http://127.0.0.1:{port}/chat/completions");
+            tauri::async_runtime::block_on(relay(&url, &HashMap::new(), "{}", move |message| {
+                tx.send(message).map_err(|e| e.to_string())
+            }))
+        });
+
+        // The body has not been written yet, so a status here is what proves
+        // the response is relayed as it arrives rather than read whole first.
+        let first = rx
+            .recv_timeout(PATIENCE)
+            .expect("the status is relayed before the body is written");
+        assert_eq!(first, StreamMessage::Status { status });
+        go.send(()).expect("release the body");
+
+        let mut messages = vec![first];
+        loop {
+            let message = rx
+                .recv_timeout(PATIENCE)
+                .expect("a relayed message, or the terminal one");
+            let terminal = matches!(
+                message,
+                StreamMessage::End | StreamMessage::Error { .. }
+            );
+            messages.push(message);
+            if terminal {
+                break;
+            }
+        }
+
+        client
+            .join()
+            .expect("the relay thread")
+            .expect("a relayed response is Ok");
+        server.join().expect("the server thread");
+        messages
+    }
+
+    /// The body the messages carry, concatenated in relay order.
+    fn body_of(messages: &[StreamMessage]) -> String {
+        messages
+            .iter()
+            .filter_map(|message| match message {
+                StreamMessage::Chunk { text } => Some(text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn relays_a_chunked_sse_body_in_order_after_the_status() {
+        let script: &'static [&'static str] =
+            &["data: one\n\n", "data: two\n\n", "data: [DONE]\n\n"];
+        let messages = relay_scripted(200, script);
+
+        assert_eq!(messages.first(), Some(&StreamMessage::Status { status: 200 }));
+        assert_eq!(messages.last(), Some(&StreamMessage::End));
+        // The chunks carry the body in the order the server wrote it, byte for
+        // byte — the caller's line parser sees exactly what the wire carried.
+        assert_eq!(body_of(&messages), script.concat());
+        // And it was relayed in runs, not as one buffered message.
+        let runs = messages
+            .iter()
+            .filter(|message| matches!(message, StreamMessage::Chunk { .. }))
+            .count();
+        assert!(runs > 1, "expected several relayed chunks, got {messages:?}");
+    }
+
+    #[test]
+    fn a_non_2xx_is_distinguishable_and_its_body_is_relayed() {
+        // The caller builds `HTTP ${status}: ${detail}` from exactly these two:
+        // a status it can read, and the body it read as text.
+        let messages = relay_scripted(404, &["{\"error\":\"no such model\"}"]);
+
+        assert_eq!(messages.first(), Some(&StreamMessage::Status { status: 404 }));
+        assert_eq!(messages.last(), Some(&StreamMessage::End));
+        assert_eq!(body_of(&messages), "{\"error\":\"no such model\"}");
+    }
+
+    #[test]
+    fn a_character_split_across_chunks_is_not_corrupted() {
+        let bytes = "é".as_bytes();
+        let mut buffer: Vec<u8> = Vec::new();
+
+        buffer.extend_from_slice(b"a");
+        buffer.extend_from_slice(&bytes[..1]);
+        // The complete run is relayed; the half character is held back, not
+        // replaced.
+        assert_eq!(take_text(&mut buffer), "a");
+        assert_eq!(buffer, vec![bytes[0]]);
+
+        buffer.extend_from_slice(&bytes[1..]);
+        assert_eq!(take_text(&mut buffer), "é");
+        assert!(buffer.is_empty());
+
+        // A genuinely invalid byte becomes the replacement character, as the
+        // web path's decoder does — and the valid text after it survives.
+        buffer.push(0xff);
+        buffer.extend_from_slice(b"z");
+        assert_eq!(take_text(&mut buffer), "\u{FFFD}z");
+        assert!(buffer.is_empty());
+    }
+
+    #[test]
+    fn a_failure_before_the_status_is_an_error_with_nothing_relayed() {
+        // A server that closes the connection before writing a status line, so
+        // there is no status and no body to relay. The caller must get an
+        // `Err` and no messages at all — never a stream that ended without
+        // saying how it ended.
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a port");
+        let port = listener.local_addr().expect("read the port").port();
+        let server = std::thread::spawn(move || {
+            let (socket, _) = listener.accept().expect("accept the request");
+            drop(socket);
+        });
+
+        let sent = std::cell::RefCell::new(Vec::new());
+        let outcome = tauri::async_runtime::block_on(relay(
+            &format!("http://127.0.0.1:{port}/chat/completions"),
+            &HashMap::new(),
+            "{}",
+            |message| {
+                sent.borrow_mut().push(message);
+                Ok(())
+            },
+        ));
+        assert!(outcome.is_err(), "expected a failed request, got {outcome:?}");
+        assert!(
+            sent.borrow().is_empty(),
+            "nothing may be relayed before the status"
+        );
+        server.join().expect("the server thread");
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
+        // The desktop chat transport's in-flight requests, so the frontend can
+        // abort one when the user abandons a turn.
+        .manage(ChatStreams::default())
         .invoke_handler(tauri::generate_handler![
             db_get_settings,
             db_set_settings,
@@ -972,6 +1377,8 @@ pub fn run() {
             db_delete_conversation,
             fetch_url,
             http_request,
+            chat_stream,
+            chat_stream_cancel,
             plugin_list,
             plugin_read_file,
             plugin_write_file,

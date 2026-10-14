@@ -92,6 +92,48 @@ export const searchKindFor = (baseUrl: string): SearchKind | null => {
 };
 
 /**
+ * True for an OpenCode host — the endpoint family that needs
+ * `x-opencode-session` and whose chat endpoint refuses a browser's CORS
+ * preflight. One read, so the two rules below cannot disagree about which
+ * endpoint they are talking about.
+ */
+export const isOpencodeHost = (baseUrl: string): boolean =>
+	baseUrl.toLowerCase().includes("opencode.ai");
+
+/**
+ * The session header OpenCode's inference endpoints require **before** they
+ * look at credentials — without it the reply is `MissingSessionID`, with it the
+ * endpoint routes the conversation and its prompt cache. The docs ask for "a
+ * stable session ID in `x-opencode-session` for each conversation"
+ * (https://opencode.ai/v2/docs/console/go/), so the value is the app's own id
+ * for that conversation: stable for the whole conversation, across turns, app
+ * runs and reloads, and never regenerated per request. Empty for every other
+ * host — an unknown header on someone else's endpoint is at best noise.
+ */
+export const sessionHeadersFor = (
+	baseUrl: string,
+	conversationId: string,
+): Record<string, string> =>
+	isOpencodeHost(baseUrl) ? { "x-opencode-session": conversationId } : {};
+
+/**
+ * True for a host whose chat endpoint refuses a browser's CORS preflight: its
+ * `OPTIONS` answers 404 with no `access-control-allow-origin` (while `/models`
+ * on the same host answers `acao=*`), so a web page never sends the POST at
+ * all. The desktop transport is the supported route for it.
+ */
+export const refusesBrowserPreflight = (baseUrl: string): boolean =>
+	isOpencodeHost(baseUrl);
+
+/**
+ * What a web-mode request to such a host fails with. A browser reports a
+ * refused cross-origin request as `TypeError: Load failed` and nothing else,
+ * which a user cannot act on.
+ */
+export const PREFLIGHT_REFUSAL =
+	"This endpoint refuses the browser's cross-origin preflight, so a web page cannot send this request at all. The desktop app sends it directly.";
+
+/**
  * The protocols that declare tools on the wire. Local to
  * this module: importing `ProtocolName` from the provider
  * index for these signatures would close a type cycle (the
