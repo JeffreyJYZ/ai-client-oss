@@ -188,7 +188,8 @@ export const reference: DocReference = {
 						"notify",
 						"native",
 						"log",
-						"on"
+						"on",
+						"run"
 					]
 				},
 				{
@@ -1164,7 +1165,7 @@ export const reference: DocReference = {
 	"slots": [
 		{
 			"id": "ui.root.layout",
-			"description": "The root layout. The default shell is itself the default contribution, so replacing it takes over the whole app."
+			"description": "The root layout. The default shell is itself the default contribution, so replacing it takes over the whole app — and that means owning the way back to the Plugins manager: the host keeps it registered, but a layout that renders no `settings.root` shows it nowhere. The way back is guaranteed for built-in **area** toggles; a layout, or a per-contribution toggle that removes the route, owns that choice."
 		},
 		{
 			"id": "app.sidebar",
