@@ -235,13 +235,23 @@ const idsOf = (
 	entries: readonly { readonly id: string }[],
 ): readonly string[] => entries.map((entry) => entry.id);
 
-/** Every registry's ids, across all five registries an area can fill. */
+/**
+ * Every registry's ids, across all six registries the gate filters.
+ *
+ * `pipeline` is one of them: `gateHost` (`lib/plugins/builtin/index.ts`) gates
+ * `host.pipeline` on the entry id exactly as it gates the other five, so an area
+ * that registered a stage would have a toggle keyed the same way. No built-in
+ * registers one today, which is why the loop below cannot go red on this
+ * addition — it is here so a future area that does is not invisible to the one
+ * check whose job is to catch that.
+ */
 const allIds = (service: HostServicesShape): readonly string[] => [
 	...idsOf(Effect.runSync(service.ui.entries())),
 	...idsOf(Effect.runSync(service.commands.entries())),
 	...idsOf(Effect.runSync(service.tools.entries())),
 	...idsOf(Effect.runSync(service.providers.entries())),
 	...idsOf(Effect.runSync(service.themes.entries())),
+	...idsOf(Effect.runSync(service.pipeline.entries())),
 ];
 
 /** The catalog's ids for an area, keyed the way the record is. */

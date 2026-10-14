@@ -112,9 +112,29 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 	"app.builtins": ["settings.section.plugins"],
 };
 
-/** Why a locked control is disabled — the row and its contributions alike. */
-const LOCKED_AREA_REASON =
-	"Locked: the irreducible core cannot be turned off, because the app always needs a surface to render into and a way back to this list.";
+/**
+ * Why each locked row is disabled — **one reason per locked row, and true of
+ * that row**. The container and the manager are locked for different reasons,
+ * and a single shared sentence ("…a surface to render into and a way back to
+ * this list") made the App container's row claim the manager's job, which the
+ * container does not have. A sentence on screen that is false of the thing it
+ * is attached to is a defect, so each locked row names its own.
+ */
+const LOCKED_AREA_REASONS: Readonly<Partial<Record<BuiltinId, string>>> = {
+	"app.substrate":
+		"Locked: the app always needs a surface to render into, so the container cannot be turned off.",
+	"app.builtins":
+		"Locked: it is the way back to this list, so the manager cannot be turned off.",
+};
+
+/**
+ * A locked row's sentence when {@link LOCKED_AREA_REASONS} has none for it —
+ * general, and true of any locked unit. It keeps a locked row from ever
+ * rendering as toggleable if a future identity joins the locked set without a
+ * reason of its own (the store's refusal stays the backstop either way).
+ */
+const LOCKED_AREA_FALLBACK =
+	"Locked: the irreducible core of the app cannot be turned off.";
 const LOCKED_CONTRIBUTION_REASON =
 	"Locked: it belongs to a locked area, which cannot be turned off.";
 
@@ -157,7 +177,12 @@ export const builtinRows = (
 			label: identity.label,
 			description: identity.description,
 			enabled: snapshot.builtins[identity.id] === true,
-			...(locked ? { lockedReason: LOCKED_AREA_REASON } : {}),
+			...(locked
+				? {
+						lockedReason:
+							LOCKED_AREA_REASONS[identity.id] ?? LOCKED_AREA_FALLBACK,
+					}
+				: {}),
 			contributions: BUILTIN_CONTRIBUTIONS[identity.id].map((id) => ({
 				id,
 				enabled: snapshot.contributions[identity.id]?.[id] !== false,
