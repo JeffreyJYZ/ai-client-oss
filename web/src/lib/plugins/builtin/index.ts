@@ -404,7 +404,7 @@ export const makeCoalescingRunner = (
 let bootedServices: HostServicesShape | undefined;
 let subscribed = false;
 
-/** The one serialised reconcile source; see {@link makeCoalescingRunner}. */
+/** The notify path's serialised reconcile source; see {@link makeCoalescingRunner}. */
 const notifyBuiltins = makeCoalescingRunner(() =>
 	bootedServices === undefined
 		? Effect.void
