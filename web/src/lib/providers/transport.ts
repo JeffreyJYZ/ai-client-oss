@@ -1,4 +1,5 @@
 import { isDesktop } from "@lib/platform";
+import { fetchDescribed } from "@lib/providers/models";
 import {
 	PREFLIGHT_REFUSAL,
 	refusesBrowserPreflight,
@@ -97,27 +98,30 @@ export type ChatTransport = (
 ) => Effect.Effect<ChatResponse, string>;
 
 /**
- * How a refused web request is described. A browser refuses a cross-origin POST
- * before it is sent and reports `TypeError: Load failed` with nothing else to
- * go on. For an endpoint known to refuse the preflight, say what happened and
- * where it does work instead of echoing WebKit; every other endpoint keeps the
- * description it always had.
- */
-const webFailure = (url: string, cause: unknown): string =>
-	refusesBrowserPreflight(url) ? PREFLIGHT_REFUSAL : String(cause);
-
-/**
  * The browser's own path: the request this app always made — `fetch` with the
  * endpoint's headers, the response's `text()` as the non-2xx detail, and its
  * body decoded as it arrives. Byte-for-byte the previous behaviour, because the
  * web build must not change: the desktop transport is the only new thing here.
+ *
+ * The rejection is described by `models.ts`'s `fetchDescribed`, not by
+ * `String(cause)` here: the request's headers are plugin-supplied, so the
+ * rejection reason can be a value whose own `String`/`Symbol.toPrimitive`
+ * throws — a throw out of a catch function defects the effect, which no typed
+ * `catch` upstream can see. For an endpoint known to refuse the preflight, the
+ * described detail is replaced with a sentence a user can act on; every other
+ * endpoint keeps the description it always had.
  */
 export const webTransport: ChatTransport = (url, headers, body) =>
 	Effect.gen(function* () {
-		const response = yield* Effect.tryPromise({
-			try: () => fetch(url, { method: "POST", headers, body }),
-			catch: (cause) => webFailure(url, cause),
-		});
+		const response = yield* fetchDescribed(() =>
+			fetch(url, { method: "POST", headers, body }),
+		).pipe(
+			// A host known to refuse the preflight gets a sentence a user can act
+			// on; every other endpoint keeps the description it always had.
+			Effect.mapError((detail) =>
+				refusesBrowserPreflight(url) ? PREFLIGHT_REFUSAL : detail,
+			),
+		);
 
 		const raw = response.body;
 		// The previous code refused an ok response with no body outright, rather
@@ -146,16 +150,31 @@ export const webTransport: ChatTransport = (url, headers, body) =>
 	});
 
 /**
+ * Abort the shell's request. A failed abort is not the caller's problem — the
+ * request is either already gone or about to be — so it is swallowed.
+ */
+const cancelRequest = (ipc: ChatIpc, requestId: string): Effect.Effect<void> =>
+	Effect.ignore(
+		Effect.tryPromise({
+			try: () => ipc.cancel(requestId),
+			catch: () => "cancel failed",
+		}),
+	);
+
+/**
  * The desktop path: the shell makes the request, outside the webview's
  * cross-origin rules, and relays the response back through a `Channel`.
  *
  * The status is the first message, so the caller learns it before any of the
  * body is read — which is also what proves nothing is buffered. Everything
  * after the status is one ordered stream, terminated by the shell's own `end`
- * (or `error`); the command's settlement is a **backstop** terminal, offered
- * into the same mailbox, so a request that failed before it sent a status, or
- * an IPC failure, can never leave the caller waiting on a message that will
- * never come.
+ * (or `error`), and the shell relays exactly one terminal on every path it can
+ * return from. Nothing here manufactures a second one: the command's settlement
+ * is **independent** of the `Channel`'s delivery order, so a terminal offered
+ * when it resolves can be processed before the trailing chunks and end the body
+ * early — dropping them, with the caller unable to tell a complete body from a
+ * truncated one. The one way the command settles without a terminal it sent is
+ * a channel that no longer has a reader: a frontend that is gone.
  */
 export const nativeTransportWith =
 	(ipc: ChatIpc): ChatTransport =>
@@ -168,10 +187,11 @@ export const nativeTransportWith =
 					.start({ requestId, url, headers, body }, (message) => {
 						Queue.offerUnsafe(mailbox, message);
 					})
+					// Nothing on success — the shell's terminal is already on its
+					// way. A failure has no other account of how the request
+					// ended, so that one is relayed as a terminal error.
 					.then(
-						() => {
-							Queue.offerUnsafe(mailbox, { type: "end" });
-						},
+						() => {},
 						(cause) => {
 							Queue.offerUnsafe(mailbox, {
 								type: "error",
@@ -182,11 +202,16 @@ export const nativeTransportWith =
 			});
 
 			const first = yield* Queue.take(mailbox);
-			if (first.type === "error") return yield* Effect.fail(first.message);
-			if (first.type !== "status")
+			if (first.type === "error" || first.type !== "status") {
+				// Nothing can be streamed, so the shell's request must not be
+				// left running.
+				yield* cancelRequest(ipc, requestId);
 				return yield* Effect.fail(
-					`the streaming request sent no status (${first.type})`,
+					first.type === "error"
+						? first.message
+						: `the streaming request sent no status (${first.type})`,
 				);
+			}
 			const status = first.status;
 
 			// The body runs, in the order the shell relayed them, up to the
@@ -213,12 +238,7 @@ export const nativeTransportWith =
 				// Called when the caller stops consuming `chunks` (a stopped
 				// turn), not when the request finishes: the shell's request is
 				// aborted, so an abandoned stream does not stay open.
-				cancel: Effect.ignore(
-					Effect.tryPromise({
-						try: () => ipc.cancel(requestId),
-						catch: () => "cancel failed",
-					}),
-				),
+				cancel: cancelRequest(ipc, requestId),
 			};
 		});
 

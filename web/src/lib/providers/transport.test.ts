@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { isDesktop } from "@lib/platform";
+import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import {
 	type ChatIpc,
 	type ChatRequest,
@@ -175,19 +176,73 @@ describe("the desktop transport", () => {
 	});
 
 	test("a request that failed before its status fails outright, not silently", async () => {
-		const { ipc } = scripted([], {
+		const { ipc, started, cancelled } = scripted([], {
 			reject: "failed to send POST https://opencode.ai/…",
 		});
 		const failure = await failureOf(
 			nativeTransportWith(ipc)(OPENCODE_URL, {}, "{}"),
 		);
 		expect(failure).toContain("failed to send POST");
+		// Nothing can be streamed, so the shell's request is not left running.
+		expect(cancelled).toEqual([started[0].requestId]);
 	});
 
-	test("a body that ends without a terminal message still ends the stream", async () => {
-		// The shell settles with the body relayed but no `end` message: the
-		// command's own settlement is the backstop, so a stream can never be
-		// left waiting for a message that will not come.
+	test("a first message that is not a status fails and aborts the request", async () => {
+		const { ipc, started, cancelled } = scripted([
+			{ type: "chunk", text: "data: one\n\n" },
+		]);
+		const failure = await failureOf(
+			nativeTransportWith(ipc)(OPENCODE_URL, {}, "{}"),
+		);
+		expect(failure).toContain("sent no status");
+		expect(cancelled).toEqual([started[0].requestId]);
+	});
+
+	test("body runs that arrive after the command settles are all relayed", async () => {
+		// The command's settlement is independent of the channel's delivery
+		// order. A terminal offered when it resolves is processed before these
+		// runs — the microtask runs before the next task — and would end the
+		// body early, dropping them with the caller unable to tell a complete
+		// body from a truncated one. The shell sends its own terminal; nothing
+		// else may end the body.
+		const early: readonly StreamMessage[] = [
+			{ type: "status", status: 200 },
+			{ type: "chunk", text: "data: one\n\n" },
+		];
+		const late: readonly StreamMessage[] = [
+			{ type: "chunk", text: "data: two\n\n" },
+			{ type: "end" },
+		];
+		const ipc: ChatIpc = {
+			start: (_request, onMessage) => {
+				for (const message of early) onMessage(message);
+				return new Promise((resolve) => {
+					setTimeout(() => {
+						// The command settles first; the rest of the body is
+						// delivered on a later task, as the shell's channel
+						// evaluations land.
+						resolve();
+						setTimeout(() => {
+							for (const message of late) onMessage(message);
+						}, 0);
+					}, 0);
+				});
+			},
+			cancel: () => Promise.resolve(),
+		};
+
+		const response = await Effect.runPromise(
+			nativeTransportWith(ipc)(OPENCODE_URL, {}, "{}"),
+		);
+		expect(await Effect.runPromise(bodyOf(response.chunks))).toBe(
+			"data: one\n\ndata: two\n\n",
+		);
+	});
+
+	test("a body with no terminal message stays open, not silently complete", async () => {
+		// The shell relays exactly one terminal on every path it can return
+		// from, so it does not produce this; if it did, the body must not read
+		// as finished — an unanswered body is not a complete one.
 		const { ipc } = scripted([
 			{ type: "status", status: 200 },
 			{ type: "chunk", text: "data: one\n\n" },
@@ -195,9 +250,10 @@ describe("the desktop transport", () => {
 		const response = await Effect.runPromise(
 			nativeTransportWith(ipc)(OPENCODE_URL, {}, "{}"),
 		);
-		expect(await Effect.runPromise(bodyOf(response.chunks))).toBe(
-			"data: one\n\n",
+		const ended = await Effect.runPromise(
+			Effect.timeoutOption(bodyOf(response.chunks), "150 millis"),
 		);
+		expect(Option.isNone(ended)).toBe(true);
 	});
 
 	test("a failure after the status fails the body stream", async () => {
@@ -254,6 +310,43 @@ describe("the web transport", () => {
 			webTransport("https://openrouter.ai/api/v1/chat/completions", {}, "{}"),
 		);
 		expect(failure).toBe("response has no body");
+		globalThis.fetch = realFetch;
+	});
+
+	test("an unprintable rejection lands in the typed channel, not as a defect", async () => {
+		// A plugin supplies the request's headers, so the rejection reason can be
+		// a value whose own `String`/`Symbol.toPrimitive` throws. Describing it
+		// *inside* the catch function would throw out of that frame and defect
+		// the effect — a failure no typed `catch` upstream can see, which is the
+		// silent reset the `string` channel exists to prevent.
+		const unprintable = {
+			toString: () => {
+				throw new Error("no string for you");
+			},
+			[Symbol.toPrimitive]: () => {
+				throw new Error("no primitive either");
+			},
+		};
+
+		for (const url of [
+			"https://openrouter.ai/api/v1/chat/completions",
+			OPENCODE_URL,
+		]) {
+			globalThis.fetch = (() =>
+				Promise.reject(unprintable)) as unknown as typeof fetch;
+			const exit = await Effect.runPromise(
+				Effect.exit(webTransport(url, {}, "{}")),
+			);
+			expect(Exit.isFailure(exit), url).toBe(true);
+			// The typed channel, not a defect: `findErrorOption` is empty for a
+			// defect, which is what these sentinels assert against.
+			const described = Exit.isFailure(exit)
+				? Option.getOrElse(Cause.findErrorOption(exit.cause), () => "a defect")
+				: "no failure";
+			expect(described, url).toBe(
+				url === OPENCODE_URL ? PREFLIGHT_REFUSAL : "an unprintable cause",
+			);
+		}
 		globalThis.fetch = realFetch;
 	});
 });

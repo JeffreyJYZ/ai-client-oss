@@ -82,8 +82,12 @@ const pluginCall = <A>(
  * whose own stringification throws — `Effect.tryPromise`'s `catch` would then
  * throw out of its own frame and defect the caller. The probe no longer fetches
  * directly (it rides the chat transport), so this is the list path's own seam.
+ *
+ * Exported because the chat transport's own web path has the same seam and the
+ * same plugin-supplied headers: one description of a possibly-unprintable
+ * cause, never a second copy (`transport.ts` imports this).
  */
-const fetchDescribed = (
+export const fetchDescribed = (
 	call: () => Promise<Response>,
 ): Effect.Effect<Response, string> =>
 	Effect.tryPromise({

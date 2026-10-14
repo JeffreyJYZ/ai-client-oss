@@ -35,6 +35,38 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 /// does not fit here.
 const API_REQUEST_TIMEOUT: Duration = Duration::from_secs(150);
 
+/// Connect-phase deadline for the streamed chat client. That client carries no
+/// total deadline (see [`STREAM_READ_TIMEOUT`]), so an unreachable or
+/// black-holing host is caught here instead of parking the turn.
+const CHAT_CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Per-**read** deadline for a streamed chat response: the gap between body
+/// chunks, not the whole response.
+///
+/// A total deadline cannot fit a stream. `reqwest`'s `ClientBuilder::timeout` is
+/// "a total request timeout … until the response body has finished", and the
+/// shared page-fetch client carries 30 seconds of it — so a chat reply read
+/// through that client was cut off mid-body for any answer that took longer than
+/// half a minute, a cap the web path never had. `read_timeout` instead "applies
+/// to each read operation, and resets after a successful read", so a reply of
+/// any total length relays as long as it keeps arriving. With no deadline at all
+/// a genuinely dead socket would park the turn until the user stopped it; the
+/// user's stop control remains what ends a reply that is merely slow.
+const STREAM_READ_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// The URL schemes the shell will relay. `reqwest` refuses anything else anyway,
+/// so this is the readable message and defence in depth, checked before a
+/// request is built — `command` names the caller the way its own error does.
+fn http_url(command: &str, url: &str) -> Result<(), String> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        Ok(())
+    } else {
+        Err(format!(
+            "{command}: only http:// and https:// URLs are allowed: {url}"
+        ))
+    }
+}
+
 /// Page-size cap: a runaway endpoint must fail loudly instead of
 /// buffering an unbounded response into app memory.
 const MAX_RESPONSE_BYTES: usize = 10 * 1024 * 1024;
@@ -561,6 +593,16 @@ impl Drop for PluginWatcher {
     }
 }
 
+/// Start a client: the rustls-no-provider build has no crypto provider of its
+/// own, so install the ring one (already in the tree for the updater) as the
+/// process default, as tauri-plugin-updater itself does. Split out because
+/// there are two clients with different deadline policies and both must install
+/// the provider before their first TLS handshake.
+fn client_builder() -> reqwest::ClientBuilder {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    reqwest::Client::builder().user_agent(USER_AGENT)
+}
+
 /// One shared client for every fetch: the connection pool and TLS
 /// sessions are reused across calls, and `reqwest::Client` is designed
 /// to be shared, not rebuilt per request.
@@ -568,16 +610,36 @@ static HTTP_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
 
 fn http_client() -> Result<&'static reqwest::Client, String> {
     let slot = HTTP_CLIENT.get_or_init(|| {
-        // The rustls-no-provider build has no crypto provider of its own;
-        // install the ring one (already in the tree for the updater) as
-        // the process default, as tauri-plugin-updater itself does.
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        reqwest::Client::builder()
-            .user_agent(USER_AGENT)
+        client_builder()
             .timeout(REQUEST_TIMEOUT)
             .build()
             .map_err(|e| format!("failed to build http client: {e}"))
     });
+    slot.as_ref().map_err(|e| e.clone())
+}
+
+/// Build a client for a streamed chat request: no total deadline, a per-read
+/// one (see [`STREAM_READ_TIMEOUT`]) and a bounded connect. Takes the read
+/// deadline as an argument so a test can shorten it and prove the semantics in
+/// bounded time; production is [`chat_client`].
+fn chat_client_from(read_timeout: Duration) -> Result<reqwest::Client, String> {
+    client_builder()
+        .connect_timeout(CHAT_CONNECT_TIMEOUT)
+        .read_timeout(read_timeout)
+        .build()
+        .map_err(|e| format!("failed to build chat http client: {e}"))
+}
+
+/// One shared client for streamed chat, with that deadline policy. It cannot be
+/// [`HTTP_CLIENT`]: a client's total deadline cannot be cleared per request
+/// (`RequestBuilder` has `timeout`, not an `Option` to unset), so the only way
+/// for a streamed body not to inherit the 30-second page-fetch deadline is a
+/// client that never had one. Sharing it keeps its pool and TLS sessions reused
+/// across turns, as the page-fetch client's are.
+static CHAT_CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+
+fn chat_client() -> Result<&'static reqwest::Client, String> {
+    let slot = CHAT_CLIENT.get_or_init(|| chat_client_from(STREAM_READ_TIMEOUT));
     slot.as_ref().map_err(|e| e.clone())
 }
 
@@ -586,11 +648,7 @@ fn http_client() -> Result<&'static reqwest::Client, String> {
 /// can. Over [`MAX_RESPONSE_BYTES`] is an error, never a truncated page.
 #[tauri::command]
 async fn fetch_url(url: String) -> Result<String, String> {
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(format!(
-            "fetch_url: only http:// and https:// URLs are allowed: {url}"
-        ));
-    }
+    http_url("fetch_url", &url)?;
     let client = http_client()?;
     let mut response = client
         .get(url.as_str())
@@ -633,11 +691,7 @@ async fn http_request(
             "http_request: only GET and POST methods are allowed: {method}"
         ));
     }
-    if !url.starts_with("http://") && !url.starts_with("https://") {
-        return Err(format!(
-            "http_request: only http:// and https:// URLs are allowed: {url}"
-        ));
-    }
+    http_url("http_request", &url)?;
     let client = http_client()?;
     let mut request = match method.as_str() {
         "GET" => client.get(url.as_str()),
@@ -779,17 +833,22 @@ async fn relay_body(
 ///
 /// The sink is a closure rather than the [`tauri::ipc::Channel`] itself, so a
 /// test can drive this with a real TCP server and a plain closure (a `Channel`
-/// needs a running app); [`chat_stream`] is then only the wiring. Everything
-/// before the status is this function's `Err`; once the status is out, a
-/// failure is relayed as a terminal `Error` message and the function returns
-/// `Ok`, so the caller's stream can never end without saying how.
+/// needs a running app); [`chat_stream`] is then only the wiring. The client is
+/// a parameter for the same reason: a test can give it a read deadline short
+/// enough to observe. Everything before the status is this function's `Err`;
+/// once the status is out, a failure is relayed as a terminal `Error` message
+/// and the function returns `Ok`, so the caller's stream can never end without
+/// saying how.
 async fn relay(
+    client: &reqwest::Client,
     url: &str,
     headers: &HashMap<String, String>,
     body: &str,
     mut send: impl FnMut(StreamMessage) -> Result<(), String>,
 ) -> Result<(), String> {
-    let client = http_client()?;
+    // The same allowlist the sibling commands enforce, checked before anything
+    // is sent (see [`http_url`]).
+    http_url("chat_stream", url)?;
     let mut request = client.post(url);
     for (name, value) in headers {
         request = request.header(name.as_str(), value.as_str());
@@ -842,8 +901,11 @@ async fn chat_stream(
     body: String,
     on_event: tauri::ipc::Channel<StreamMessage>,
 ) -> Result<(), String> {
+    // Resolved before the task starts, so a client that cannot be built at all
+    // is the command's own `Err` rather than a stream that never speaks.
+    let client = chat_client()?;
     let task = tauri::async_runtime::spawn(async move {
-        relay(&url, &headers, &body, move |message| {
+        relay(client, &url, &headers, &body, move |message| {
             on_event
                 .send(message)
                 .map_err(|e| format!("failed to relay a streamed message: {e}"))
@@ -1162,7 +1224,7 @@ mod watcher_tests {
 
 #[cfg(test)]
 mod stream_tests {
-    use super::{relay, take_text, StreamMessage};
+    use super::{chat_client_from, http_url, relay, take_text, StreamMessage};
     use std::collections::HashMap;
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
@@ -1172,6 +1234,12 @@ mod stream_tests {
     /// Long enough for a handshake and a few local writes; every wait below is
     /// bounded by it, so a mistake fails the test instead of hanging it.
     const PATIENCE: Duration = Duration::from_secs(10);
+
+    /// A client with the production shape's deadlines — no total deadline, a
+    /// per-read one — at a length the scripted tests below never approach.
+    fn test_client() -> reqwest::Client {
+        chat_client_from(Duration::from_secs(30)).expect("build a chat client")
+    }
 
     /// Read the request head (up to the blank line) so the response can be
     /// written while the client is still sending its body.
@@ -1186,61 +1254,23 @@ mod stream_tests {
         }
     }
 
-    fn write_chunk(socket: &mut TcpStream, text: &str) {
-        write!(socket, "{:x}\r\n{text}\r\n", text.len()).expect("write a chunk");
+    fn write_head(socket: &mut TcpStream, status: u16) {
+        let reason = if status == 200 { "OK" } else { "Not Found" };
+        write!(
+            socket,
+            "HTTP/1.1 {status} {reason}\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n"
+        )
+        .expect("write the response head");
+        socket.flush().expect("flush the head");
     }
 
-    /// A server that answers one request with `status` and a chunked body it
-    /// holds until the test releases it — so the test can prove the status is
-    /// relayed **before** any of the body exists.
-    fn serve(status: u16, chunks: &'static [&'static str]) -> (u16, mpsc::Sender<()>, std::thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a port");
-        let port = listener.local_addr().expect("read the port").port();
-        let (go_tx, go_rx) = mpsc::channel::<()>();
-        let handle = std::thread::spawn(move || {
-            let (mut socket, _) = listener.accept().expect("accept the request");
-            read_head(&mut socket);
-            let reason = if status == 200 { "OK" } else { "Not Found" };
-            write!(
-                socket,
-                "HTTP/1.1 {status} {reason}\r\ncontent-type: text/event-stream\r\ntransfer-encoding: chunked\r\n\r\n"
-            )
-            .expect("write the response head");
-            socket.flush().expect("flush the head");
-            go_rx
-                .recv_timeout(PATIENCE)
-                .expect("the test releases the body");
-            for chunk in chunks {
-                write_chunk(&mut socket, chunk);
-                socket.flush().expect("flush a chunk");
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            socket.write_all(b"0\r\n\r\n").expect("end the body");
-            socket.flush().expect("flush the end");
-        });
-        (port, go_tx, handle)
+    fn write_chunk(socket: &mut TcpStream, text: &str) -> std::io::Result<()> {
+        write!(socket, "{:x}\r\n{text}\r\n", text.len())
     }
 
-    /// Relay one scripted response and return every relayed message in order.
-    fn relay_scripted(status: u16, chunks: &'static [&'static str]) -> Vec<StreamMessage> {
-        let (port, go, server) = serve(status, chunks);
-        let (tx, rx) = mpsc::channel::<StreamMessage>();
-        let client = std::thread::spawn(move || {
-            let url = format!("http://127.0.0.1:{port}/chat/completions");
-            tauri::async_runtime::block_on(relay(&url, &HashMap::new(), "{}", move |message| {
-                tx.send(message).map_err(|e| e.to_string())
-            }))
-        });
-
-        // The body has not been written yet, so a status here is what proves
-        // the response is relayed as it arrives rather than read whole first.
-        let first = rx
-            .recv_timeout(PATIENCE)
-            .expect("the status is relayed before the body is written");
-        assert_eq!(first, StreamMessage::Status { status });
-        go.send(()).expect("release the body");
-
-        let mut messages = vec![first];
+    /// Everything the relay has sent until (and including) its terminal message.
+    fn collect_terminal(rx: &mpsc::Receiver<StreamMessage>) -> Vec<StreamMessage> {
+        let mut messages = Vec::new();
         loop {
             let message = rx
                 .recv_timeout(PATIENCE)
@@ -1251,16 +1281,116 @@ mod stream_tests {
             );
             messages.push(message);
             if terminal {
-                break;
+                return messages;
             }
         }
+    }
 
-        client
+    /// Run one relay on its own thread, returning its message receiver and the
+    /// thread's join handle (which resolves to the relay's own result).
+    fn relay_in_background(
+        client: reqwest::Client,
+        url: String,
+    ) -> (
+        mpsc::Receiver<StreamMessage>,
+        std::thread::JoinHandle<Result<(), String>>,
+    ) {
+        let (tx, rx) = mpsc::channel::<StreamMessage>();
+        let handle = std::thread::spawn(move || {
+            tauri::async_runtime::block_on(relay(&client, &url, &HashMap::new(), "{}", move |message| {
+                tx.send(message).map_err(|e| e.to_string())
+            }))
+        });
+        (rx, handle)
+    }
+
+    /// A server that answers one request with `status` and a chunked body it
+    /// holds until the test releases it — so the test can prove the status is
+    /// relayed **before** any of the body exists — written with `gap` between
+    /// runs.
+    fn serve(
+        status: u16,
+        chunks: &'static [&'static str],
+        gap: Duration,
+    ) -> (u16, mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a port");
+        let port = listener.local_addr().expect("read the port").port();
+        let (go_tx, go_rx) = mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept the request");
+            read_head(&mut socket);
+            write_head(&mut socket, status);
+            go_rx
+                .recv_timeout(PATIENCE)
+                .expect("the test releases the body");
+            // A client that hangs up mid-body (a deadline, an abort) makes these
+            // writes fail; that is the client's business, not the mock's, and
+            // swallowing it here keeps the test's own assertion the one that
+            // reports what happened.
+            for chunk in chunks {
+                if write_chunk(&mut socket, chunk).is_err() {
+                    return;
+                }
+                if socket.flush().is_err() {
+                    return;
+                }
+                std::thread::sleep(gap);
+            }
+            let _ = socket.write_all(b"0\r\n\r\n");
+            let _ = socket.flush();
+        });
+        (port, go_tx, handle)
+    }
+
+    /// Relay one scripted response and return every relayed message in order.
+    fn relay_scripted(
+        client: reqwest::Client,
+        status: u16,
+        chunks: &'static [&'static str],
+        gap: Duration,
+    ) -> Vec<StreamMessage> {
+        let (port, go, server) = serve(status, chunks, gap);
+        let (rx, client_thread) =
+            relay_in_background(client, format!("http://127.0.0.1:{port}/chat/completions"));
+
+        // The body has not been written yet, so a status here is what proves
+        // the response is relayed as it arrives rather than read whole first.
+        let first = rx
+            .recv_timeout(PATIENCE)
+            .expect("the status is relayed before the body is written");
+        assert_eq!(first, StreamMessage::Status { status });
+        go.send(()).expect("release the body");
+
+        let mut messages = vec![first];
+        messages.extend(collect_terminal(&rx));
+
+        client_thread
             .join()
             .expect("the relay thread")
             .expect("a relayed response is Ok");
         server.join().expect("the server thread");
         messages
+    }
+
+    /// A server that writes a status and one run, then holds the socket open and
+    /// **silent** until the test drops the release handle. Only a read deadline
+    /// can end such a body, so this pins that one exists: a mock that closed on
+    /// its own would end the stream by closing the connection, which is a
+    /// different event and would let the test pass with no deadline at all.
+    fn serve_stalled() -> (u16, mpsc::Sender<()>, std::thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind a port");
+        let port = listener.local_addr().expect("read the port").port();
+        let (release_tx, release_rx) = mpsc::channel::<()>();
+        let handle = std::thread::spawn(move || {
+            let (mut socket, _) = listener.accept().expect("accept the request");
+            read_head(&mut socket);
+            write_head(&mut socket, 200);
+            write_chunk(&mut socket, "data: one\n\n").expect("write the run");
+            socket.flush().expect("flush the run");
+            // Held until the test is done with it, and not a moment longer.
+            let _ = release_rx.recv();
+        });
+        (port, release_tx, handle)
     }
 
     /// The body the messages carry, concatenated in relay order.
@@ -1278,7 +1408,12 @@ mod stream_tests {
     fn relays_a_chunked_sse_body_in_order_after_the_status() {
         let script: &'static [&'static str] =
             &["data: one\n\n", "data: two\n\n", "data: [DONE]\n\n"];
-        let messages = relay_scripted(200, script);
+        let messages = relay_scripted(
+            test_client(),
+            200,
+            script,
+            Duration::from_millis(20),
+        );
 
         assert_eq!(messages.first(), Some(&StreamMessage::Status { status: 200 }));
         assert_eq!(messages.last(), Some(&StreamMessage::End));
@@ -1294,10 +1429,104 @@ mod stream_tests {
     }
 
     #[test]
+    fn relays_a_body_that_outlives_the_read_deadline() {
+        // Each gap is inside the read deadline; the whole body is not. A
+        // per-read deadline lets this through, where a **total** one of the same
+        // length — the shape the shared page-fetch client carries, and what this
+        // path used to inherit — cuts the reply off mid-body.
+        let deadline = Duration::from_millis(500);
+        let script: &'static [&'static str] =
+            &["data: one\n\n", "data: two\n\n", "data: three\n\n"];
+        let messages = relay_scripted(
+            chat_client_from(deadline).expect("build a chat client"),
+            200,
+            script,
+            Duration::from_millis(300),
+        );
+
+        // Three 300ms gaps: ~900ms of body, against a 500ms deadline.
+        assert!(Duration::from_millis(900) > deadline);
+        assert_eq!(messages.last(), Some(&StreamMessage::End));
+        assert_eq!(body_of(&messages), script.concat());
+    }
+
+    #[test]
+    fn a_stalled_body_ends_the_stream_instead_of_hanging() {
+        // The server writes a status and one run, then holds the socket open and
+        // silent. The read deadline must end the stream with a terminal error:
+        // with no deadline at all this body would stay open until the user
+        // noticed, which is what "no deadline" would mean for a dead connection.
+        let client = chat_client_from(Duration::from_millis(250)).expect("build a chat client");
+        let (port, release, server) = serve_stalled();
+
+        let (rx, client_thread) =
+            relay_in_background(client, format!("http://127.0.0.1:{port}/chat/completions"));
+        // Only the read deadline can produce this terminal: the mock has not
+        // closed anything.
+        let messages = collect_terminal(&rx);
+
+        assert_eq!(messages.first(), Some(&StreamMessage::Status { status: 200 }));
+        assert_eq!(body_of(&messages), "data: one\n\n");
+        assert!(
+            matches!(messages.last(), Some(StreamMessage::Error { .. })),
+            "a stalled body must end with a terminal error, got {messages:?}"
+        );
+        client_thread
+            .join()
+            .expect("the relay thread")
+            .expect("a stalled body is a relayed failure, not a request error");
+
+        drop(release);
+        server.join().expect("the server thread");
+    }
+
+    #[test]
+    fn a_non_http_url_is_refused_before_any_request() {
+        let sent = std::cell::RefCell::new(Vec::new());
+        let outcome = tauri::async_runtime::block_on(relay(
+            &test_client(),
+            "file:///etc/passwd",
+            &HashMap::new(),
+            "{}",
+            |message| {
+                sent.borrow_mut().push(message);
+                Ok(())
+            },
+        ));
+        let error = outcome.expect_err("a non-http URL must be refused");
+        assert_eq!(
+            error,
+            "chat_stream: only http:// and https:// URLs are allowed: file:///etc/passwd"
+        );
+        assert!(sent.borrow().is_empty(), "nothing may be relayed");
+    }
+
+    #[test]
+    fn the_url_allowlist_names_every_caller() {
+        // The three commands share one check, so each keeps the message its own
+        // error carried.
+        for command in ["fetch_url", "http_request", "chat_stream"] {
+            assert!(http_url(command, "https://example.com/x").is_ok());
+            assert!(http_url(command, "http://127.0.0.1:8080/x").is_ok());
+            for rejected in ["file:///etc/passwd", "data:text/plain,hi", "/etc/passwd", ""] {
+                assert_eq!(
+                    http_url(command, rejected).expect_err("a non-http URL must be refused"),
+                    format!("{command}: only http:// and https:// URLs are allowed: {rejected}")
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_non_2xx_is_distinguishable_and_its_body_is_relayed() {
         // The caller builds `HTTP ${status}: ${detail}` from exactly these two:
         // a status it can read, and the body it read as text.
-        let messages = relay_scripted(404, &["{\"error\":\"no such model\"}"]);
+        let messages = relay_scripted(
+            test_client(),
+            404,
+            &["{\"error\":\"no such model\"}"],
+            Duration::from_millis(20),
+        );
 
         assert_eq!(messages.first(), Some(&StreamMessage::Status { status: 404 }));
         assert_eq!(messages.last(), Some(&StreamMessage::End));
@@ -1343,6 +1572,7 @@ mod stream_tests {
 
         let sent = std::cell::RefCell::new(Vec::new());
         let outcome = tauri::async_runtime::block_on(relay(
+            &test_client(),
             &format!("http://127.0.0.1:{port}/chat/completions"),
             &HashMap::new(),
             "{}",
