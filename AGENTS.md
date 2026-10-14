@@ -80,6 +80,10 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 - **`"plugin-changed"` is defined twice — `runtime.ts` `PLUGIN_CHANGED_EVENT` and `src-tauri/src/lib.rs` — with no shared source; `runtime.test.ts` pins them by reading the Rust constant.** A drift makes the desktop watcher's listener never fire, silently.
 
+## Providers
+
+- **OpenCode Go (`oc go`) is NOT callable from the app's webview — two independent blockers, both server-side.** (1) Its **chat** endpoint 404s the CORS `OPTIONS` preflight (no `access-control-allow-origin`) while `/models` on the same host answers `acao=*`, so a webview refuses to send the preflighted POST and WebKit reports `TypeError: Load failed` — a diagnosis that reads as an app bug and is not. (2) It requires **`x-opencode-session` before auth** (absent → `MissingSessionID`; present → `Go requires a credential`), and the app has no per-provider custom-header setting. Docs: base is `https://opencode.ai/inference/go/v1` (**not** `/zen/go/v1`), endpoint per model family — `chat/completions` (DeepSeek/GLM/Kimi/MiMo/LongCat), `messages` (Claude Haiku/MiniMax/Qwen), `responses` (Grok/Luna/Muse). The supported route is a **local gateway** that is a validated client (the CLI's own `http://127.0.0.1:8787/w/opencode/…`), or a native streaming transport — never the webview's `fetch`.
+
 ## Web search
 
 - **OpenRouter search = the `openrouter:web_search` server tool, never the `web` plugin.** OpenRouter **deprecated** the plugin (`plugins:[{id:"web"}]`, or a `model:…:online` suffix) because it **searches once per request** — every single message, so a bare "nice" became a query for the city of Nice. The server tool lives in `tools` (`{type:"openrouter:web_search",parameters:{max_results}}`), lets the **model** decide whether to search (0–N times), and works on `/responses` as well as `/chat/completions`.
