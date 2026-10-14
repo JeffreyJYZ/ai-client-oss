@@ -17,7 +17,7 @@ import { chatcompletions } from "@lib/providers/chatCompletions";
 import { FETCH_URL_NAME } from "@lib/providers/presets";
 import type { Chunk, SendCtx } from "@lib/providers/types";
 import { Effect, Exit, Scope, Stream } from "effect";
-import { send } from "@/state/chat";
+import { getChat, send } from "@/state/chat";
 import { getSettings, setSettings } from "@/state/settings";
 
 /**
@@ -273,13 +273,15 @@ const systemOf = (body: unknown): string => {
 
 /**
  * Run one real turn over a provider that streams `reply` as a single text
- * chunk, and report both sites Fix 1 touches: the **body** the turn sent (the
- * injected memory block) and the **notes** in the store once the turn ended.
+ * chunk, and report the three sites the memory feature touches: the **body**
+ * the turn sent (the injected memory prompt), the **text** the reply rendered
+ * with (the tag strip) and the **notes** in the store once the turn ended.
  *
  * `turn-end` is published by `finalize` *after* it has harvested the reply's
- * `<memory>` blocks, so the wait guarantees the store write has happened. The
- * notes are read before the settings reset — the return value, not a later
- * `getSettings()`, is the assertion source.
+ * `<memory>` blocks and refreshed the store, so the wait guarantees both the
+ * store write and the visible message text have happened. The notes and text
+ * are read before the settings reset — the return value, not a later
+ * `getSettings()`/`getChat()`, is the assertion source.
  */
 const runMemoryTurn = async (
 	protocol: string,
@@ -290,6 +292,7 @@ const runMemoryTurn = async (
 	>,
 ): Promise<{
 	readonly body: unknown;
+	readonly text: string;
 	readonly notes: readonly MemoryEntry[];
 }> => {
 	let sent: unknown;
@@ -325,7 +328,12 @@ const runMemoryTurn = async (
 			send("hello", []);
 			await turn.done;
 			if (sent === undefined) throw new Error("timed out waiting for a body");
-			return { body: sent, notes: getSettings().memoryNotes };
+			const last = getChat().messages.at(-1);
+			return {
+				body: sent,
+				text: last?.role === "assistant" ? last.text : "",
+				notes: getSettings().memoryNotes,
+			};
 		} finally {
 			turn.dispose();
 		}
@@ -344,9 +352,9 @@ const runMemoryTurn = async (
 
 /**
  * The `app.memory` area is the feature's switch; `memoriesEnabled` is the
- * section's own. Both sites that reach beyond the UI — the system-prompt
- * injection and the note store — must follow the **area**, or turning it off
- * would leave an invisible feature running.
+ * section's own. Every site that reaches beyond the UI — the system-prompt
+ * injection, the note store and the reply-text tag strip — follows the one
+ * predicate, or turning memory off would leave an invisible feature running.
  */
 describe("the app.memory area gates the injection and the store", () => {
 	const note = "the user prefers terse answers";
@@ -407,5 +415,80 @@ describe("the app.memory area gates the injection and the store", () => {
 		expect(systemOf(body)).not.toContain(MEMORY_TAG_OPEN);
 		expect(systemOf(body)).not.toContain(note);
 		expect(notes).toEqual([existing]);
+	});
+});
+
+/* ------------------------------------------------- the tag strip is gated */
+
+/**
+ * With memory off the `<memory>` tag is ordinary prose: the strip belongs to
+ * the feature, so an off feature interprets nothing — the reply renders
+ * **verbatim** rather than having text deleted from it, and no note is stored.
+ * Both switches retire the feature, so both are exercised.
+ *
+ * The reply carries the two shapes the strip acts on — a complete block and an
+ * unterminated tag — because a verbatim render proves *neither* was
+ * interpreted (the live case deletes the block and truncates at the tag), and
+ * a store comparison proves nothing was harvested from either.
+ */
+describe("the memory tag is prose when the feature is off", () => {
+	const note = "the user prefers terse answers";
+	const reply =
+		"noted <memory>the user works in Berlin</memory> and <memory>half a thought";
+
+	test("area off, flag on: the reply renders verbatim and nothing is stored", async () => {
+		const existing = liveNote(note);
+		const { text, notes } = await runMemoryTurn(
+			`t5-memory-verbatim-area-${crypto.randomUUID()}`,
+			reply,
+			{
+				memoriesEnabled: true,
+				memoryNotes: [existing],
+				memories: [],
+				builtins: { "app.memory": { enabled: false } },
+			},
+		);
+
+		expect(text).toBe(reply);
+		expect(notes).toEqual([existing]);
+	});
+
+	test("area on, flag off: the reply renders verbatim and nothing is stored", async () => {
+		const existing = liveNote(note);
+		const { text, notes } = await runMemoryTurn(
+			`t5-memory-verbatim-flag-${crypto.randomUUID()}`,
+			reply,
+			{
+				memoriesEnabled: false,
+				memoryNotes: [existing],
+				memories: [],
+				builtins: { "app.memory": { enabled: true } },
+			},
+		);
+
+		expect(text).toBe(reply);
+		expect(notes).toEqual([existing]);
+	});
+
+	test("live: the block is stripped and stored, the unterminated tag still truncates", async () => {
+		const existing = liveNote(note);
+		const { text, notes } = await runMemoryTurn(
+			`t5-memory-verbatim-on-${crypto.randomUUID()}`,
+			reply,
+			{
+				memoriesEnabled: true,
+				memoryNotes: [existing],
+				memories: [],
+				builtins: { "app.memory": { enabled: true } },
+			},
+		);
+
+		// Today's behaviour, unchanged: the complete block is removed and its
+		// note stored; the unterminated tag drops the rest of the reply.
+		expect(text).toBe("noted  and ");
+		expect(notes.map((entry) => entry.content)).toEqual([
+			note,
+			"the user works in Berlin",
+		]);
 	});
 });

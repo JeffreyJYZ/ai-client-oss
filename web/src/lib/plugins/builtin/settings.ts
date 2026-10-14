@@ -30,8 +30,9 @@ import {
  * rather than oversight:
  *
  * - Memory rides `app.memory` (`builtin/memory.ts`), so the feature's area
- *   toggle takes the section, the five tools, the block injected into every
- *   request and the recording of notes the model writes;
+ *   toggle takes the section, the five tools, the memory prompt sent with each
+ *   request while notes are live, the reply-text strip and the recording of
+ *   notes the model writes;
  * - the Plugins section rides the locked `app.builtins` (`areas.ts`
  *   `registerManager`);
  * - the Settings **surface** (`settings.root`) rides the locked `app.substrate`

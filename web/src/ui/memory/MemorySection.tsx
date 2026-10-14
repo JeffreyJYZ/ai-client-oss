@@ -26,10 +26,11 @@ import { memoryRows } from "@/ui/memory/memoryRows";
  *
  * Two switches govern memory, one level apart. The `app.memory` area
  * (`lib/plugins/builtin/memory.ts`) owns the whole feature: turning it off
- * removes this section, the five tools the same area contributes, the block
- * injected into every request, and the recording of notes the model writes.
+ * removes this section, the five tools the same area contributes, the memory
+ * prompt sent with each request while notes are live, the strip that removes
+ * `<memory>` blocks from a reply, and the recording of notes the model writes.
  * The **Enabled** checkbox below turns memory off *within* the area — notes
- * stay visible here, but nothing is injected and nothing is recorded.
+ * stay visible here, but no prompt is sent and nothing is recorded.
  *
  * The area has to be the complete switch because that checkbox lives inside
  * the section the area owns: turning the area off hides the very control, so
