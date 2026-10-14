@@ -147,7 +147,7 @@ Pure functions over an immutable list: one private mutator that every operation 
 
 **Files:**
 - Create: `web/src/ui/memory/MemorySection.tsx` + a pure view-model test
-- Modify: `web/src/ui/Settings.tsx` (the inline block goes), `web/src/lib/plugins/builtin/memory.ts` (registers the section)
+- Modify: `web/src/ui/Settings.tsx` (the inline block goes), `web/src/lib/plugins/builtin/memory.ts` (registers the section), **`web/src/lib/plugins/builtin/settings.ts`** (the registration must **move**, not be added — T5 is not "make it a registered section": P1 already registered `MemorySection` as `settings.section.memory`, order 70, under the **`app.settings`** area. The section has to be owned by `app.memory` so toggling that area removes it, so the entry leaves `settings.ts` (whose doc comment counts "nine `settings.sections` entries" and becomes eight) and appears in `memory.ts`. Leaving both is not a double render: the registry refuses a duplicate id first-wins and logs a fault, so the section would silently stay owned by `app.settings` — the move must therefore **remove** the old entry, not just add the new one.)
 
 **Interfaces:**
 - Produces: `memoryRows(notes, now): readonly MemoryRow[]` — a pure view-model with the live list (each carrying its **id**), the recently-deleted list, and for each a `canRevert` flag with a `reason` when it cannot.
