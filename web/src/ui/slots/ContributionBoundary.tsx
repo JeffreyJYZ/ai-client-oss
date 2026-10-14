@@ -20,6 +20,12 @@ interface ContributionBoundaryState {
  * class can implement `componentDidCatch`/`getDerivedStateFromError`, and that
  * is a lifecycle method, not a `try` statement (the Grit rules do not apply to
  * it).
+ *
+ * The notice names its `owner` **without calling it a plugin**: `owner` is a
+ * plugin id for a third-party contribution but a built-in **area** id
+ * (`app.shell`) for a built-in one, and the boundary is handed only the string,
+ * so it cannot tell the two apart — "plugin app.shell failed" was therefore a
+ * false claim about half the things it wraps.
  */
 export class ContributionBoundary extends Component<
 	ContributionBoundaryProps,
@@ -46,7 +52,7 @@ export class ContributionBoundary extends Component<
 		if (this.state.failed) {
 			return (
 				<p className="px-3 py-1 text-xs text-red-400">
-					plugin {this.props.owner} failed
+					{this.props.owner} failed to render
 				</p>
 			);
 		}

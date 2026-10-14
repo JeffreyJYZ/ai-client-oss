@@ -5,6 +5,7 @@ import {
 	areaEnabled,
 	contributionEnabled,
 	makeBuiltinsReconciler,
+	makeCoalescingRunner,
 } from "@lib/plugins/builtin";
 import {
 	BUILTIN_IDENTITIES,
@@ -20,7 +21,7 @@ import {
 	makeHost,
 } from "@lib/plugins/host";
 import { clearLog, getLogSnapshot } from "@lib/plugins/log";
-import { Cause, Effect, Exit, Scope } from "effect";
+import { Cause, Deferred, Effect, Exit, Scope } from "effect";
 import {
 	type BuiltinsDeps,
 	type BuiltinsSnapshot,
@@ -110,6 +111,12 @@ const withBuiltins = (builtins: NonNullable<Settings["builtins"]>): Settings =>
 
 /** The last line the store logged. */
 const lastLog = (): string => getLogSnapshot().at(-1)?.message ?? "";
+
+/** Let a forked fibre's continuations run (the `plugins.test.ts` shape). */
+const tick = (): Promise<void> =>
+	new Promise((resolve) => {
+		setTimeout(resolve, 0);
+	});
 
 describe("defaults and unknown ids", () => {
 	test("an absent builtins field means every area and contribution is on", () => {
@@ -206,6 +213,47 @@ describe("the locked core", () => {
 		expect(snapshot.builtins["app.substrate"]).toBe(true);
 		expect(snapshot.builtins["app.builtins"]).toBe(true);
 		// Refused means refused: nothing was persisted.
+		expect(h.patches).toEqual([]);
+	});
+
+	test("a persisted locked-off area still resolves on — the lock holds on read", () => {
+		// A hand-edited `settings.json`, an imported backup, or a full-trust
+		// plugin through `host.db` can hand the store `{"app.substrate":
+		// {"enabled": false}}`, and the same door can turn off a *contribution*
+		// of a locked area — here the manager's own section, which is the way
+		// back. The store refuses both writes, but an unclamped read would
+		// honour them; the lock is a *store* guarantee (spec "The locked core"),
+		// so the read door must refuse them too.
+		const h = makeHarness(
+			withBuiltins({
+				"app.substrate": { enabled: false },
+				"app.builtins": {
+					enabled: false,
+					contributions: { "settings.section.plugins": false },
+				},
+			}),
+		);
+		h.store.start();
+
+		const snapshot = h.store.getBuiltinsSnapshot();
+		expect(snapshot.builtins["app.substrate"]).toBe(true);
+		expect(snapshot.builtins["app.builtins"]).toBe(true);
+		// A contribution of a locked area is clamped too: it is what the gate
+		// reads, so `false` here would unregister the manager's own section and
+		// take away the way back.
+		expect(snapshot.contributions["app.builtins"]).toEqual({
+			"settings.section.plugins": true,
+		});
+
+		// A read clamp, not a migration: the blob is left exactly as written, so
+		// an older app opening this data sees what it wrote, and nothing was
+		// persisted on the way.
+		expect(h.settings().builtins?.["app.substrate"]).toEqual({
+			enabled: false,
+		});
+		expect(h.settings().builtins?.["app.builtins"]?.contributions).toEqual({
+			"settings.section.plugins": false,
+		});
 		expect(h.patches).toEqual([]);
 	});
 });
@@ -1380,5 +1428,79 @@ describe("per-contribution toggles", () => {
 		const exit = await Effect.runPromiseExit(reconciler.reconcile(services));
 		expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
 		expect(new Set(closed)).toEqual(new Set(ids));
+	});
+});
+
+/* --------------------------------------------------- the coalescing runner */
+
+/**
+ * The wiring's one serialisation point (`builtin/index.ts`
+ * `makeCoalescingRunner`). A store change while a reconcile is in flight must
+ * run **once more after** it, never beside it: `reconcile` clears its live list
+ * before it closes and re-registers, so two overlapping passes would both find
+ * nothing to close and accumulate one scope per area.
+ *
+ * The first run is held open on a `Deferred` so the later notifications
+ * genuinely arrive mid-flight — the burst a rapid series of settings changes
+ * produces. Without the latch those notifications fork their own reconciles at
+ * once (`runs` is 2 before the first is released, and two runs are concurrent),
+ * which is what the assertions catch.
+ */
+describe("the coalescing runner", () => {
+	test("two notifications in the same turn register each area once, never beside the first", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		enabled.all();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		const held = Effect.runSync(Deferred.make<void>());
+		let runs = 0;
+		let concurrent = 0;
+		let maxConcurrent = 0;
+
+		const notify = makeCoalescingRunner(() => {
+			runs += 1;
+			const first = runs === 1;
+			concurrent += 1;
+			maxConcurrent = Math.max(maxConcurrent, concurrent);
+			return (first ? Deferred.await(held) : Effect.void).pipe(
+				Effect.andThen(reconciler.reconcile(services)),
+				Effect.ensuring(
+					Effect.sync(() => {
+						concurrent -= 1;
+					}),
+				),
+			);
+		});
+
+		notify();
+		notify();
+		notify();
+
+		// While the first is held, the later notifications are pending, not
+		// running: no second reconcile started beside it.
+		expect(runs).toBe(1);
+		expect(maxConcurrent).toBe(1);
+
+		Effect.runSync(Deferred.succeed(held, undefined));
+		await tick();
+
+		expect(runs, "the held run plus exactly one coalesced run").toBe(2);
+		expect(maxConcurrent, "never two reconciles at once").toBe(1);
+		// One scope per area, not one per notification: the coalesced pass
+		// closed the held run's scopes before it registered its own.
+		expect(reconciler.live().length).toBe(BUILTIN_AREAS.length);
+		// And every area's ids are registered once, not duplicated.
+		const ids = registryIds(services);
+		for (const [name, list] of Object.entries(ids)) {
+			expect(new Set(list).size, `${name} has no duplicates`).toBe(list.length);
+		}
+		expect(ids.ui).toContain("ui.root.layout");
+		expect(ids.tools).toEqual(["fetch_url", "web_search"]);
 	});
 });

@@ -35,14 +35,15 @@ import { CommandPalette, CommandResults } from "@/ui/CommandPalette";
  */
 export const registerCommandBuiltins = (host: Host): void => {
 	/**
-	 * The notification surface this file pushes through. The built-in plugin's
-	 * `Scope` is not on the `Host` it is handed, and a built-in's scope is never
-	 * closed anyway, so the service is built without one: notify's documented
-	 * host-caller path detaches the toast's `ttl` fibre, which expires the toast
-	 * on its `ttl` exactly as a scope-owned one would — and a never-closed scope
-	 * would otherwise accumulate one finalizer per toast. The toast is therefore
+	 * The notification surface this file pushes through. The built-in's `Scope`
+	 * is not on the `Host` it is handed, so the service is built **without** one
+	 * — and its toasts expire on their own `ttl`, which is what makes that safe:
+	 * notify's host-caller path detaches the toast's `ttl` fibre, so a toast
+	 * expires exactly as a scope-owned one would. The toast is therefore
 	 * transient (ttl'd), not app-lifetime: a failure the user has seen goes away
-	 * on its own rather than sitting on screen until dismissed.
+	 * on its own rather than sitting on screen until dismissed. (A scope-owned
+	 * service would also grow one finalizer per toast, and `reconcile` closes
+	 * each area's scope on every toggle.)
 	 */
 	const notify = makeNotifyService();
 

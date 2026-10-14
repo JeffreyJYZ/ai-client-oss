@@ -71,8 +71,10 @@ export const BUILTIN_IDENTITIES = [
 		// With the shell off the container does not go blank: `ui/MinimalHost.tsx`
 		// renders the Plugins manager plus a line naming what is off (the
 		// reachability fix), so the sentence must not claim an empty container.
+		// The manager *is* the way back, so naming both would name one thing
+		// twice.
 		description:
-			"The default layout, the header and the notice strips; with this off the container renders its minimal host surface instead — the Plugins manager, the way back, and a line naming what is off.",
+			"The default layout, the header and the notice strips; with this off the container renders its minimal host surface instead: the Plugins manager and a line naming what is off.",
 		locked: false,
 	},
 	{

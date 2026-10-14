@@ -31,7 +31,10 @@ import {
  *   `getSnapshot()` by identity on every render — a fresh object per read is an
  *   infinite render loop.
  * - **Locked units are refused here, in the store** (spec "Error handling"), not
- *   only in the UI, so a future caller cannot bypass the irreducible core.
+ *   only in the UI, so a future caller cannot bypass the irreducible core. Both
+ *   doors are covered: a toggle of a locked unit is refused at the write, and
+ *   `resolve` clamps the read, so a hand-edited blob that says a locked area —
+ *   or one of its contributions — is off is not honoured either.
  *
  * Registration is not this module's job: it holds and persists the state, and
  * Task 3's reconcile is what acts on it.
@@ -99,10 +102,23 @@ export interface BuiltinsStore {
 }
 
 /**
+ * Every key of a contribution record, turned on. Used by restore-all, and by
+ * {@link resolve} to clamp a locked area's recorded overrides on.
+ */
+const allOn = (
+	record: Readonly<Record<string, boolean>>,
+): Record<string, boolean> => {
+	const next: Record<string, boolean> = {};
+	for (const key of Object.keys(record)) next[key] = true;
+	return next;
+};
+
+/**
  * Resolve the persisted state into the snapshot (spec "Persistence"). Every area
- * in the table gets an explicit flag — `false` only when the store says so — and
- * only areas the table knows contribute anything, so a stale area id is ignored
- * rather than surfaced. The whole record is rebuilt here, pure.
+ * in the table gets an explicit flag — `false` only when the store says so and
+ * the area is not locked — and only areas the table knows contribute anything,
+ * so a stale area id is ignored rather than surfaced. The whole record is
+ * rebuilt here, pure.
  */
 const resolve = (settings: Settings): BuiltinsSnapshot => {
 	const state = settings.builtins ?? {};
@@ -111,9 +127,26 @@ const resolve = (settings: Settings): BuiltinsSnapshot => {
 
 	for (const identity of BUILTIN_IDENTITIES) {
 		const entry = state[identity.id];
-		builtins[identity.id] = entry?.enabled !== false;
+		// A locked area's flag is clamped **on this read**, not only refused on
+		// the write: a hand-edited `settings.json`, an imported backup or a
+		// full-trust plugin through `host.db` can set `enabled: false` without
+		// passing the store's `refused` guard, and the lock is the store's own
+		// guarantee (spec "The locked core"). Everything else keeps the
+		// absent-means-on form.
+		builtins[identity.id] =
+			identity.locked === true || entry?.enabled !== false;
 		const recorded = entry?.contributions;
-		if (recorded !== undefined) contributions[identity.id] = { ...recorded };
+		if (recorded !== undefined) {
+			// The same clamp one level down. The store refuses to *write* a
+			// contribution of a locked area off, so a recorded override saying it
+			// is off can only come from a hand-edited blob or an import — and
+			// honouring it would unregister that contribution (for `app.builtins`,
+			// the manager's own section: the way back) while the area still reads
+			// as locked. No ids are invented: the recorded keys are kept, forced
+			// on.
+			contributions[identity.id] =
+				identity.locked === true ? allOn(recorded) : { ...recorded };
+		}
 	}
 
 	return { enabled: settings.pluginsEnabled, builtins, contributions };
@@ -158,15 +191,6 @@ const sameSnapshot = (a: BuiltinsSnapshot, b: BuiltinsSnapshot): boolean =>
 	(a.enabled === b.enabled &&
 		sameFlags(a.builtins, b.builtins) &&
 		sameContributions(a.contributions, b.contributions));
-
-/** Every key of a contribution record, turned on. Used by restore-all. */
-const allOn = (
-	record: Readonly<Record<string, boolean>>,
-): Record<string, boolean> => {
-	const next: Record<string, boolean> = {};
-	for (const key of Object.keys(record)) next[key] = true;
-	return next;
-};
 
 /** Build a store over injected seams. The app builds the one in this module. */
 export const makeBuiltinsStore = (deps: BuiltinsDeps): BuiltinsStore => {

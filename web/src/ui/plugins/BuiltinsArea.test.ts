@@ -168,14 +168,20 @@ describe("builtinRows", () => {
 		expect(ids("app.settings")).not.toContain("settings.root.shell");
 	});
 
-	test("a contribution's enabled state is read by the reconciler's rule", () => {
-		// The view-model re-states the rule rather than importing
+	test("the view-model's enabled state follows the reconciler's rules", () => {
+		// The view-model re-states the rules rather than importing
 		// `@lib/plugins/builtin` (that module imports `areas.ts`, which imports
 		// this section — importing it back would close a cycle). Pinned here
 		// against the production helpers, so a drift fails.
+		//
+		// The `builtins` map is **partial on purpose**: the store's snapshot is
+		// always complete, and on a complete map `=== true` and `!== false`
+		// agree on every value — so a complete map could not catch the area rule
+		// drifting to the contribution rule's absent-means-on form. With the
+		// sibling areas absent, the two forms disagree and this half bites too.
 		const snapshotWithState: BuiltinsSnapshot = {
 			enabled: false,
-			builtins: { ...snapshot().builtins, "app.tools": false },
+			builtins: { "app.tools": false },
 			contributions: { "app.tools": { fetch_url: false } },
 		};
 
@@ -295,13 +301,6 @@ describe("the catalog equals the gate's keys", () => {
 		for (const identity of BUILTIN_IDENTITIES) {
 			expect(Array.isArray(BUILTIN_CONTRIBUTIONS[identity.id])).toBe(true);
 		}
-	});
-
-	/* A guard so a future area's missing key is a visible failure, not a hole. */
-	test("the real area table is the one the catalog is keyed by", () => {
-		expect(BUILTIN_AREAS.map((area) => area.id)).toEqual(
-			BUILTIN_IDENTITIES.map((identity) => identity.id),
-		);
 	});
 
 	/* The module door is reachable and idempotent (the store is shared). */

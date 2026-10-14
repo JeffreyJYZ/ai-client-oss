@@ -220,55 +220,53 @@ function AreaRow({ row }: { readonly row: BuiltinRow }) {
 				<p className="text-xs text-amber-300/80">{row.lockedReason}</p>
 			)}
 
-			{row.contributions.length === 0 ? (
-				<p className="text-xs text-neutral-500">
-					This area has no individually toggleable contributions.
-				</p>
-			) : (
-				<details className="flex flex-col gap-2">
-					{/* No onClick on the summary: nothing here needs one, and a
-					    preventDefault would cancel a control's own activation. */}
-					<summary className={`cursor-pointer select-none ${HEADING}`}>
-						Contributions ({row.contributions.length})
-					</summary>
-					<ul className="flex flex-col gap-1 pt-2">
-						{row.contributions.map((contribution) => (
-							<li
-								key={contribution.id}
-								className="flex flex-wrap items-center gap-2"
+			{/* No empty-state branch: every area in `BUILTIN_CONTRIBUTIONS` has at
+			    least one id, and a mismatch between that catalog and what the
+			    real registries hold fails `BuiltinsArea.test.ts`'s catalog
+			    check. */}
+			<details className="flex flex-col gap-2">
+				{/* No onClick on the summary: nothing here needs one, and a
+				    preventDefault would cancel a control's own activation. */}
+				<summary className={`cursor-pointer select-none ${HEADING}`}>
+					Contributions ({row.contributions.length})
+				</summary>
+				<ul className="flex flex-col gap-1 pt-2">
+					{row.contributions.map((contribution) => (
+						<li
+							key={contribution.id}
+							className="flex flex-wrap items-center gap-2"
+						>
+							<span
+								className="truncate font-mono text-xs text-neutral-400"
+								title={contribution.id}
 							>
-								<span
-									className="truncate font-mono text-xs text-neutral-400"
-									title={contribution.id}
-								>
-									{contribution.id}
+								{contribution.id}
+							</span>
+							{contribution.lockedReason === undefined ? null : (
+								<span className="text-xs text-amber-300/80">
+									{contribution.lockedReason}
 								</span>
-								{contribution.lockedReason === undefined ? null : (
-									<span className="text-xs text-amber-300/80">
-										{contribution.lockedReason}
-									</span>
-								)}
-								<label className="ml-auto flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
-									<input
-										type="checkbox"
-										checked={contribution.enabled}
-										disabled={contribution.lockedReason !== undefined}
-										title={contribution.lockedReason}
-										onChange={(event) =>
-											setContributionEnabled(
-												row.id,
-												contribution.id,
-												event.target.checked,
-											)
-										}
-										className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
-									/>
-								</label>
-							</li>
-						))}
-					</ul>
-				</details>
-			)}
+							)}
+							<label className="ml-auto flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
+								<input
+									type="checkbox"
+									checked={contribution.enabled}
+									disabled={contribution.lockedReason !== undefined}
+									title={contribution.lockedReason}
+									onChange={(event) =>
+										setContributionEnabled(
+											row.id,
+											contribution.id,
+											event.target.checked,
+										)
+									}
+									className="h-4 w-4 accent-neutral-300 disabled:opacity-40"
+								/>
+							</label>
+						</li>
+					))}
+				</ul>
+			</details>
 		</li>
 	);
 }

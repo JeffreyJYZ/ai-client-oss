@@ -80,7 +80,10 @@ describe("ContributionBoundary", () => {
 
 		boundary.state = { failed: true };
 		const html = renderToStaticMarkup(boundary.render());
-		expect(html).toContain("plugin acme failed");
+		// Neutral about the owner: it is a plugin id here, but a built-in area
+		// id for a built-in contribution, and this boundary cannot tell them
+		// apart (so it must not say "plugin").
+		expect(html).toContain("acme failed to render");
 		// It does not blank the page: the fallback is a real element, not null.
 		expect(html.startsWith("<p")).toBe(true);
 	});

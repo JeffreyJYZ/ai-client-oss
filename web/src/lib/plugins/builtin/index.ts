@@ -351,19 +351,77 @@ const reconciler = makeBuiltinsReconciler({
 	makeHost,
 });
 
+/**
+ * Serialise calls to an async runner. A call made while one is in flight sets a
+ * pending flag and returns; the in-flight run starts **exactly one more** when
+ * it finishes.
+ *
+ * That is the property a reconcile needs, not a convenience: `reconcile` clears
+ * its live list before it closes and re-registers, so two overlapping passes
+ * would both find nothing to close and accumulate one scope per area — and the
+ * store notifies once per settings change, so a burst of changes would do it.
+ * Serialising makes the overlap unreachable rather than merely unproduced:
+ * every built-in finalizer runs synchronously today, so a second pass happens
+ * to be safe right now, but a future async finalizer or registrar would leak a
+ * scope per toggle without this.
+ */
+export const makeCoalescingRunner = (
+	run: () => Effect.Effect<void>,
+): (() => void) => {
+	let inFlight = false;
+	let pending = false;
+
+	return (): void => {
+		if (inFlight) {
+			pending = true;
+			return;
+		}
+		inFlight = true;
+		Effect.runFork(
+			Effect.gen(function* () {
+				let again = true;
+				while (again) {
+					yield* run();
+					// Read-and-clear in one synchronous step, so a notification
+					// that arrives while `run` executes is seen exactly once.
+					again = yield* Effect.sync(() => {
+						const next = pending;
+						pending = false;
+						return next;
+					});
+				}
+			}).pipe(
+				Effect.ensuring(
+					Effect.sync(() => {
+						inFlight = false;
+					}),
+				),
+			),
+		);
+	};
+};
+
 let bootedServices: HostServicesShape | undefined;
 let subscribed = false;
 
+/** The one serialised reconcile source; see {@link makeCoalescingRunner}. */
+const notifyBuiltins = makeCoalescingRunner(() =>
+	bootedServices === undefined
+		? Effect.void
+		: reconciler.reconcile(bootedServices),
+);
+
 /**
  * A store change while the app runs re-reconciles with the services captured at
- * boot. A change before boot (the store self-starts at import, before the
- * runtime resolves its services) is ignored: the boot reconcile reads the
- * then-current snapshot, so nothing it would have done is missed.
+ * boot, **coalesced**: a change that arrives while a reconcile is in flight runs
+ * once more when it finishes rather than beside it. A change before boot (the
+ * store self-starts at import, before the runtime resolves its services) is
+ * ignored: the boot reconcile reads the then-current snapshot, so nothing it
+ * would have done is missed.
  */
 const onBuiltinsChanged = (): void => {
-	const services = bootedServices;
-	if (services === undefined) return;
-	Effect.runFork(reconciler.reconcile(services));
+	if (bootedServices === undefined) return;
+	notifyBuiltins();
 };
 
 /**
