@@ -427,6 +427,31 @@ describe("the memory migration (the first real member of the registry)", () => {
 		expect(shipped.run(first)).toEqual(first);
 	});
 
+	test("a blob that already carries memoryNotes is a fixed point, even when one was edited", () => {
+		// The guard is not a re-derivation: a blob below DATA_VERSION that already
+		// carries `memoryNotes` must come back untouched. A no-guard transform
+		// re-derives from `memories` and clobbers the edit below back to
+		// "One fact." — and an UNEDITED input cannot pin this, because
+		// re-derivation is byte-identical there, so part (b) above passes with or
+		// without the guard. Only an edited note can tell the two apart.
+		const shipped = shippedMigrations.find((m) => m.to === DATA_VERSION);
+		expect(shipped).toBeDefined();
+		if (!shipped) return;
+		const edited = {
+			...legacyBlob([legacyMemory("m1", "One fact.", 10)]),
+			dataVersion: 1,
+			memoryNotes: [
+				{
+					id: "one-fact",
+					content: "EDITED BY USER",
+					updatedAt: 99,
+					history: [],
+				},
+			],
+		};
+		expect(shipped.run(edited)).toEqual(edited);
+	});
+
 	test("the legacy memories array is byte-identical, and nothing else is rewritten", async () => {
 		const raw = legacyBlob([
 			legacyMemory("m1", "First.", 1),

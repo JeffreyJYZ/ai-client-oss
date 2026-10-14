@@ -95,19 +95,31 @@ export type MemoryNote = z.infer<typeof memoryNoteSchema>;
  * because `memoryNoteSchema` above is the legacy `{id, text, createdAt,
  * source}` shape, which stays (the legacy array keeps being written).
  */
-export const memoryEntrySchema: z.ZodType<MemoryEntry> = z.object({
+// The schema's INPUT is `unknown` because `history` is defaulted below — a stored
+// entry may legitimately omit it. Its OUTPUT stays pinned to `MemoryEntry`, which
+// is what five later tasks consume, so a field rename or retype is still a compile
+// error.
+export const memoryEntrySchema: z.ZodType<MemoryEntry, unknown> = z.object({
 	id: z.string(),
 	content: z.string(),
 	updatedAt: z.number(),
 	/** Present = soft-deleted; the UI and `memory_list` filter on it. */
 	deletedAt: z.number().optional(),
-	/** Previous contents, newest last. Required: every write we make sets it. */
-	history: z.array(
-		z.object({
-			content: z.string(),
-			at: z.number(),
-		}),
-	),
+	/**
+	 * Previous contents, newest last. Defaulted to none: a note that carries no
+	 * history has no revisions to lose, so `[]` is exact for it, whereas requiring
+	 * the field turns one omitted array into the whole settings blob being
+	 * unreadable (every write refused) rather than degrading to the right answer.
+	 * `id`/`content`/`updatedAt` stay required, so real corruption is rejected.
+	 */
+	history: z
+		.array(
+			z.object({
+				content: z.string(),
+				at: z.number(),
+			}),
+		)
+		.default([]),
 });
 
 /**

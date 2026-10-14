@@ -17,7 +17,8 @@ export const db: Db = isDesktop ? tauri : web;
  * user can download the pre-migration state (spec §13). In-memory only: a
  * durable, file-backed snapshot would need a general desktop file-write
  * command, and the native bridge exposes only plugin-scoped writes (T20).
- * Today the registry is empty, so no capture fires.
+ * The registry now carries the memory migration, so any blob below
+ * `DATA_VERSION` captures here — the only case that fires.
  */
 let preMigrationCapture: string | null = null;
 
