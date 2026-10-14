@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { emptyProviderConfig } from "@lib/db";
+import { emptyProviderConfig, type Settings } from "@lib/db";
+import { MEMORY_TAG_OPEN } from "@lib/memory";
+import { addMemory, type MemoryEntry } from "@lib/memoryNotes";
 import { registerToolBuiltins } from "@lib/plugins/builtin/tools";
 import {
 	type Host,
@@ -232,5 +234,178 @@ describe("tools on the outgoing body, through a real turn", () => {
 			plugin.close();
 			builtin.close();
 		}
+	});
+});
+
+/* ------------------------------------------------------- memory area gating */
+
+/**
+ * One live note, built through T1's own `addMemory` so the entry has the real
+ * store's shape rather than a hand-written literal that could drift from it.
+ */
+const liveNote = (content: string): MemoryEntry => {
+	const result = addMemory(
+		[],
+		`memory-${crypto.randomUUID()}`,
+		content,
+		Date.now(),
+	);
+	if (!result.ok) throw new Error(result.message);
+	const note = result.notes[0];
+	if (note === undefined) throw new Error("addMemory returned no note");
+	return note;
+};
+
+/** The system message's text in a chat/completions body, `""` when there is none. */
+const systemOf = (body: unknown): string => {
+	const messages =
+		(
+			body as {
+				readonly messages?: readonly {
+					readonly role?: string;
+					readonly content?: unknown;
+				}[];
+			}
+		).messages ?? [];
+	const system = messages.find((message) => message.role === "system");
+	return typeof system?.content === "string" ? system.content : "";
+};
+
+/**
+ * Run one real turn over a provider that streams `reply` as a single text
+ * chunk, and report both sites Fix 1 touches: the **body** the turn sent (the
+ * injected memory block) and the **notes** in the store once the turn ended.
+ *
+ * `turn-end` is published by `finalize` *after* it has harvested the reply's
+ * `<memory>` blocks, so the wait guarantees the store write has happened. The
+ * notes are read before the settings reset — the return value, not a later
+ * `getSettings()`, is the assertion source.
+ */
+const runMemoryTurn = async (
+	protocol: string,
+	reply: string,
+	memory: Pick<
+		Settings,
+		"memoriesEnabled" | "memoryNotes" | "memories" | "builtins"
+	>,
+): Promise<{
+	readonly body: unknown;
+	readonly notes: readonly MemoryEntry[];
+}> => {
+	let sent: unknown;
+	const provider = {
+		...chatcompletions,
+		send: (ctx: SendCtx) =>
+			Effect.sync(() => {
+				sent = chatcompletions.buildRequest(
+					(ctx.prev ?? chatcompletions.template) as never,
+					ctx,
+				);
+				return reply === ""
+					? (Stream.empty as Stream.Stream<Chunk, string>)
+					: Stream.make({ kind: "text", text: reply } as Chunk);
+			}),
+	};
+	const handle = addProvider(protocol, provider);
+	const before = getSettings();
+	setSettings({
+		providers: [
+			{
+				...emptyProviderConfig("t5-memory-provider"),
+				protocol,
+				baseUrl: "https://example.com/v1",
+			},
+		],
+		activeProviderId: "t5-memory-provider",
+		...memory,
+	});
+	try {
+		const turn = subscribeTurnEnd();
+		try {
+			send("hello", []);
+			await turn.done;
+			if (sent === undefined) throw new Error("timed out waiting for a body");
+			return { body: sent, notes: getSettings().memoryNotes };
+		} finally {
+			turn.dispose();
+		}
+	} finally {
+		handle.dispose();
+		setSettings({
+			providers: before.providers,
+			activeProviderId: before.activeProviderId,
+			memoriesEnabled: before.memoriesEnabled,
+			memoryNotes: before.memoryNotes,
+			memories: before.memories,
+			builtins: before.builtins,
+		});
+	}
+};
+
+/**
+ * The `app.memory` area is the feature's switch; `memoriesEnabled` is the
+ * section's own. Both sites that reach beyond the UI — the system-prompt
+ * injection and the note store — must follow the **area**, or turning it off
+ * would leave an invisible feature running.
+ */
+describe("the app.memory area gates the injection and the store", () => {
+	const note = "the user prefers terse answers";
+	const reply = "ok, noted <memory>the user works in Berlin</memory>";
+
+	test("area off, flag on: no block is injected and the reply's note is not stored", async () => {
+		const existing = liveNote(note);
+		const { body, notes } = await runMemoryTurn(
+			`t5-memory-off-${crypto.randomUUID()}`,
+			reply,
+			{
+				memoriesEnabled: true,
+				memoryNotes: [existing],
+				memories: [],
+				builtins: { "app.memory": { enabled: false } },
+			},
+		);
+
+		expect(systemOf(body)).not.toContain(MEMORY_TAG_OPEN);
+		expect(systemOf(body)).not.toContain(note);
+		expect(notes).toEqual([existing]);
+	});
+
+	test("area on, flag on: the block is injected and the reply's note is stored", async () => {
+		const existing = liveNote(note);
+		const { body, notes } = await runMemoryTurn(
+			`t5-memory-on-${crypto.randomUUID()}`,
+			reply,
+			{
+				memoriesEnabled: true,
+				memoryNotes: [existing],
+				memories: [],
+				builtins: { "app.memory": { enabled: true } },
+			},
+		);
+
+		expect(systemOf(body)).toContain(MEMORY_TAG_OPEN);
+		expect(systemOf(body)).toContain(note);
+		expect(notes.map((entry) => entry.content)).toEqual([
+			note,
+			"the user works in Berlin",
+		]);
+	});
+
+	test("area on, flag off: nothing is injected and nothing is stored", async () => {
+		const existing = liveNote(note);
+		const { body, notes } = await runMemoryTurn(
+			`t5-memory-flag-off-${crypto.randomUUID()}`,
+			reply,
+			{
+				memoriesEnabled: false,
+				memoryNotes: [existing],
+				memories: [],
+				builtins: { "app.memory": { enabled: true } },
+			},
+		);
+
+		expect(systemOf(body)).not.toContain(MEMORY_TAG_OPEN);
+		expect(systemOf(body)).not.toContain(note);
+		expect(notes).toEqual([existing]);
 	});
 });

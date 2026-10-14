@@ -1,6 +1,7 @@
 import { MAX_MEMORY_NOTE_LENGTH } from "@lib/memory";
 import {
 	addMemory,
+	MEMORY_DELETED_CAP,
 	type MemoryResult,
 	removeMemory,
 	revertMemory,
@@ -23,9 +24,17 @@ import { memoryRows } from "@/ui/memory/memoryRows";
 /**
  * The Memory settings section: the durable-memory list and its editor.
  *
- * It is registered by the `app.memory` area (`lib/plugins/builtin/memory.ts`),
- * so turning that area off removes the section with the five tools the same
- * area contributes — the whole memory feature is one toggle.
+ * Two switches govern memory, one level apart. The `app.memory` area
+ * (`lib/plugins/builtin/memory.ts`) owns the whole feature: turning it off
+ * removes this section, the five tools the same area contributes, the block
+ * injected into every request, and the recording of notes the model writes.
+ * The **Enabled** checkbox below turns memory off *within* the area — notes
+ * stay visible here, but nothing is injected and nothing is recorded.
+ *
+ * The area has to be the complete switch because that checkbox lives inside
+ * the section the area owns: turning the area off hides the very control, so
+ * anything the area left live — the injection, the store — would keep running
+ * with no UI to see it or turn it off.
  *
  * Every write goes through T1's operations (`lib/memoryNotes.ts`), which are
  * the same ones the model's tools call, so a user edit and a model edit cannot
@@ -97,10 +106,14 @@ export function MemorySection() {
 	const saveEdit = (): void => {
 		if (editing === null) return;
 		const content = editing.text.trim();
+		// An empty draft is never saved. The Save control is disabled while the
+		// draft is empty (that is the feedback); this guard keeps a submit path
+		// that bypasses the button from blanking a note.
+		if (content === "") return;
 		// An unchanged save would push a no-op revision onto the history, so it
 		// just closes the editor.
 		const target = notes.find((note) => note.id === editing.id);
-		if (content === "" || target?.content === content) {
+		if (target?.content === content) {
 			setEditing(null);
 			return;
 		}
@@ -209,7 +222,11 @@ export function MemorySection() {
 										}
 										className={cls(INPUT, "flex-1")}
 									/>
-									<button type="submit" className={BUTTON}>
+									<button
+										type="submit"
+										disabled={editing.text.trim() === ""}
+										className={BUTTON}
+									>
 										Save
 									</button>
 									<button
@@ -251,6 +268,11 @@ export function MemorySection() {
 					<h4 className="text-xs uppercase tracking-widest text-neutral-500">
 						Recently deleted
 					</h4>
+					<p className="text-xs text-neutral-500">
+						A removed note waits here, restorable, until you delete it forever.
+						Only the {MEMORY_DELETED_CAP} most recently removed are kept:
+						removing another drops the oldest from this list.
+					</p>
 					<ul className="flex flex-col gap-2">
 						{rows.deleted.map((row) => (
 							<li

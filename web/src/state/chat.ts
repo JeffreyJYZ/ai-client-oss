@@ -7,6 +7,7 @@ import {
 	memoryPrompt,
 	recordMemories,
 } from "@lib/memory";
+import type { BuiltinId } from "@lib/plugins/builtinIdentity";
 import { HostServices } from "@lib/plugins/host";
 import {
 	composeTurnBody,
@@ -36,6 +37,7 @@ import type {
 } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
+import { getBuiltinsSnapshot } from "@/state/builtins";
 import { getActiveProvider, getSettings, setSettings } from "./settings";
 
 export type ChatStatus = "idle" | "streaming";
@@ -351,6 +353,27 @@ const appendMarker = (
 };
 
 /**
+ * The `app.memory` area's id, pinned to the identity table's union so renaming
+ * the area there is a type error here rather than a silently ungated read.
+ */
+const MEMORY_AREA_ID = "app.memory" satisfies BuiltinId;
+
+/**
+ * Whether the `app.memory` area is on. The area — not the `memoriesEnabled`
+ * setting — owns the whole memory feature, so both the prompt block and the
+ * note store must be gated on it: with the area off the section and the five
+ * tools are gone, and a note recorded or injected anyway would be invisible,
+ * with no UI to see or remove it.
+ *
+ * Read from the builtins store's synchronous snapshot (`getBuiltinsSnapshot`),
+ * the same shape the Plugins manager reads: absent means on, and the store
+ * itself clamps a locked area on. `=== true` because `resolve` writes an
+ * explicit flag for every identity in the table, this one included.
+ */
+const memoryAreaEnabled = (): boolean =>
+	getBuiltinsSnapshot().builtins[MEMORY_AREA_ID] === true;
+
+/**
  * Persist memory notes the model ended its reply with. The tag path is the
  * documented fallback for endpoints that cannot be sent tool declarations, so
  * it routes through T1's single mutator (`recordMemories`) exactly as the five
@@ -368,7 +391,11 @@ const commitMemories = (extracted: ExtractedMemories): void => {
 	}
 	if (extracted.memories.length === 0) return;
 	const settings = getSettings();
-	if (!settings.memoriesEnabled) return;
+	// The area gates the store as it gates the injection: with `app.memory` off
+	// the section and the tools are gone, so a note recorded here would be
+	// invisible with nothing to remove it. `memoriesEnabled` keeps its meaning
+	// *within* the area.
+	if (!settings.memoriesEnabled || !memoryAreaEnabled()) return;
 	const recorded = recordMemories(
 		settings.memories,
 		settings.memoryNotes,
@@ -521,11 +548,15 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	const settings = getSettings();
 	// The memory section is composed for the wire only: the conversation's own
-	// `systemPrompt` never changes, and with no live notes (or the feature off)
-	// `memoryPrompt` is "" so the request is byte-identical to before.
-	const memory = settings.memoriesEnabled
-		? memoryPrompt(settings.memoryNotes)
-		: "";
+	// `systemPrompt` never changes, and with no live notes (or memory off)
+	// `memoryPrompt` is "" so the request is byte-identical to before. "Off"
+	// is the `app.memory` area **and** the setting: the area owns the feature,
+	// so its toggle has to take the injected block with the section and the
+	// tools, or an area switched off would keep steering every request.
+	const memory =
+		settings.memoriesEnabled && memoryAreaEnabled()
+			? memoryPrompt(settings.memoryNotes)
+			: "";
 
 	// The TinyFish key rides the request's ctx (it decides
 	// the `web_search` declaration) and every tool

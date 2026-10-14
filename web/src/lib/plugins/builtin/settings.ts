@@ -25,11 +25,13 @@ import {
  *
  * The eight `settings.sections` entries, in render order: the page's warning
  * banners, Providers, the provider editor, Profiles, the profile editor, Web
- * search, Backup, Updates. Three sections that render into the same list do
- * **not** live here, and all three are by design rather than oversight:
+ * search, Backup, Updates. Two sections that render into that same list do
+ * **not** live here, and neither does the surface itself — all three by design
+ * rather than oversight:
  *
- * - Memory rides `app.memory` (`builtin/memory.ts`), so the feature's toggle
- *   takes the section with the tools it belongs to;
+ * - Memory rides `app.memory` (`builtin/memory.ts`), so the feature's area
+ *   toggle takes the section, the five tools, the block injected into every
+ *   request and the recording of notes the model writes;
  * - the Plugins section rides the locked `app.builtins` (`areas.ts`
  *   `registerManager`);
  * - the Settings **surface** (`settings.root`) rides the locked `app.substrate`
