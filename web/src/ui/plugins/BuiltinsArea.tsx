@@ -47,8 +47,10 @@ const HEADING = "text-xs uppercase tracking-widest text-neutral-500";
 export const BUILTIN_CONTRIBUTIONS: Readonly<
 	Record<BuiltinId, readonly string[]>
 > = {
-	// The container hosts a layout; it owns no entry of its own.
-	"app.substrate": [],
+	// The container hosts a layout, and owns the settings surface every section
+	// renders into — the surface is part of the way back, so it is locked with
+	// the container (see `areas.ts` `registerSubstrate`).
+	"app.substrate": ["settings.root.shell"],
 	"app.shell": [
 		"ui.root.layout",
 		"shell.header.title",
@@ -80,7 +82,6 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 	],
 	"app.overlay": ["overlay.toasts", "overlay.modal"],
 	"app.settings": [
-		"settings.root.shell",
 		"settings.section.notices",
 		"settings.section.providers",
 		"settings.section.provider-editor",

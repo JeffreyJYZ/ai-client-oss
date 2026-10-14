@@ -54,8 +54,15 @@ export const BUILTIN_IDENTITIES = [
 	{
 		id: "app.substrate",
 		label: "App container",
+		// What it actually owns: `ui/App.tsx` is the container and
+		// `ui/MinimalHost.tsx` is what it shows when no layout contribution is
+		// present (the manager itself, plus what is off); its registrar also
+		// registers the Settings **surface** (`settings.root.shell`), because every
+		// section — the manager's included — renders into it, so the surface is
+		// part of the way back. The row describes what the locked container
+		// provides, not an abstract "surface for the rest of the app".
 		description:
-			"The container that hosts a layout; it stays on so there is always a surface for the rest of the app to render into.",
+			"The container that hosts the app's layout and the Settings surface its sections render into; it stays on and shows a minimal surface with the Plugins manager when no layout is rendering.",
 		locked: true,
 	},
 	{
@@ -81,12 +88,12 @@ export const BUILTIN_IDENTITIES = [
 	{
 		id: "app.settings",
 		label: "Settings",
-		// The Plugins manager rides `app.builtins` (the locked way back), not
-		// this area — see `areas.ts` `registerManager` — so this sentence must
-		// not name it: turning Settings off removes every Settings section, and
-		// the manager is not one of them.
+		// The surface is not this area's: `settings.root.shell` rides the locked
+		// `app.substrate` (and the Plugins manager rides `app.builtins`), so this
+		// sentence must name only what this area still owns — the sections and the
+		// sidebar — and must not claim the surface or the manager.
 		description:
-			"The Settings page, its sections and the conversation sidebar.",
+			"The Settings sections and the conversation sidebar; the surface they render into belongs to the app container, so turning this off never removes the way back to the Plugins manager.",
 		locked: false,
 	},
 	{

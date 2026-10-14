@@ -8,17 +8,16 @@ import {
 	ProviderEditor,
 	ProviderSection,
 	SettingsNotices,
-	SettingsShell,
 	UpdatesSection,
 	WebSearchSection,
 } from "@/ui/Settings";
 
 /**
- * The settings and sidebar area's built-in contributions (spec §4/§12): the
- * Settings page's chrome (`settings.root`), its nine sections
- * (`settings.sections`), and the conversation sidebar (`app.sidebar` +
- * `app.sidebar.actions`). Registered through the `Host` — the same public API a
- * plugin uses — so each region can be reordered, hidden or replaced.
+ * The settings and sidebar area's built-in contributions (spec §4/§12): its
+ * nine sections (`settings.sections`) and the conversation sidebar
+ * (`app.sidebar` + `app.sidebar.actions`). Registered through the `Host` — the
+ * same public API a plugin uses — so each region can be reordered, hidden or
+ * replaced.
  *
  * Every `order` is explicit and ascending, holding today's top-to-bottom render
  * order, because resolution falls back to registration order: a later task (or
@@ -27,18 +26,20 @@ import {
  *
  * The nine `settings.sections` entries, in render order: the page's warning
  * banners, Providers, the provider editor, Profiles, the profile editor, Web
- * search, Memory, Backup, Updates. The tenth, Plugins, does **not** live here:
- * it rides the locked `app.builtins` area (`areas.ts` `registerManager`), so
- * turning this whole area off cannot take away the way back.
+ * search, Memory, Backup, Updates. Two things this area owns do **not** live
+ * here, and both are locks rather than oversights:
+ *
+ * - the Plugins section (the tenth) rides the locked `app.builtins` (`areas.ts`
+ *   `registerManager`);
+ * - the Settings **surface** (`settings.root`) rides the locked `app.substrate`
+ *   (`areas.ts` `registerSubstrate`), because every section renders into it —
+ *   the manager's included — so the surface is part of the way back, not
+ *   something turning this area off may take away.
+ *
+ * Both are the same move one level apart: the route back is not owned by the
+ * area it returns from.
  */
 export const registerSettingsBuiltins = (host: Host): void => {
-	host.ui.register({
-		id: "settings.root.shell",
-		slot: "settings.root",
-		component: SettingsShell,
-		order: 10,
-	});
-
 	host.ui.register({
 		id: "settings.section.notices",
 		slot: "settings.sections",

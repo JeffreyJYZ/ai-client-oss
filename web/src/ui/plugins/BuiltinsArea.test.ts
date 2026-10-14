@@ -161,7 +161,11 @@ describe("builtinRows", () => {
 		]);
 		expect(ids("app.commands")).toContain("app.command.palette");
 		expect(ids("app.shell")).toContain("shell.header.title");
-		expect(ids("app.substrate")).toEqual([]);
+		// The container's own entry is the settings surface (the sections render
+		// into it, so it is part of the way back); the sections themselves stay the
+		// settings area's.
+		expect(ids("app.substrate")).toEqual(["settings.root.shell"]);
+		expect(ids("app.settings")).not.toContain("settings.root.shell");
 	});
 
 	test("a contribution's enabled state is read by the reconciler's rule", () => {

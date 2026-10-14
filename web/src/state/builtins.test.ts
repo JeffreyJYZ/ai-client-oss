@@ -12,6 +12,7 @@ import {
 } from "@lib/plugins/builtinIdentity";
 import { PluginFault } from "@lib/plugins/errors";
 import {
+	type Contribution,
 	type Host,
 	HostLayer,
 	HostServices,
@@ -28,7 +29,9 @@ import {
 	makeBuiltinsStore,
 	startBuiltins,
 } from "@/state/builtins";
+import { minimalHostView } from "@/ui/MinimalHost";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
+import { SettingsShell } from "@/ui/Settings";
 
 /**
  * The built-in store's semantics. No DOM: the store is a module snapshot plus a
@@ -533,11 +536,11 @@ describe("reconcile", () => {
 		await run(reconciler, services);
 		const all = registryIds(services);
 
-		// Every area with a registrar contributes something, the manager's locked
-		// area included (Task 5a moved `settings.section.plugins` into it);
-		// `app.substrate` is the one lock that contributes nothing of its own —
-		// the container exists to host a layout and owns no entry. Read each area
-		// alone, through the same reconciler, and union the results.
+		// Every area with a registrar contributes something — the two locked ones
+		// included: `app.builtins` carries the manager's section (Task 5a's move)
+		// and `app.substrate` the settings surface its sections render into (this
+		// round's move, so the manager keeps a surface when `app.settings` is off).
+		// Read each area alone, through the same reconciler, and union the results.
 		const union: Record<RegistryName, Set<string>> = {
 			ui: new Set(),
 			commands: new Set(),
@@ -550,17 +553,10 @@ describe("reconcile", () => {
 			await run(reconciler, services);
 			const alone = registryIds(services);
 			const seen = REGISTRIES.flatMap((name) => alone[name]);
-			if (area.id === "app.substrate") {
-				expect(
-					seen,
-					"the substrate container registers nothing of its own",
-				).toEqual([]);
-			} else {
-				expect(
-					seen.length,
-					`${area.id} contributes at least one entry`,
-				).toBeGreaterThan(0);
-			}
+			expect(
+				seen.length,
+				`${area.id} contributes at least one entry`,
+			).toBeGreaterThan(0);
 			for (const name of REGISTRIES) {
 				for (const id of alone[name]) union[name].add(id);
 			}
@@ -923,10 +919,11 @@ describe("the invariant: every non-locked area off leaves exactly the locked cor
 		await run(reconciler, services);
 		const bare = registryIds(services);
 
-		// Exactly the locked contributions. The container owns no registry entry
-		// of its own, so the whole survivor set is the manager's one section —
-		// and every other registry is empty, not merely shorter.
-		expect(bare.ui, "the locked core's own entry survives").toEqual([
+		// Exactly the locked contributions: the container's settings surface plus
+		// the manager's one section — and every other registry is empty, not merely
+		// shorter. Both survivors are locked-area entries, which is the point.
+		expect(bare.ui, "the locked core's own entries survive").toEqual([
+			"settings.root.shell",
 			"settings.section.plugins",
 		]);
 		expect(bare.commands).toEqual([]);
@@ -938,8 +935,11 @@ describe("the invariant: every non-locked area off leaves exactly the locked cor
 		// fail against the current table).
 		expect(idsOf(Effect.runSync(services.pipeline.entries()))).toEqual([]);
 
-		// Owned by the locked area itself, so the survivor is the manager's own
-		// registration and not a leftover of a disabled area.
+		// Owned by the locked areas themselves, so the survivors are those areas'
+		// own registrations and not leftovers of a disabled area.
+		expect(idsOf(Effect.runSync(services.ui.ownedBy("app.substrate")))).toEqual(
+			["settings.root.shell"],
+		);
 		expect(idsOf(Effect.runSync(services.ui.ownedBy("app.builtins")))).toEqual([
 			"settings.section.plugins",
 		]);
@@ -953,6 +953,77 @@ describe("the invariant: every non-locked area off leaves exactly the locked cor
 		for (const name of REGISTRIES) {
 			expect(after[name].length, `${name} count`).toBe(before[name].length);
 		}
+	});
+
+	test("the container routes back to the manager with every non-locked area off", async () => {
+		// The finding this closes: the locked set is a *registration* guarantee,
+		// and reachability is a separate property. `app.shell` owns the only
+		// `ui.root.layout`, so with it off the container used to render nothing at
+		// all (`#root` at 0 chars, measured in the browser) while the manager stayed
+		// registered. The container's own surface is the route back, and this
+		// asserts the **reachable target**, not that something rendered.
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		// The resolved flags, from the same source the reconcile above just read:
+		// one entry per identity, which is what the store's snapshot carries.
+		const flags = (): Record<string, boolean> =>
+			Object.fromEntries(
+				BUILTIN_AREAS.map((area) => [area.id, enabled.enabledOf(area.id)]),
+			);
+		/** What the container's `<Slot id="ui.root.layout">` resolves to. */
+		const rootEntries = (): readonly Contribution[] =>
+			Effect.runSync(services.ui.entries()).filter(
+				(entry) => entry.slot === "ui.root.layout",
+			);
+
+		enabled.all();
+		await run(reconciler, services);
+		// With a layout present the surface stays out of the page — it is the
+		// last resort, not a second layout beside the shell.
+		expect(rootEntries().length).toBeGreaterThan(0);
+		expect(minimalHostView(rootEntries(), flags()).engaged).toBe(false);
+
+		for (const area of BUILTIN_AREAS) {
+			if (area.locked !== true) enabled.set(area.id, false);
+		}
+		await run(reconciler, services);
+
+		// The state the container used to render as a blank page: the root layout
+		// slot holds nothing at all.
+		expect(rootEntries()).toEqual([]);
+
+		const view = minimalHostView(rootEntries(), flags());
+		expect(view.engaged, "the container renders a surface, not nothing").toBe(
+			true,
+		);
+
+		// The reachable target, by identity: the manager's own component, the very
+		// reference the manager's registered entry carries — not merely something
+		// rendered, and not a second manager. The route is read as `unknown` so the
+		// comparison needs no cast of its own.
+		const manager = Effect.runSync(services.ui.entries()).find(
+			(entry) => entry.id === "settings.section.plugins",
+		);
+		expect(
+			manager?.component,
+			"the manager's entry carries its component",
+		).toBe(PluginsSection);
+		const route: unknown = view.route;
+		expect(route).toBe(manager?.component);
+
+		// And it names what is off, so the surface says why the page is bare.
+		expect(view.offLabels).toEqual(
+			BUILTIN_AREAS.filter((area) => area.locked !== true).map(
+				(area) => area.label,
+			),
+		);
 	});
 });
 
@@ -968,6 +1039,12 @@ describe("the invariant: every non-locked area off leaves exactly the locked cor
  * names: turning the whole Settings area off may remove every Settings
  * contribution, but not the manager — and a reconcile must register it as the
  * manager's own area, not as a survivor of `app.settings`.
+ *
+ * Task 6's fix round added the second half of that invariant, because being
+ * *registered* turned out not to be being *reachable*: the settings **surface**
+ * (`settings.root.shell`) every section renders into now rides the locked
+ * `app.substrate`, so turning `app.settings` off leaves the manager's page
+ * standing with the manager in it. Same move, one level along.
  */
 
 describe("the manager rides the locked core", () => {
@@ -983,7 +1060,7 @@ describe("the manager rides the locked core", () => {
 		return { services, enabled, reconciler };
 	};
 
-	test("turning app.settings off leaves the Plugins manager registered", async () => {
+	test("turning app.settings off keeps the manager reachable, through the locked surface", async () => {
 		const { services, enabled, reconciler } = reconcilerOverRealAreas();
 
 		enabled.all();
@@ -992,16 +1069,40 @@ describe("the manager rides the locked core", () => {
 
 		enabled.set("app.settings", false);
 		await run(reconciler, services);
-		const ui = registryIds(services).ui;
+		const entries = Effect.runSync(services.ui.entries());
+		const ui = entries.map((entry) => entry.id);
 
-		// The way back survives its neighbour area going off.
-		expect(ui).toContain("settings.section.plugins");
 		// The Settings area's own entries are gone — the manager is not simply
 		// "the area stayed on".
 		expect(ui).not.toContain("settings.section.providers");
-		expect(ui).not.toContain("settings.root.shell");
+		expect(ui).not.toContain("settings.section.notices");
 		expect(ui).not.toContain("app.sidebar.chats");
-		// And it is registered by the manager's own (locked) area.
+
+		// What survives is the locked pair — and after this round the **surface is
+		// one of them**. It used to be `app.settings`' own entry, so turning that
+		// area off took the page the manager renders into: the manager stayed
+		// registered and became unreachable (measured in the browser: a header-only
+		// page). Now the surface rides the container, so the page survives with it.
+		const surface = entries.find((entry) => entry.id === "settings.root.shell");
+		expect(surface?.slot, "the settings page still has its surface").toBe(
+			"settings.root",
+		);
+		expect(surface?.component).toBe(SettingsShell);
+		expect(
+			idsOf(Effect.runSync(services.ui.ownedBy("app.substrate"))),
+			"the surface is the locked container's entry, not the settings area's",
+		).toEqual(["settings.root.shell"]);
+
+		// The reachable target, by identity: the surface renders the slot the
+		// manager's own section is registered into, and that section is the
+		// manager's component. (That `SettingsShell` renders `settings.sections` is
+		// traced to `ui/Settings.tsx`, not asserted here; the browser run proves the
+		// rendered result.)
+		const manager = entries.find(
+			(entry) => entry.id === "settings.section.plugins",
+		);
+		expect(manager?.slot).toBe("settings.sections");
+		expect(manager?.component).toBe(PluginsSection);
 		expect(idsOf(Effect.runSync(services.ui.ownedBy("app.builtins")))).toEqual([
 			"settings.section.plugins",
 		]);

@@ -14,6 +14,7 @@ import {
 } from "@lib/plugins/builtinIdentity";
 import type { Host } from "@lib/plugins/host";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
+import { SettingsShell } from "@/ui/Settings";
 
 /**
  * The built-in area table (spec "Units and identities"): one named, individually
@@ -48,14 +49,36 @@ export interface BuiltinArea extends BuiltinIdentity {
 }
 
 /**
- * The substrate's registrar. Deliberately empty in this task: Task 3 gives the
- * substrate its meaning — the container the registration/reconcile lifecycle
- * owns. Each area now registers through its own host, built per area by
- * `builtin/index.ts`, and the substrate still has nothing of its own to
- * register: a non-empty body would double-register another area's
- * contributions.
+ * The substrate's registrar: the settings **surface** (`settings.root`).
+ *
+ * Why the surface is the container's rather than the settings area's: every
+ * settings section renders into that surface, the Plugins manager's own section
+ * included (which rides the locked `app.builtins`), so the surface is part of
+ * the way back. Locking it costs exactly one thing — the ability to make the
+ * whole settings surface unreachable, which is the bug rather than a
+ * customisation. The **sections** stay `app.settings`' to toggle, so the
+ * drill-down loses nothing.
+ *
+ * This is the same move {@link registerManager} makes for the manager's
+ * section, one level along, and for the same reason: the route back is not
+ * owned by the area it returns from. Together they are what makes the manager
+ * reachable in both states that used to lose it — with the shell off (the
+ * container's own surface, `ui/MinimalHost.tsx`) and with `app.settings` off
+ * (this surface, which carries the manager's section).
+ *
+ * The entry is byte-for-byte what `registerSettingsBuiltins` used to register —
+ * the id, the slot, `SettingsShell` and `order: 10` — so the settings page
+ * renders exactly where it did, and resolution (order, then priority, then
+ * registration order) is unchanged.
  */
-const registerSubstrate = (): void => {};
+const registerSubstrate = (host: Host): void => {
+	host.ui.register({
+		id: "settings.root.shell",
+		slot: "settings.root",
+		component: SettingsShell,
+		order: 10,
+	});
+};
 
 /**
  * The manager's registrar: the Plugins section itself.
