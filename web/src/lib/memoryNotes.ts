@@ -2,9 +2,9 @@
  * The note store and its one mutator.
  *
  * Pure TypeScript: no Effect, no UI, no storage. Every write (add, update,
- * remove, revert — and the legacy tag path later) goes through `mutateList`,
- * the single mutator, so a tag-created note and a tool-created note are
- * indistinguishable afterwards.
+ * remove, revert) goes through `mutateList`, the single mutator — the shape
+ * seam that lets a later task route the legacy tag path (`lib/memory.ts`)
+ * through it so both writers converge on one shape.
  */
 
 /** Id allowlist. Own schema: ids guard a different thing than plugin ids or
@@ -14,7 +14,7 @@ export const MEMORY_ID_PATTERN: RegExp = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const MEMORY_HISTORY_DEPTH = 5;
 export const MEMORY_DELETED_CAP = 20;
 
-export interface MemoryNote {
+export interface MemoryEntry {
 	id: string;
 	content: string;
 	updatedAt: number;
@@ -23,7 +23,7 @@ export interface MemoryNote {
 }
 
 export type MemoryResult =
-	| { ok: true; notes: readonly MemoryNote[] }
+	| { ok: true; notes: readonly MemoryEntry[] }
 	| { ok: false; message: string };
 
 interface MutableNote {
@@ -34,17 +34,22 @@ interface MutableNote {
 	history: { content: string; at: number }[];
 }
 
-const toReadonly = (note: MutableNote): MemoryNote => ({
+/** A fresh copy of one entry. Nothing the caller can reach is the store's own
+ *  object, array or history entry, so a returned value is never a write path. */
+const copyEntry = (note: MemoryEntry): MemoryEntry => ({
 	id: note.id,
 	content: note.content,
 	updatedAt: note.updatedAt,
 	deletedAt: note.deletedAt,
-	history: note.history,
+	history: note.history.map((entry) => ({
+		content: entry.content,
+		at: entry.at,
+	})),
 });
 
 const fail = (message: string): MemoryResult => ({ ok: false, message });
 
-const ok = (notes: readonly MemoryNote[]): MemoryResult => ({
+const ok = (notes: readonly MemoryEntry[]): MemoryResult => ({
 	ok: true,
 	notes,
 });
@@ -54,7 +59,7 @@ const ok = (notes: readonly MemoryNote[]): MemoryResult => ({
  * transform to this function, which clones the input so it is never mutated.
  */
 const mutateList = (
-	notes: readonly MemoryNote[],
+	notes: readonly MemoryEntry[],
 	transform: (
 		draft: MutableNote[],
 	) => { notes: MutableNote[] } | { message: string },
@@ -71,16 +76,16 @@ const mutateList = (
 	}));
 	const result = transform(draft);
 	if ("message" in result) return fail(result.message);
-	return ok(result.notes.map(toReadonly));
+	return ok(result.notes.map(copyEntry));
 };
 
 const validId = (id: string): boolean => MEMORY_ID_PATTERN.test(id);
 
-const findIndex = (notes: readonly MemoryNote[], id: string): number =>
+const findIndex = (notes: readonly MemoryEntry[], id: string): number =>
 	notes.findIndex((note) => note.id === id);
 
 export const addMemory = (
-	notes: readonly MemoryNote[],
+	notes: readonly MemoryEntry[],
 	id: string,
 	content: string,
 	now: number,
@@ -88,7 +93,15 @@ export const addMemory = (
 	if (!validId(id)) {
 		return fail(`id "${id}" does not match ${MEMORY_ID_PATTERN.source}`);
 	}
-	if (findIndex(notes, id) !== -1) {
+	const existing = notes.find((note) => note.id === id);
+	if (existing) {
+		// A soft-deleted id is still taken, but the way out is restore, not
+		// update — so name it, or a model follows the wrong refusal.
+		if (existing.deletedAt !== undefined) {
+			return fail(
+				`id "${id}" was removed — use memory_revert to restore it, or pick another`,
+			);
+		}
 		return fail(
 			`id "${id}" already exists — use memory_update, or pick another`,
 		);
@@ -105,7 +118,7 @@ export const addMemory = (
 };
 
 export const updateMemory = (
-	notes: readonly MemoryNote[],
+	notes: readonly MemoryEntry[],
 	id: string,
 	content: string,
 	now: number,
@@ -137,7 +150,7 @@ export const updateMemory = (
 };
 
 export const removeMemory = (
-	notes: readonly MemoryNote[],
+	notes: readonly MemoryEntry[],
 	id: string,
 	now: number,
 ): MemoryResult => {
@@ -180,7 +193,7 @@ export const removeMemory = (
 };
 
 export const revertMemory = (
-	notes: readonly MemoryNote[],
+	notes: readonly MemoryEntry[],
 	id: string,
 	now: number,
 ): MemoryResult => {
@@ -211,9 +224,9 @@ export const revertMemory = (
 };
 
 export const listMemories = (
-	notes: readonly MemoryNote[],
+	notes: readonly MemoryEntry[],
 	includeDeleted: boolean = false,
-): readonly MemoryNote[] => {
-	if (includeDeleted) return [...notes];
-	return notes.filter((note) => note.deletedAt === undefined);
+): readonly MemoryEntry[] => {
+	if (includeDeleted) return notes.map(copyEntry);
+	return notes.filter((note) => note.deletedAt === undefined).map(copyEntry);
 };
