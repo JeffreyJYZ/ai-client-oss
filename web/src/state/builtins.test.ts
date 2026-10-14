@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
 import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
 import {
@@ -31,6 +31,7 @@ import {
 	makeBuiltinsStore,
 	startBuiltins,
 } from "@/state/builtins";
+import { setSettings } from "@/state/settings";
 import { minimalHostView } from "@/ui/MinimalHost";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
 import { SettingsShell } from "@/ui/Settings";
@@ -62,6 +63,12 @@ const ALL_TOOLS: readonly string[] = [
 // line from one test would otherwise be visible to the next.
 beforeEach(() => {
 	clearLog();
+	// `app.memory` reads the real settings store (`appMemorySettings`); make the
+	// assumption explicit rather than ambient so this suite is order-independent.
+	setSettings({ memoriesEnabled: true });
+});
+afterEach(() => {
+	setSettings({ memoriesEnabled: true });
 });
 
 interface Harness {
@@ -1525,5 +1532,29 @@ describe("the coalescing runner", () => {
 		}
 		expect(ids.ui).toContain("ui.root.layout");
 		expect(ids.tools).toEqual(ALL_TOOLS);
+	});
+});
+
+describe("memory tools follow the stored flag (explicit, not ambient)", () => {
+	test("memoriesEnabled off ⇒ the five are absent; on ⇒ present", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		setSettings({ memoriesEnabled: false });
+		await run(reconciler, services);
+		const off = registryIds(services);
+		expect(off.tools).toEqual(["fetch_url", "web_search"]);
+
+		setSettings({ memoriesEnabled: true });
+		await run(reconciler, services);
+		const on = registryIds(services);
+		expect(on.tools).toEqual(ALL_TOOLS);
 	});
 });

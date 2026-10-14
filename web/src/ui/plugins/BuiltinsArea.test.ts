@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
 import { BUILTIN_AREAS } from "@lib/plugins/areas";
 import {
@@ -24,6 +24,7 @@ import {
 	makeBuiltinsStore,
 	startBuiltins,
 } from "@/state/builtins";
+import { setSettings } from "@/state/settings";
 import { BUILTIN_CONTRIBUTIONS, builtinRows } from "@/ui/plugins/BuiltinsArea";
 
 /**
@@ -66,6 +67,11 @@ const makeStore = (initial: Settings = settingsDefaults()) => {
 
 /** The store's own snapshot, resolved before `start()` — this file's input. */
 const snapshot = (): BuiltinsSnapshot => getBuiltinsSnapshot();
+
+// `app.memory` reads the real settings store; make it explicit here too.
+beforeEach(() => {
+	setSettings({ memoriesEnabled: true });
+});
 
 /* -------------------------------------------------------------- the view-model */
 
