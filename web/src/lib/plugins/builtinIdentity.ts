@@ -147,7 +147,7 @@ export const BUILTIN_IDENTITIES = [
 		// its switch is reachable) and the five tools (only while
 		// `memoriesEnabled` is on, so "off" means absent from the registry).
 		description:
-			"The Memory settings section, and the five memory tools the model can call to add, update, remove, revert and list durable memories; with this off the section and every memory tool are gone.",
+			"The Memory settings section, the five memory tools, and the memory the model sends and records; with this off, all of it is gone.",
 		locked: false,
 	},
 	{
