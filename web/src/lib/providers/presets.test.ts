@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { anthropic } from "@lib/providers/anthropicMessages";
 import { chatcompletions } from "@lib/providers/chatCompletions";
-import { FETCH_URL_NAME, requestTools } from "@lib/providers/presets";
+import {
+	FETCH_URL_NAME,
+	PROVIDER_PRESETS,
+	requestTools,
+} from "@lib/providers/presets";
 import { responses } from "@lib/providers/responses";
 import type { SendCtx } from "@lib/providers/types";
 
@@ -186,5 +190,41 @@ describe("the assembled body is idempotent", () => {
 			expect(toolsOf(second), label).toEqual(toolsOf(first));
 			expect(namesOf(second), label).toEqual([FETCH_URL_NAME, "shout"]);
 		}
+	});
+});
+
+/**
+ * `https://opencode.ai/docs/go/`, "Endpoints": every Go model is served under
+ * this one prefix — the API family is the method path (`/chat/completions`,
+ * `/responses`, `/messages`), never a second base — and the page's own model
+ * list is `curl https://opencode.ai/inference/go/v1/models`. So the base URL is
+ * a single documented string, and "Fetch models" (which appends `/models`) is
+ * correct against it.
+ */
+const GO_BASE_URL = "https://opencode.ai/inference/go/v1";
+
+describe("the OpenCode Go preset points at the documented Go endpoint", () => {
+	const preset = PROVIDER_PRESETS.find((entry) => entry.id === "opencode-go");
+
+	test("its base URL is the one the Go docs give", () => {
+		expect(preset?.baseUrl).toBe(GO_BASE_URL);
+	});
+
+	test("it is not the undocumented /zen alias", () => {
+		// The preset shipped as `https://opencode.ai/zen/go/v1`, which the Go
+		// docs never mention (the Go page carries zero `zen/` paths), so a
+		// drift back to that shape fails here rather than at a user's button.
+		expect(preset?.baseUrl).not.toContain("/zen/");
+	});
+
+	test("the models path the app builds from it is the documented one", () => {
+		expect(`${preset?.baseUrl}/models`).toBe(`${GO_BASE_URL}/models`);
+	});
+
+	test("its default protocol is the open models' family", () => {
+		// Open models (GLM, Kimi, DeepSeek, MiMo, LongCat) are Chat Completions;
+		// the page's GPT/Grok entries are Responses and its Claude/Qwen ones
+		// Messages, which the Protocol dropdown selects over this same base.
+		expect(preset?.protocol).toBe("chatcompletions");
 	});
 });

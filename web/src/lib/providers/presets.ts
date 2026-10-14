@@ -345,6 +345,15 @@ export const requestTools = (
  * `${baseUrl}/models`, `${baseUrl}/messages`). `opencode-go`
  * covers the Go and Go Plus tiers — they share an endpoint and
  * differ only by subscription limits, so one row serves both.
+ *
+ * `openai-responses`/`openai-chat` share a base URL because OpenAI
+ * serves both families from one, and `opencode-go` is the same shape:
+ * its docs give **one** prefix for every Go model
+ * (https://opencode.ai/docs/go/, "Endpoints" — the family is the method
+ * path, `/chat/completions` vs `/responses` vs `/messages`), so its row
+ * is the Chat Completions family and the Protocol dropdown reaches the
+ * other two over the same base. The page's own model list is
+ * `${baseUrl}/models`, which is the path this app builds.
  */
 export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 	{
@@ -385,7 +394,7 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 	{
 		id: "opencode-go",
 		label: "OpenCode Go / Go Plus",
-		baseUrl: "https://opencode.ai/zen/go/v1",
+		baseUrl: "https://opencode.ai/inference/go/v1",
 		protocol: "chatcompletions",
 		tools: [],
 	},

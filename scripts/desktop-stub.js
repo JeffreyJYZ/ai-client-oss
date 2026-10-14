@@ -15,7 +15,9 @@
  * scripted SSE body (override with `window.__t25Script`, a list of body runs)
  * and `window.__t25ChatStreams` / `window.__t25Cancels` record what the app
  * sent; set `window.__t25Open = true` to leave a request open, so a stopped turn
- * and its `chat_stream_cancel` are observable.
+ * and its `chat_stream_cancel` are observable. `window.__t25Status` overrides
+ * the relayed status (default 200), so a probe's non-2xx line is provable
+ * through the real transport.
  *
  * Traps, all expected rather than bugs:
  * - With this stub the Tauri **db** adapter is the selected one and every `db_*`
@@ -120,7 +122,7 @@
 				// abandons it, so the cancel path is observable.
 				const open = window.__t25Open === true;
 				const queue = [
-					{ type: "status", status: 200 },
+					{ type: "status", status: window.__t25Status ?? 200 },
 					...(open ? script.slice(0, 1) : script).map((text) => ({
 						type: "chunk",
 						text,

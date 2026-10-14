@@ -1,5 +1,7 @@
 import type { HostServices } from "@lib/plugins/host";
 import { requireProvider } from "@lib/plugins/providers";
+import { chatHeaders } from "@lib/providers/send";
+import { type ChatTransport, chatTransport } from "@lib/providers/transport";
 import type { SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Option, Result } from "effect";
 
@@ -19,6 +21,28 @@ interface ModelsPayload {
 const describeCause = (cause: unknown): Effect.Effect<string> =>
 	Effect.sync(() => String(cause)).pipe(
 		Effect.catchCause(() => Effect.succeed("an unprintable cause")),
+	);
+
+/**
+ * A transport call whose failure stays in the `string` channel. A plugin
+ * supplies the request's headers and its probe body, so a header value whose
+ * own coercion throws makes `fetch` reject with **that** value; the web
+ * transport describes the rejection with `String`, which then throws out of
+ * its own `catch` frame and turns an isolated plugin fault into a **defect** —
+ * the silent reset the `string` channel exists to prevent, inherited by the
+ * probe the moment it moved onto the transport. `catchDefect` handles exactly
+ * that case and nothing else: a typed failure and an interrupt pass through
+ * untouched, so this cannot swallow a stopped turn.
+ */
+const transportCall = <A>(
+	call: Effect.Effect<A, string>,
+): Effect.Effect<A, string> =>
+	call.pipe(
+		Effect.catchDefect((defect) =>
+			describeCause(defect).pipe(
+				Effect.flatMap((detail) => Effect.fail(detail)),
+			),
+		),
 	);
 
 /**
@@ -53,10 +77,11 @@ const pluginCall = <A>(
 	});
 
 /**
- * `fetch` whose rejection is described without `String` throwing. The request's
- * `headers` are plugin-supplied (and so is the probe's body), so the rejection
- * reason can be a value whose own stringification throws — `Effect.tryPromise`'s
- * `catch` would then throw out of its own frame and defect the caller.
+ * `fetch` whose rejection is described without `String` throwing. The model
+ * list's `headers` are plugin-supplied, so the rejection reason can be a value
+ * whose own stringification throws — `Effect.tryPromise`'s `catch` would then
+ * throw out of its own frame and defect the caller. The probe no longer fetches
+ * directly (it rides the chat transport), so this is the list path's own seam.
  */
 const fetchDescribed = (
 	call: () => Promise<Response>,
@@ -78,6 +103,14 @@ const fetchDescribed = (
  * Anthropic provider sends `x-api-key` rather than a Bearer token. A
  * non-2xx response, a transport failure, or a throw from the plugin-supplied
  * `headers` becomes the `string` error channel.
+ *
+ * Deliberately the webview's own `fetch`, not the chat transport: a list is a
+ * `GET`, and the shell's streaming command is a `POST`; and this path needs no
+ * shell anyway, because OpenCode's models endpoint answers the browser's
+ * preflight (`OPTIONS` → 200, `access-control-allow-headers` naming
+ * `Content-Type, Authorization`), unlike its chat endpoint, which refuses it.
+ * The session header is not added here for the same reason: it is not on that
+ * allowed-headers list, so sending it would make the webview's preflight fail.
  */
 export const listModels = (
 	protocol: string,
@@ -118,20 +151,43 @@ export const listModels = (
 	});
 
 /**
+ * The session id a probe sends as `x-opencode-session`. A probe is not a
+ * conversation — it has no history to route or cache — but OpenCode's
+ * inference endpoints want a stable id on every request, and one constant is
+ * as stable as it gets. Deliberately not the conversation id: the probe runs
+ * outside any conversation, and inventing one would attribute a real
+ * conversation's cache to a ping.
+ */
+export const PROBE_SESSION_ID = "test-connection";
+
+/**
  * `POST ${baseUrl}${endpoint}` with a real generation that proves the selected
  * model answers. The probe body is **the protocol's own request shape**, built
  * by its own `buildRequest` from its template — never a hardcoded
  * chat-completions body, which mis-shaped every protocol but `responses` now
- * that protocols are runtime data. The response stream is never read — a 2xx is
- * enough, so the body is cancelled to release the connection. A non-2xx
- * response, a transport failure, or a throw from a plugin-supplied member
- * (`headers`, `buildRequest`) becomes the `string` error channel.
+ * that protocols are runtime data.
+ *
+ * The request rides {@link chatTransport} — the same abstraction and the same
+ * `isDesktop` choice the chat path uses — so on the desktop the shell makes it,
+ * and a host that refuses the webview's CORS preflight (OpenCode's chat
+ * endpoint) is reachable from the button. Headers are assembled by
+ * {@link chatHeaders}, so an OpenCode host gets the session header here exactly
+ * as a chat send does, and no other host gets it. The response body is never
+ * read — a 2xx is enough — so the request is released through the transport's
+ * own `cancel` rather than left open.
+ *
+ * A non-2xx response, a transport failure, or a throw from a plugin-supplied
+ * member (`headers`, `buildRequest`) becomes the `string` error channel.
+ *
+ * `transport` is the seam a test drives `nativeTransportWith(ipc)` through; the
+ * production path is the default, which is the rule itself.
  */
 export const testModel = (
 	protocol: string,
 	baseUrl: string,
 	apiKey: string | undefined,
 	model: string,
+	transport: ChatTransport = chatTransport,
 ): Effect.Effect<void, string, HostServices> =>
 	Effect.gen(function* () {
 		const provider = yield* requireProvider(protocol);
@@ -154,25 +210,21 @@ export const testModel = (
 			} satisfies SendCtx),
 		);
 
-		const response = yield* fetchDescribed(() =>
-			fetch(`${baseUrl}${provider.endpoint}`, {
-				method: "POST",
-				headers,
-				body: JSON.stringify(probe),
-			}),
+		const url = `${baseUrl}${provider.endpoint}`;
+		const response = yield* transportCall(
+			transport(
+				url,
+				chatHeaders(url, headers, PROBE_SESSION_ID),
+				JSON.stringify(probe),
+			),
 		);
 
 		if (!response.ok) {
-			const detail = yield* Effect.tryPromise({
-				try: () => response.text(),
-				catch: () => "",
-			});
+			const detail = yield* response.text;
 			return yield* Effect.fail(`${response.status}: ${detail}`);
 		}
 
-		yield* Effect.sync(() => {
-			void response.body?.cancel();
-		});
+		yield* response.cancel;
 	});
 
 /** The line a successful probe reports. */
@@ -210,8 +262,9 @@ export const probeConnection = (
 	baseUrl: string,
 	apiKey: string | undefined,
 	model: string,
+	transport: ChatTransport = chatTransport,
 ): Effect.Effect<string, never, HostServices> =>
-	testModel(protocol, baseUrl, apiKey, model).pipe(
+	testModel(protocol, baseUrl, apiKey, model, transport).pipe(
 		Effect.as(probeSucceeded(model)),
 		Effect.catchCause((cause) => Effect.succeed(probeFailure(protocol, cause))),
 	);
