@@ -280,8 +280,13 @@ describe("memoryNotes", () => {
 		const first = listed[0];
 		if (first) first.content = "tampered";
 		expect(store[0]?.content).toBe("content");
-		// The default (filtered) path is a fresh array too.
-		expect(listMemories(store)).not.toBe(store);
+		// The default (filtered) path must hand back fresh entries too: asserting only
+		// array freshness here let a mutation that drops `map(copyEntry)` from this
+		// branch pass all 16 tests (found by the fix round's re-review).
+		const filtered = listMemories(store);
+		expect(filtered).not.toBe(store);
+		expect(filtered[0]).not.toBe(store[0]);
+		expect(filtered[0]?.history).not.toBe(store[0]?.history);
 	});
 
 	test("listMemories filters deleted by default", () => {
