@@ -39,6 +39,10 @@ jobs:
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install web dependencies
+        working-directory: web
+        run: bun install --frozen-lockfile
+
       - name: Bump version, commit and tag
         id: bump
         shell: bash
@@ -48,7 +52,11 @@ jobs:
           tag="desktop-v${version}"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add web/package.json web/src-tauri/tauri.conf.json web/src-tauri/Cargo.toml web/src-tauri/Cargo.lock
+          # `web/src/docs/reference.generated.ts` pins `appVersion` to
+          # `web/package.json` (reference.test.ts), so a bump that skips this
+          # leaves the default branch red and fails CI on the bump commit.
+          (cd web && bun run docs)
+          git add web/package.json web/src-tauri/tauri.conf.json web/src-tauri/Cargo.toml web/src-tauri/Cargo.lock web/src/docs/reference.generated.ts
           git commit -m "chore(release): desktop v${version}"
           git push origin "HEAD:${{ github.event.repository.default_branch }}"
           git tag "${tag}"
