@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
 import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
 import {
+	areaEnabled,
 	contributionEnabled,
 	makeBuiltinsReconciler,
 } from "@lib/plugins/builtin";
@@ -27,6 +28,7 @@ import {
 	makeBuiltinsStore,
 	startBuiltins,
 } from "@/state/builtins";
+import { PluginsSection } from "@/ui/plugins/PluginsSection";
 
 /**
  * The built-in store's semantics. No DOM: the store is a module snapshot plus a
@@ -531,9 +533,11 @@ describe("reconcile", () => {
 		await run(reconciler, services);
 		const all = registryIds(services);
 
-		// Every toggleable area contributes something; the locked core registers
-		// nothing of its own in this task. Read each area alone, through the same
-		// reconciler, and union the results.
+		// Every area with a registrar contributes something, the manager's locked
+		// area included (Task 5a moved `settings.section.plugins` into it);
+		// `app.substrate` is the one lock that contributes nothing of its own —
+		// the container exists to host a layout and owns no entry. Read each area
+		// alone, through the same reconciler, and union the results.
 		const union: Record<RegistryName, Set<string>> = {
 			ui: new Set(),
 			commands: new Set(),
@@ -546,10 +550,10 @@ describe("reconcile", () => {
 			await run(reconciler, services);
 			const alone = registryIds(services);
 			const seen = REGISTRIES.flatMap((name) => alone[name]);
-			if (area.locked === true) {
+			if (area.id === "app.substrate") {
 				expect(
 					seen,
-					`${area.id} is locked and registers nothing of its own`,
+					"the substrate container registers nothing of its own",
 				).toEqual([]);
 			} else {
 				expect(
@@ -876,6 +880,92 @@ describe("reconcile", () => {
 });
 
 /* ---------------------------------------------------- per-contribution toggles */
+
+/* ----------------------------------------------------- the manager's home */
+
+/**
+ * Task 5a: the Plugins manager section (`settings.section.plugins`) must ride
+ * the locked `app.builtins` area, not the toggleable `app.settings` one.
+ *
+ * The assertions are the "way back" invariant the spec's success criterion 3
+ * names: turning the whole Settings area off may remove every Settings
+ * contribution, but not the manager — and a reconcile must register it as the
+ * manager's own area, not as a survivor of `app.settings`.
+ */
+
+describe("the manager rides the locked core", () => {
+	const reconcilerOverRealAreas = () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+		return { services, enabled, reconciler };
+	};
+
+	test("turning app.settings off leaves the Plugins manager registered", async () => {
+		const { services, enabled, reconciler } = reconcilerOverRealAreas();
+
+		enabled.all();
+		await run(reconciler, services);
+		expect(registryIds(services).ui).toContain("settings.section.plugins");
+
+		enabled.set("app.settings", false);
+		await run(reconciler, services);
+		const ui = registryIds(services).ui;
+
+		// The way back survives its neighbour area going off.
+		expect(ui).toContain("settings.section.plugins");
+		// The Settings area's own entries are gone — the manager is not simply
+		// "the area stayed on".
+		expect(ui).not.toContain("settings.section.providers");
+		expect(ui).not.toContain("settings.root.shell");
+		expect(ui).not.toContain("app.sidebar.chats");
+		// And it is registered by the manager's own (locked) area.
+		expect(idsOf(Effect.runSync(services.ui.ownedBy("app.builtins")))).toEqual([
+			"settings.section.plugins",
+		]);
+	});
+
+	test("with everything on, the manager is the last settings.sections entry and the same component", async () => {
+		const { services, enabled, reconciler } = reconcilerOverRealAreas();
+
+		enabled.all();
+		await run(reconciler, services);
+		const sections = Effect.runSync(services.ui.entries()).filter(
+			(entry) => entry.slot === "settings.sections",
+		);
+
+		// The move kept the order: the nine Settings sections, then the manager.
+		expect(sections.map((entry) => entry.id)).toEqual([
+			"settings.section.notices",
+			"settings.section.providers",
+			"settings.section.provider-editor",
+			"settings.section.profiles",
+			"settings.section.profile-editor",
+			"settings.section.web-search",
+			"settings.section.memory",
+			"settings.section.backup",
+			"settings.section.updates",
+			"settings.section.plugins",
+		]);
+		// Identity, not a wrapper: the manager's own component.
+		expect(sections.at(-1)?.component).toBe(PluginsSection);
+	});
+});
+
+describe("areaEnabled", () => {
+	test("an area is on only when its flag is exactly true", () => {
+		expect(areaEnabled({ "app.shell": true }, "app.shell")).toBe(true);
+		expect(areaEnabled({ "app.shell": false }, "app.shell")).toBe(false);
+		// The one input where this rule differs from `contributionEnabled`'s
+		// absent-means-on form — pinned so a drift to that form fails here.
+		expect(areaEnabled({}, "app.shell")).toBe(false);
+	});
+});
 
 /**
  * Task 4's filter: the real reconciler over the real `BUILTIN_AREAS`, the real

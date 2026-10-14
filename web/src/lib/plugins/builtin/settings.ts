@@ -1,6 +1,5 @@
 import type { Host } from "@lib/plugins/host";
 import { ConversationList, NewChatButton } from "@/ui/ConversationList";
-import { PluginsSection } from "@/ui/plugins/PluginsSection";
 import {
 	BackupSection,
 	MemorySection,
@@ -16,7 +15,7 @@ import {
 
 /**
  * The settings and sidebar area's built-in contributions (spec §4/§12): the
- * Settings page's chrome (`settings.root`), its ten sections
+ * Settings page's chrome (`settings.root`), its nine sections
  * (`settings.sections`), and the conversation sidebar (`app.sidebar` +
  * `app.sidebar.actions`). Registered through the `Host` — the same public API a
  * plugin uses — so each region can be reordered, hidden or replaced.
@@ -26,9 +25,11 @@ import {
  * a plugin) must be able to slot itself between two built-ins, not only after
  * all of them. `settings.nav` carries no built-in — it is a seam for plugins.
  *
- * The ten `settings.sections` entries, in render order: the page's warning
+ * The nine `settings.sections` entries, in render order: the page's warning
  * banners, Providers, the provider editor, Profiles, the profile editor, Web
- * search, Memory, Backup, Updates, Plugins.
+ * search, Memory, Backup, Updates. The tenth, Plugins, does **not** live here:
+ * it rides the locked `app.builtins` area (`areas.ts` `registerManager`), so
+ * turning this whole area off cannot take away the way back.
  */
 export const registerSettingsBuiltins = (host: Host): void => {
 	host.ui.register({
@@ -91,12 +92,6 @@ export const registerSettingsBuiltins = (host: Host): void => {
 		slot: "settings.sections",
 		component: UpdatesSection,
 		order: 90,
-	});
-	host.ui.register({
-		id: "settings.section.plugins",
-		slot: "settings.sections",
-		component: PluginsSection,
-		order: 100,
 	});
 
 	host.ui.register({

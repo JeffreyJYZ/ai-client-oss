@@ -102,6 +102,25 @@ export const contributionEnabled = (
 ): boolean => contributions[areaId]?.[contributionId] !== false;
 
 /**
+ * Whether an area is **enabled**, given the resolved area flags — the
+ * production rule in one place, exported so the wiring and the tests call the
+ * same function rather than a copy of it (a copy lets the operator silently
+ * change with every test still green), exactly as {@link contributionEnabled}
+ * does one level down.
+ *
+ * The map it reads is the store's **resolved** `builtins` (`state/builtins.ts`
+ * `resolve`), which fills an explicit flag for every identity, so `=== true`
+ * and the contributions' absent-means-on form agree on every value it can
+ * carry; the strict form is stated because this helper answers "is the area's
+ * resolved flag on?", and a partial map is pinned in the tests as off so a
+ * drift to the other form fails.
+ */
+export const areaEnabled = (
+	builtins: Readonly<Record<string, boolean>>,
+	areaId: string,
+): boolean => builtins[areaId] === true;
+
+/**
  * An inert handle for a contribution that is off. Returned in place of the real
  * one so a registrar that disposes what it registered cannot tell the
  * difference — a skipped registration leaves no trace by construction.
@@ -320,7 +339,7 @@ export const makeBuiltinsReconciler = (
 
 const reconciler = makeBuiltinsReconciler({
 	areas: BUILTIN_AREAS,
-	enabledOf: (areaId) => getBuiltinsSnapshot().builtins[areaId] === true,
+	enabledOf: (areaId) => areaEnabled(getBuiltinsSnapshot().builtins, areaId),
 	// The one production rule, not a copy of it. An id no registry holds is
 	// simply never asked about, so stale state is inert.
 	contributionEnabledOf: (areaId, contributionId) =>

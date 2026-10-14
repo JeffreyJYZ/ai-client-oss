@@ -81,13 +81,12 @@ export const BUILTIN_IDENTITIES = [
 	{
 		id: "app.settings",
 		label: "Settings",
-		// The Plugins manager section rides inside this area today (registered
-		// inline by `registerSettingsBuiltins`), so the sentence names it. Task 5
-		// extracts it into `app.builtins` — a settled controller ruling, not an
-		// option, because otherwise turning this area off would take away the way
-		// back, which the spec forbids.
+		// The Plugins manager rides `app.builtins` (the locked way back), not
+		// this area — see `areas.ts` `registerManager` — so this sentence must
+		// not name it: turning Settings off removes every Settings section, and
+		// the manager is not one of them.
 		description:
-			"The Settings page, its sections, the conversation sidebar and the Plugins manager section that still rides inside the page.",
+			"The Settings page, its sections and the conversation sidebar.",
 		locked: false,
 	},
 	{
@@ -132,11 +131,10 @@ export const BUILTIN_IDENTITIES = [
 	{
 		id: "app.builtins",
 		label: "Plugins manager",
-		// The manager's registration is settled to move here in Task 5, from the
-		// inline `settings.section.plugins` inside `registerSettingsBuiltins`.
-		// Until that lands this lock protects nothing at contribution level: the
-		// manager still rides `app.settings`, so turning that area off takes the
-		// manager with it.
+		// The registrar (`areas.ts` `registerManager`) registers
+		// `settings.section.plugins` under this id, so the lock protects the
+		// manager at contribution level: turning any other area off, the
+		// Settings area included, cannot take away the way back.
 		description:
 			"The Plugins manager section; it stays on because it is the way back to this list.",
 		locked: true,

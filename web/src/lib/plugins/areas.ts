@@ -13,6 +13,7 @@ import {
 	type BuiltinIdentity,
 } from "@lib/plugins/builtinIdentity";
 import type { Host } from "@lib/plugins/host";
+import { PluginsSection } from "@/ui/plugins/PluginsSection";
 
 /**
  * The built-in area table (spec "Units and identities"): one named, individually
@@ -57,19 +58,30 @@ export interface BuiltinArea extends BuiltinIdentity {
 const registerSubstrate = (): void => {};
 
 /**
- * The manager's registrar. Deliberately empty **until Task 5**, which extracts
- * the Plugins section's registration into it.
+ * The manager's registrar: the Plugins section itself.
  *
- * The extraction is a settled controller ruling, not an option: today the
- * manager's registration is one inline `host.ui.register({ id:
- * "settings.section.plugins", … })` inside `registerSettingsBuiltins`
- * (`builtin/settings.ts`), so it rides `app.settings` — the area that is
- * toggleable — and this area's lock therefore protects nothing at contribution
- * level. Until Task 5 moves that registration here, turning `app.settings` off
- * takes the manager with it, and the spec's "there is always a way back" would
- * depend on the UI alone.
+ * The registration was extracted here from `registerSettingsBuiltins`
+ * (`builtin/settings.ts`), where one inline `host.ui.register({ id:
+ * "settings.section.plugins", … })` made the manager ride `app.settings` — the
+ * toggleable area. Under that area the lock protected nothing at contribution
+ * level: turning `app.settings` off took the manager with it, so the spec's
+ * "there is always a way back" depended on the UI alone. Registering it here
+ * puts it under the locked `app.builtins` area, whose gated host is the one the
+ * locked core actually holds.
+ *
+ * The id, slot, component and `order: 100` are byte-for-byte what
+ * `registerSettingsBuiltins` registered, so the section renders last in
+ * `settings.sections`, as the same `PluginsSection` component, exactly where it
+ * was.
  */
-const registerManager = (): void => {};
+const registerManager = (host: Host): void => {
+	host.ui.register({
+		id: "settings.section.plugins",
+		slot: "settings.sections",
+		component: PluginsSection,
+		order: 100,
+	});
+};
 
 /**
  * One registrar per area id. Typed by {@link BuiltinId}, so adding an identity
