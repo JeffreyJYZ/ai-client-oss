@@ -12,7 +12,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 ## Search
 
-- **`rg`, always scoped to a path — never `grep`.** The `grep` alias excludes `.git`/VCS but not `node_modules`, so an unscoped recursive grep walks all deps. Scope it (`rg <pat> web/src`) or exclude (`rg -g '!node_modules' <pat> .`).
+- **`rg`, always scoped to a path — never `grep`, and never the `grep` tool.** The `grep` alias excludes `.git`/VCS but not `node_modules`, so an unscoped recursive grep walks all deps. Scope it (`rg <pat> web/src`) or exclude (`rg -g '!node_modules' <pat> .`).
 
 ## Fonts
 
@@ -33,7 +33,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 ## Linting
 
 - **Effect checking = two layers, both wired.** Biome GritQL is syntactic (no types); the Effect language service is type-aware.
-- **Biome GritQL:** `biome-plugins/*.grit` ban `async`/`await`/`throw`/`try-catch`/`new Promise`. Wired in `biome.jsonc` `plugins`, each scoped `"includes": ["**/web/src/**"]` — the glob **needs the leading `**/`** (`web/src/**` matches nothing). Suppress per line: `// biome-ignore lint/plugin/<rule>: reason` (used for `main.tsx`'s bootstrap throw).
+- **Biome GritQL:** `biome-plugins/*.grit` ban `async`/`await`/`throw`/`try-catch`/`new Promise`. Wired in `biome.jsonc` `plugins`, each scoped `"includes": ["**/web/src/**"]` — the glob **needs the leading `**/`** (`web/src/**` **silently** matches nothing). Suppress per line: `// biome-ignore lint/plugin/<rule>: reason` (used for `main.tsx`'s bootstrap throw).
 - **`@biomejs/biome` is a `web` devDependency, pinned exactly to the `biome.jsonc` `$schema` version** — `lint`/`fix` call bare `biome`, which resolves only if installed. A global `~/.bun/bin/biome` hides the omission; the release workflow's `beforeBuildCommand` (`bun run build`) then dies `biome: command not found` (exit 127). Pinned (not `^`) because a formatter bump can reformat the whole tree.
 - **Effect language service:** `@effect/language-service` in `web/tsconfig.app.json` `compilerOptions.plugins`. Headless: `bunx effect-language-service diagnostics --project tsconfig.app.json --format text` (catches `floatingEffect`, `missingEffectContext`, `missingReturnYieldStar`; exits 1 on findings). Wired into `web` `lint` — `biome check . && effect-language-service diagnostics --project tsconfig.app.json` — so `build` runs it. For CI/`tsc`: `effect-language-service patch`. Add rules: `effect-language-service config`.
 - **Gotcha:** Biome `correctness/useYield` errors on a trivial `Effect.gen(function* () { return x })` with no `yield*` — use `Effect.succeed`/`Effect.sync` for no-yield effects.
