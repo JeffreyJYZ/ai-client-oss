@@ -193,7 +193,7 @@ Pure functions over an immutable list: one private mutator that every operation 
 
 **Type consistency:** `MemoryEntry`, `MemoryResult` and the five operation names are defined once in T1 and used verbatim in T2–T6; `MEMORY_ID_PATTERN` is T1's alone; the tool names in T3 match those in T6's assertions. (`db/types.ts` keeps its own legacy `MemoryNote` for `{id, text, createdAt, source}` — a different type, deliberately not the same name.)
 
-**Review Focus:** all five lines have their test in the named task (1 → T3, 2 → T4, 3 → T2, 4 → T5, 5 → T1).
+**Review Focus:** all five lines have their test in the named task (1 → T3, 2 → T4, 3 → T2, 4 → T5, 5 → T4 — moved off T1, which could not make it fail).
 
 **Proportion:** six tasks, one test cycle each; the spec is the argument, this is the decision list.
 
