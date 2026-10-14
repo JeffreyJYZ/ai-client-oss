@@ -24,9 +24,10 @@ const isTestModule = (file: string): boolean =>
 	file.includes(".test.") || file.includes(".spec.");
 
 /**
- * A registrar is a named export matching `register…Builtins`. The aggregator
- * `registerBuiltins` deliberately does not match: `.+` requires the area word
- * between `register` and `Builtins`.
+ * A registrar is a named export matching `register…Builtins`. `.+` requires the
+ * area word between `register` and `Builtins`, so a shared aggregator cannot be
+ * mistaken for one — and there is no aggregator any more: `builtin/index.ts`
+ * reconciles through this table rather than exporting a `registerBuiltins`.
  */
 const REGISTRAR_NAME = /^register.+Builtins$/;
 

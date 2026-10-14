@@ -52,7 +52,7 @@ export interface BuiltinsSnapshot {
 	 * follow the same gate as its other controls.
 	 */
 	readonly enabled: boolean;
-	/** One entry per area in {@link BUILTIN_AREAS}; absent means on. */
+	/** One entry per area in {@link BUILTIN_IDENTITIES}; absent means on. */
 	readonly builtins: Readonly<Record<string, boolean>>;
 	/**
 	 * The recorded per-contribution overrides, area → contribution id → on. An

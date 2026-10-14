@@ -1,10 +1,21 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
+import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
+import { makeBuiltinsReconciler } from "@lib/plugins/builtin";
 import {
 	BUILTIN_IDENTITIES,
 	LOCKED_BUILTIN_IDS,
 } from "@lib/plugins/builtinIdentity";
+import { PluginFault } from "@lib/plugins/errors";
+import {
+	type Host,
+	HostLayer,
+	HostServices,
+	type HostServicesShape,
+	makeHost,
+} from "@lib/plugins/host";
 import { clearLog, getLogSnapshot } from "@lib/plugins/log";
+import { Effect } from "effect";
 import {
 	type BuiltinsDeps,
 	type BuiltinsSnapshot,
@@ -168,7 +179,7 @@ describe("defaults and unknown ids", () => {
 describe("the locked core", () => {
 	test("the locked set is the substrate and the manager — pinned literally", () => {
 		// A literal, not a re-derivation: recomputing `LOCKED_BUILTIN_IDS` from
-		// `BUILTIN_AREAS` would compare an expression with itself, so a third
+		// `BUILTIN_IDENTITIES` would compare an expression with itself, so a third
 		// locked area could appear silently.
 		expect(LOCKED_BUILTIN_IDS).toEqual(["app.substrate", "app.builtins"]);
 	});
@@ -414,5 +425,317 @@ describe("the snapshot React reads", () => {
 
 		h.write({ pluginsEnabled: false });
 		expect(h.store.getBuiltinsSnapshot().enabled).toBe(false);
+	});
+});
+
+/* ----------------------------------------------------------------- reconcile */
+
+/**
+ * Task 3's integration tests: the real `makeBuiltinsReconciler`, the real
+ * `BUILTIN_AREAS` (so the registrars under `builtin/**` actually run), the real
+ * `makeHost` over a real `HostLayer`, and the real registries — only the
+ * enabled-state source is a harness, so nothing here is exercised against a
+ * fake of the thing under test.
+ *
+ * The tests read the registries by id rather than by owner: `registry.add`
+ * replaces an entry with the same id **in place**, so an id set is what the
+ * reconcile actually controls. The "off empties it" half of the toggle test is
+ * therefore load-bearing — a reconcile that registered without closing would
+ * leave the ids standing and fail it.
+ */
+
+/** The registries a built-in area can register into, as this test reads them. */
+const REGISTRIES = ["ui", "commands", "tools", "providers", "themes"] as const;
+type RegistryName = (typeof REGISTRIES)[number];
+type RegistryIds = Readonly<Record<RegistryName, readonly string[]>>;
+
+type Reconciler = ReturnType<typeof makeBuiltinsReconciler>;
+
+/** A fresh set of the layer's registries and theme core, per test. */
+const makeServices = (): HostServicesShape =>
+	Effect.runSync(HostServices.pipe(Effect.provide(HostLayer)));
+
+const idsOf = (entries: readonly { readonly id: string }[]): string[] =>
+	entries.map((entry) => entry.id);
+
+/** Every relevant registry's ids, in resolution order. */
+const registryIds = (services: HostServicesShape): RegistryIds => ({
+	ui: idsOf(Effect.runSync(services.ui.entries())),
+	commands: idsOf(Effect.runSync(services.commands.entries())),
+	tools: idsOf(Effect.runSync(services.tools.entries())),
+	providers: idsOf(Effect.runSync(services.providers.entries())),
+	themes: idsOf(Effect.runSync(services.themes.entries())),
+});
+
+/**
+ * The enabled-state source one reconciler reads. Mutable on purpose: the same
+ * reconciler instance reconciles across many states, so its close-first half is
+ * the one under test (a second instance would close nothing).
+ */
+const makeEnabled = () => {
+	const disabled = new Set<string>();
+	return {
+		enabledOf: (id: string): boolean => !disabled.has(id),
+		set: (id: string, on: boolean): void => {
+			if (on) disabled.delete(id);
+			else disabled.add(id);
+		},
+		/** Everything off except `id`. */
+		only: (id: string): void => {
+			disabled.clear();
+			for (const area of BUILTIN_AREAS) {
+				if (area.id !== id) disabled.add(area.id);
+			}
+		},
+		all: (): void => {
+			disabled.clear();
+		},
+	};
+};
+
+const run = (
+	reconciler: Reconciler,
+	services: HostServicesShape,
+): Promise<void> => Effect.runPromise(reconciler.reconcile(services));
+
+describe("reconcile", () => {
+	test("with everything on, every area's contributions are registered", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		const all = registryIds(services);
+
+		// Every toggleable area contributes something; the locked core registers
+		// nothing of its own in this task. Read each area alone, through the same
+		// reconciler, and union the results.
+		const union: Record<RegistryName, Set<string>> = {
+			ui: new Set(),
+			commands: new Set(),
+			tools: new Set(),
+			providers: new Set(),
+			themes: new Set(),
+		};
+		for (const area of BUILTIN_AREAS) {
+			enabled.only(area.id);
+			await run(reconciler, services);
+			const alone = registryIds(services);
+			const seen = REGISTRIES.flatMap((name) => alone[name]);
+			if (area.locked === true) {
+				expect(
+					seen,
+					`${area.id} is locked and registers nothing of its own`,
+				).toEqual([]);
+			} else {
+				expect(
+					seen.length,
+					`${area.id} contributes at least one entry`,
+				).toBeGreaterThan(0);
+			}
+			for (const name of REGISTRIES) {
+				for (const id of alone[name]) union[name].add(id);
+			}
+		}
+
+		enabled.all();
+		await run(reconciler, services);
+		const registered = registryIds(services);
+
+		// Everything on holds exactly the union of what each area contributes.
+		for (const name of REGISTRIES) {
+			expect(new Set(registered[name]), `${name} ids`).toEqual(union[name]);
+			expect(registered[name].length, `${name} count`).toBe(all[name].length);
+		}
+
+		// Concrete anchors, one per registry the app's own areas fill.
+		expect(registered.ui).toContain("ui.root.layout");
+		expect(registered.tools).toEqual(["fetch_url", "web_search"]);
+		expect(registered.providers).toEqual(
+			expect.arrayContaining(["anthropic", "responses", "chatcompletions"]),
+		);
+		expect(registered.themes).toEqual(["app.theme.dark"]);
+		expect(registered.commands).toContain("app.command.palette");
+	});
+
+	test("disabling one area empties exactly that area's registrations", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		const all = registryIds(services);
+
+		// Guard against a vacuous pass: the additivity below (left + alone = all)
+		// would hold trivially if everything registered nothing. Every registry
+		// has entries with everything on, so there is something to remove.
+		for (const name of REGISTRIES) {
+			expect(all[name].length, `${name} has entries to remove`).toBeGreaterThan(
+				0,
+			);
+		}
+
+		for (const area of BUILTIN_AREAS) {
+			enabled.only(area.id);
+			await run(reconciler, services);
+			const alone = registryIds(services);
+
+			// Each toggleable area contributes something, so "what that area
+			// alone contributes" is a real remainder, not an empty set.
+			if (area.locked !== true) {
+				expect(
+					REGISTRIES.flatMap((name) => alone[name]).length,
+					`${area.id} contributes something to remove`,
+				).toBeGreaterThan(0);
+			}
+
+			enabled.all();
+			enabled.set(area.id, false);
+			await run(reconciler, services);
+			const without = registryIds(services);
+
+			for (const name of REGISTRIES) {
+				// What is left plus what that one area contributes is everything,
+				// with no overlap: disabling it removed exactly its own entries and
+				// touched no other area's.
+				expect(
+					without[name].length + alone[name].length,
+					`${area.id} in ${name}: sizes add`,
+				).toBe(all[name].length);
+				expect(
+					new Set([...without[name], ...alone[name]]),
+					`${area.id} in ${name}: union is everything`,
+				).toEqual(new Set(all[name]));
+			}
+		}
+
+		// The direct case, for the smallest surface: disabling tools empties the
+		// tools registry and leaves `ui` untouched.
+		enabled.all();
+		enabled.set("app.tools", false);
+		await run(reconciler, services);
+		const direct = registryIds(services);
+		expect(direct.tools).toEqual([]);
+		expect(direct.ui).toEqual(all.ui);
+	});
+
+	test("off → on → off → on leaves no duplicates", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		const baseline = registryIds(services);
+
+		const logged = spyOn(console, "log");
+		try {
+			enabled.set("app.tools", false);
+			await run(reconciler, services);
+			expect(registryIds(services).tools, "off empties the area").toEqual([]);
+
+			enabled.set("app.tools", true);
+			await run(reconciler, services);
+			expect(registryIds(services), "on restores it exactly").toEqual(baseline);
+
+			enabled.set("app.tools", false);
+			await run(reconciler, services);
+			expect(registryIds(services).tools, "off again empties it").toEqual([]);
+
+			enabled.set("app.tools", true);
+			await run(reconciler, services);
+			expect(registryIds(services), "on again restores it exactly").toEqual(
+				baseline,
+			);
+		} finally {
+			logged.mockRestore();
+		}
+
+		// One live scope per enabled area, not one per toggle: every scope the
+		// previous reconcile opened was closed.
+		expect(reconciler.live().length).toBe(BUILTIN_AREAS.length);
+
+		// A reconcile that registered over a live registration makes the registry
+		// log a refusal ("already holds a contribution" / "already registered" /
+		// "already bound"); the cycle logged none.
+		const faults = logged.mock.calls
+			.flat()
+			.filter((value): value is PluginFault => value instanceof PluginFault)
+			.map((fault) => fault.detail);
+		expect(faults.filter((detail) => detail.includes("already"))).toEqual([]);
+	});
+
+	test("a register that throws leaves the previous registrations intact", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		let failing = false;
+
+		// The real table, with the tools area swapped for one that registers a
+		// contribution and then throws when `failing` — the "registered
+		// something, then broke" state the rollback must undo.
+		const areas: readonly BuiltinArea[] = BUILTIN_AREAS.map((area) =>
+			area.id !== "app.tools"
+				? area
+				: {
+						...area,
+						register: (host: Host): void => {
+							if (!failing) {
+								area.register(host);
+								return;
+							}
+							host.ui.register({
+								id: "test.partial",
+								slot: "app.header.actions",
+								component: () => null,
+							});
+							throw new Error("boom");
+						},
+					},
+		);
+
+		const reconciler = makeBuiltinsReconciler({
+			areas,
+			enabledOf: enabled.enabledOf,
+			makeHost,
+		});
+		enabled.all();
+		await run(reconciler, services);
+		const baseline = registryIds(services);
+		expect(baseline.tools).toEqual(["fetch_url", "web_search"]);
+
+		clearLog();
+		failing = true;
+		await run(reconciler, services);
+
+		const after = registryIds(services);
+		// The failed area registered nothing: its one partial contribution was
+		// rolled back with its scope rather than left behind.
+		expect(after.tools).toEqual([]);
+		expect(after.ui).not.toContain("test.partial");
+		// Every other area is intact.
+		expect(after.ui).toEqual(baseline.ui);
+		expect(after.commands).toEqual(baseline.commands);
+		expect(after.providers).toEqual(baseline.providers);
+		expect(after.themes).toEqual(baseline.themes);
+
+		// The failure named the area it belonged to.
+		const messages = getLogSnapshot()
+			.map((entry) => entry.message)
+			.join("\n");
+		expect(messages).toContain("app.tools");
 	});
 });
