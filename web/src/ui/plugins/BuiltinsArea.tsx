@@ -81,6 +81,16 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 		"composer.actions.send",
 	],
 	"app.overlay": ["overlay.toasts", "overlay.modal"],
+	// A tool's key is its wire name, exactly as for `app.tools`; the five are
+	// registered only while memory is on, so the gate and this catalog agree
+	// about what the area contributes.
+	"app.memory": [
+		"memory_add",
+		"memory_update",
+		"memory_remove",
+		"memory_revert",
+		"memory_list",
+	],
 	"app.settings": [
 		"settings.section.notices",
 		"settings.section.providers",
