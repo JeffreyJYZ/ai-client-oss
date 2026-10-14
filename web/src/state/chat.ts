@@ -358,8 +358,9 @@ const appendMarker = (
  * generated id **and** mirrors the same dedupe decision into the legacy
  * `memories` array. The malformed (unterminated) block `extractMemories`
  * dropped is logged **here**, once, where the reply is stored — never on the
- * streaming render path, which would fire per frame. A no-op when the reply
- * carried none or the feature is off.
+ * streaming render path, which would fire per frame. The malformed-reply
+ * diagnostic is emitted before those guards, so it reports even when the reply
+ * carried no block or memory is off; only the store write is then skipped.
  */
 const commitMemories = (extracted: ExtractedMemories): void => {
 	for (const line of memoryLogLines(extracted)) {

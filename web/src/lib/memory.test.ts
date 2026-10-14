@@ -123,8 +123,15 @@ describe("the tag path routes through the one mutator", () => {
 		if (!tagNote) return;
 		// The generated id, not a model choice.
 		expect(tagNote.id).toMatch(/^memory-[0-9a-f-]{36}$/);
-		// Modulo the id, the two entries are deep-equal: no field either way.
-		expect({ ...tagNote, id: "editor-theme" }).toEqual(toolCreated.notes[0]);
+		// The generated id, checked above: now pin every other field by hand, so a
+		// rename, a shape drift, or a stray extra field fails this half.
+		expect(tagNote).toEqual({
+			id: tagNote.id,
+			content,
+			updatedAt: NOW,
+			history: [],
+			deletedAt: undefined,
+		});
 		// The legacy mirror carries the same generated id and text.
 		expect(recorded.memories).toHaveLength(1);
 		expect(recorded.memories[0]?.id).toBe(tagNote.id);
@@ -199,5 +206,31 @@ describe("the tag path routes through the one mutator", () => {
 		);
 		expect(merged.map((n) => n.text)).toEqual(["kept", "fresh"]);
 		expect(merged[0]?.id).toBe("n-1");
+	});
+
+	test("the tag path dedupes against the live store, not only the mirror", () => {
+		const content = "the user prefers dark editors";
+		const toolCreated = addMemory([], "editor-theme", content, NOW);
+		expect(toolCreated.ok).toBe(true);
+		if (!toolCreated.ok) return;
+		const notes = toolCreated.notes;
+		const recorded = recordMemories([], notes, [content.toUpperCase()], NOW);
+		expect(recorded.notes).toHaveLength(notes.length);
+		expect(
+			memoryPrompt(recorded.notes).match(new RegExp(content, "g"))?.length ?? 0,
+		).toBe(1);
+	});
+
+	test("stores differ past the legacy cap by design", () => {
+		const legacy = Array.from({ length: MAX_MEMORY_NOTES }, (_, i) => ({
+			id: `old-${i}`,
+			text: `old note ${i}`,
+			createdAt: i,
+			source: "model" as const,
+		}));
+		const notes = [live("a", "alpha"), live("b", "beta"), live("c", "gamma")];
+		const recorded = recordMemories(legacy, notes, ["a fresh fact"], NOW);
+		expect(recorded.memories).toHaveLength(MAX_MEMORY_NOTES);
+		expect(recorded.notes).toHaveLength(notes.length + 1);
 	});
 });

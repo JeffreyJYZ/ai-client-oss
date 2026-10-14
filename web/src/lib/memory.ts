@@ -128,10 +128,14 @@ export const memoryPrompt = (notes: readonly MemoryEntry[]): string => {
  * notes and within the additions, and keep order. Pure.
  */
 const acceptedTexts = (
-	existing: readonly MemoryNote[],
+	legacy: readonly MemoryNote[],
+	store: readonly MemoryEntry[],
 	additions: readonly string[],
 ): readonly string[] => {
-	const seen = new Set(existing.map((note) => note.text.trim().toLowerCase()));
+	const seen = new Set([
+		...legacy.map((note) => note.text.trim().toLowerCase()),
+		...store.map((note) => note.content.trim().toLowerCase()),
+	]);
 	const accepted: string[] = [];
 	for (const addition of additions) {
 		const text = addition.trim().slice(0, MAX_MEMORY_NOTE_LENGTH);
@@ -158,7 +162,7 @@ export const mergeMemories = (
 	now: number,
 ): readonly MemoryNote[] => {
 	const merged = [...existing];
-	for (const text of acceptedTexts(existing, additions)) {
+	for (const text of acceptedTexts(existing, [], additions)) {
 		merged.push({ id: nextMemoryId(), text, createdAt: now, source: "model" });
 	}
 	// Keep the newest MAX_MEMORY_NOTES: the additions sit at the tail.
@@ -193,7 +197,7 @@ export const recordMemories = (
 	now: number,
 	makeId: () => string = nextMemoryId,
 ): RecordedMemories => {
-	const accepted = acceptedTexts(legacy, additions);
+	const accepted = acceptedTexts(legacy, notes, additions);
 	if (accepted.length === 0) return { memories: legacy, notes };
 	const mirrored: MemoryNote[] = [];
 	let next = notes;
