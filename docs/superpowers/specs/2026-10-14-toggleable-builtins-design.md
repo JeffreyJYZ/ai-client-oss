@@ -71,7 +71,7 @@ The Plugins section gains a **Built-ins** area:
 ### Error handling
 
 - A toggle on a **locked** unit is refused at the store with a message naming the unit.
-- A **reconcile that throws** must not leave the app half-registered: per area the close-then-register pair runs as one unit; on failure the error is reported **with the area id** and the previous state is restored if nothing registered.
+- A **reconcile that throws** must not leave the app half-registered: per area the close-then-register pair runs as one unit; on failure the error is reported **with the area id**, and the **failed area is left empty with its partial work rolled back while every other area is untouched** — under close-first that is the only coherent reading, since a deterministically-throwing registrar cannot be "restored". (Wording reconciled after T3's review confirmed the implementation; the earlier phrase "the previous state is restored if nothing registered" was ambiguous.)
 - A built-in's fault names its **area** (the same principle as a plugin fault naming its plugin), so the log says which area broke.
 
 ### Testing
