@@ -83,6 +83,25 @@ export interface BuiltinsReconciler {
 }
 
 /**
+ * Whether a contribution is **enabled**, given the store's recorded overrides —
+ * the production rule in one place, exported so the wiring and the tests call
+ * the same function rather than a copy of it (a copy lets `!== false` silently
+ * become `=== true` with every test still green).
+ *
+ * It answers the question the wiring asks — "is this contribution on?" — so no
+ * operator is left at a call site to drift. The rule is deliberately
+ * `!== false`: an absent area, an absent contribution and an id no registry
+ * holds all resolve to `undefined`, and all of them are **enabled** — which is
+ * what makes a renamed built-in's stale state inert (spec "Persistence":
+ * unknown ids are ignored).
+ */
+export const contributionEnabled = (
+	contributions: Readonly<Record<string, Readonly<Record<string, boolean>>>>,
+	areaId: string,
+	contributionId: string,
+): boolean => contributions[areaId]?.[contributionId] !== false;
+
+/**
  * An inert handle for a contribution that is off. Returned in place of the real
  * one so a registrar that disposes what it registered cannot tell the
  * difference — a skipped registration leaves no trace by construction.
@@ -153,6 +172,33 @@ const gateHost = (host: Host, enabled: ContributionFilter): Host => ({
 });
 
 /**
+ * Close one area's scope, **absorbing every cause**. This is the teardown
+ * cleanup pass's own close: it runs when the reconcile is already being
+ * interrupted, to close the scopes the aborted pass did not reach, so it must
+ * never abort on the interrupt it is cleaning up after. A non-interrupt defect
+ * is still logged, exactly as {@link closeQuietly} logs it, and closing an
+ * already-closed scope is a no-op, so a scope the normal pass already closed
+ * costs nothing here.
+ */
+const closeAbsorbing = (
+	areaId: string,
+	scope: Scope.Closeable,
+): Effect.Effect<void> =>
+	Scope.close(scope, Exit.void).pipe(
+		Effect.catchCause((cause) =>
+			Cause.hasInterrupts(cause)
+				? Effect.void
+				: Effect.sync(() =>
+						recordLog(
+							areaId,
+							"error",
+							`closing the built-in area "${areaId}" faulted: ${Cause.pretty(cause)}`,
+						),
+					),
+		),
+	);
+
+/**
  * Close one area's scope, reporting — but never treating as a fault —
  * whatever the finalizers end with. `Scope.close`'s typed error is `never`, so
  * a finalizer that dies escapes as a defect: at boot that travels out of
@@ -207,11 +253,31 @@ export const makeBuiltinsReconciler = (
 			// this scope, so each area's entries — and its subscriptions, notify
 			// queues and `host.run` fibres — are gone before anything
 			// re-registers.
+			//
+			// `live` is cleared up front, so the invariant `live` names every
+			// scope still open would be broken for the width of this loop — which
+			// is why the loop is wrapped in `ensuring`: an interrupt is re-raised
+			// by `closeQuietly`, and without the cleanup pass the areas after the
+			// interruption point would be abandoned with their scopes open,
+			// leaking everything they own (including an `app.themes` `host.run`
+			// subscriber — the very leak the seam exists to stop). Closing an
+			// already-closed scope is a no-op, so the pass is safe to always run.
 			const previous = live;
 			live = [];
-			for (const area of [...previous].reverse()) {
-				yield* closeQuietly(area.id, area.scope);
-			}
+			const teardownOrder = [...previous].reverse();
+			yield* Effect.forEach(
+				teardownOrder,
+				(area) => closeQuietly(area.id, area.scope),
+				{ discard: true },
+			).pipe(
+				Effect.ensuring(
+					Effect.forEach(
+						teardownOrder,
+						(area) => closeAbsorbing(area.id, area.scope),
+						{ discard: true },
+					),
+				),
+			);
 
 			// Register each enabled area into a scope of its own, through a host
 			// gated on that area's contribution state so a disabled contribution
@@ -255,10 +321,14 @@ export const makeBuiltinsReconciler = (
 const reconciler = makeBuiltinsReconciler({
 	areas: BUILTIN_AREAS,
 	enabledOf: (areaId) => getBuiltinsSnapshot().builtins[areaId] === true,
-	// The store's rule, verbatim: on unless explicitly `false`. An id no
-	// registry holds is simply never asked about, so stale state is inert.
+	// The one production rule, not a copy of it. An id no registry holds is
+	// simply never asked about, so stale state is inert.
 	contributionEnabledOf: (areaId, contributionId) =>
-		getBuiltinsSnapshot().contributions[areaId]?.[contributionId] !== false,
+		contributionEnabled(
+			getBuiltinsSnapshot().contributions,
+			areaId,
+			contributionId,
+		),
 	makeHost,
 });
 

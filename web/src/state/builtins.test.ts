@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
 import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
-import { makeBuiltinsReconciler } from "@lib/plugins/builtin";
+import {
+	contributionEnabled,
+	makeBuiltinsReconciler,
+} from "@lib/plugins/builtin";
 import {
 	BUILTIN_IDENTITIES,
 	LOCKED_BUILTIN_IDS,
@@ -474,13 +477,13 @@ const registryIds = (services: HostServicesShape): RegistryIds => ({
  */
 const makeEnabled = () => {
 	const disabled = new Set<string>();
-	// Contribution-level state, per area. Absent means on, the store's own rule.
-	const disabledContributions = new Map<string, Set<string>>();
+	// Contribution-level state in the store's own shape, so this fake applies the
+	// **production** rule (`contributionEnabled`) rather than a second copy of it.
+	let contributions: Record<string, Record<string, boolean>> = {};
 	return {
 		enabledOf: (id: string): boolean => !disabled.has(id),
-		/** The store's rule, over injected seams: on unless explicitly `false`. */
 		contributionEnabledOf: (areaId: string, contributionId: string): boolean =>
-			disabledContributions.get(areaId)?.has(contributionId) !== true,
+			contributionEnabled(contributions, areaId, contributionId),
 		set: (id: string, on: boolean): void => {
 			if (on) disabled.delete(id);
 			else disabled.add(id);
@@ -490,10 +493,10 @@ const makeEnabled = () => {
 			contributionId: string,
 			on: boolean,
 		): void => {
-			const set = disabledContributions.get(areaId) ?? new Set<string>();
-			if (on) set.delete(contributionId);
-			else set.add(contributionId);
-			disabledContributions.set(areaId, set);
+			contributions = {
+				...contributions,
+				[areaId]: { ...contributions[areaId], [contributionId]: on },
+			};
 		},
 		/** Everything off except `id`. */
 		only: (id: string): void => {
@@ -936,11 +939,12 @@ describe("per-contribution toggles", () => {
 		expect(after).toContain("composer.toolbar.attach");
 	});
 
-	test("a contribution toggle re-reconciles and registers the rest of the area", async () => {
-		// The interaction: a contribution toggle changes the snapshot, which
-		// triggers a full reconcile — and that reconcile must still register the
-		// rest of the area, not empty it. Driven through the real store, whose
-		// snapshot the deps read exactly as the production wiring does.
+	test("an off contribution leaves the rest of its area registered across a reconcile", async () => {
+		// What this proves: after a real store change, a reconcile registers the
+		// rest of the area rather than emptying it. What it does **not** prove:
+		// that the store's subscription fires a reconcile — `reconcile` is called
+		// by hand here, and the subscription wiring is Task 3's (`state/plugins.ts`
+		// shape) and is exercised by the app's boot, not by this suite.
 		const services = makeServices();
 		const h = makeHarness();
 		h.store.start();
@@ -949,7 +953,7 @@ describe("per-contribution toggles", () => {
 			areas: BUILTIN_AREAS,
 			enabledOf: (areaId) => h.snapshot().builtins[areaId] === true,
 			contributionEnabledOf: (areaId, contributionId) =>
-				h.snapshot().contributions[areaId]?.[contributionId] !== false,
+				contributionEnabled(h.snapshot().contributions, areaId, contributionId),
 			makeHost,
 		});
 
@@ -957,7 +961,7 @@ describe("per-contribution toggles", () => {
 		const baseline = registryIds(services);
 
 		h.store.setContributionEnabled("app.tools", "fetch_url", false);
-		// The store really changed, so the app's subscription would reconcile.
+		// The store really changed: its resolved snapshot now records it off.
 		expect(h.snapshot().contributions["app.tools"]?.fetch_url).toBe(false);
 		await run(reconciler, services);
 
@@ -986,7 +990,7 @@ describe("per-contribution toggles", () => {
 			areas: BUILTIN_AREAS,
 			enabledOf: (areaId) => h.snapshot().builtins[areaId] === true,
 			contributionEnabledOf: (areaId, contributionId) =>
-				h.snapshot().contributions[areaId]?.[contributionId] !== false,
+				contributionEnabled(h.snapshot().contributions, areaId, contributionId),
 			makeHost,
 		});
 
@@ -1047,5 +1051,66 @@ describe("per-contribution toggles", () => {
 		const exit = await Effect.runPromiseExit(reconciler.reconcile(services));
 		expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
 		expect(getLogSnapshot()).toEqual([]);
+	});
+
+	test("an interrupted teardown still closes every scope it had not reached", async () => {
+		// The parked-A fix made this reachable: an interrupt is re-raised, so a
+		// reconcile cancelled mid-teardown aborts the close loop. `live` is
+		// cleared before the loop, so without a cleanup pass the areas after the
+		// interruption point are abandoned with their scopes open — leaking
+		// everything they own (an `app.themes` `host.run` subscriber included).
+		const services = makeServices();
+		const closed: string[] = [];
+
+		// Teardown walks the live list in reverse, so the **last** area here is
+		// closed first; its finalizer records it and then interrupts, aborting the
+		// loop with the other three still open.
+		const ids = ["app.a", "app.b", "app.c", "app.interrupter"] as const;
+		const areas: readonly BuiltinArea[] = ids.map((id) => ({
+			id,
+			label: id,
+			description: "A test-only area used to observe teardown.",
+			locked: false,
+			register: () => {},
+		}));
+
+		const recordingMakeHost = (
+			service: HostServicesShape,
+			areaId: string,
+			areaScope: Scope.Scope,
+		): Host => {
+			const finalizer =
+				areaId === "app.interrupter"
+					? Effect.sync(() => {
+							closed.push(areaId);
+						}).pipe(Effect.andThen(Effect.interrupt))
+					: Effect.sync(() => {
+							closed.push(areaId);
+						});
+			Effect.runSync(
+				Effect.provideService(
+					Scope.addFinalizer(areaScope, finalizer),
+					Scope.Scope,
+					areaScope,
+				),
+			);
+			return makeHost(service, areaId, areaScope);
+		};
+
+		const reconciler = makeBuiltinsReconciler({
+			areas,
+			enabledOf: () => true,
+			contributionEnabledOf: () => true,
+			makeHost: recordingMakeHost,
+		});
+
+		await run(reconciler, services);
+		closed.length = 0;
+
+		// Close-first aborts on the interrupter; the interrupt propagates, and the
+		// teardown cleanup must still close the other three.
+		const exit = await Effect.runPromiseExit(reconciler.reconcile(services));
+		expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
+		expect(new Set(closed)).toEqual(new Set(ids));
 	});
 });
