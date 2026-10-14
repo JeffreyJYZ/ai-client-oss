@@ -168,9 +168,11 @@ export interface Host {
 	 * `Effect.runFork` is owned by nothing and never stops.
 	 *
 	 * Nothing is returned and nothing is awaited — the scope is the lifetime, so
-	 * a caller cannot leak a fibre by losing its handle. A fault is reported
-	 * through the host log and never thrown, because a fibre with no handle has
-	 * no caller to fail to.
+	 * a caller cannot leak a fibre by losing its handle. A fault is logged as a
+	 * `PluginFault` through Effect's own logger — the console, **not** the
+	 * Plugins section's log panel, which the `recordLog`-backed `host.log`
+	 * feeds — and never thrown, because a fibre with no handle has no caller to
+	 * fail to.
 	 */
 	readonly run: <A, E>(effect: Effect.Effect<A, E>) => void;
 }

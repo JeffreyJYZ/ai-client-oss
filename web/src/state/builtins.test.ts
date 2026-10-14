@@ -15,7 +15,7 @@ import {
 	makeHost,
 } from "@lib/plugins/host";
 import { clearLog, getLogSnapshot } from "@lib/plugins/log";
-import { Effect, Scope } from "effect";
+import { Cause, Effect, Exit, Scope } from "effect";
 import {
 	type BuiltinsDeps,
 	type BuiltinsSnapshot,
@@ -474,11 +474,26 @@ const registryIds = (services: HostServicesShape): RegistryIds => ({
  */
 const makeEnabled = () => {
 	const disabled = new Set<string>();
+	// Contribution-level state, per area. Absent means on, the store's own rule.
+	const disabledContributions = new Map<string, Set<string>>();
 	return {
 		enabledOf: (id: string): boolean => !disabled.has(id),
+		/** The store's rule, over injected seams: on unless explicitly `false`. */
+		contributionEnabledOf: (areaId: string, contributionId: string): boolean =>
+			disabledContributions.get(areaId)?.has(contributionId) !== true,
 		set: (id: string, on: boolean): void => {
 			if (on) disabled.delete(id);
 			else disabled.add(id);
+		},
+		setContribution: (
+			areaId: string,
+			contributionId: string,
+			on: boolean,
+		): void => {
+			const set = disabledContributions.get(areaId) ?? new Set<string>();
+			if (on) set.delete(contributionId);
+			else set.add(contributionId);
+			disabledContributions.set(areaId, set);
 		},
 		/** Everything off except `id`. */
 		only: (id: string): void => {
@@ -505,6 +520,7 @@ describe("reconcile", () => {
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
 			makeHost,
 		});
 
@@ -569,6 +585,7 @@ describe("reconcile", () => {
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
 			makeHost,
 		});
 
@@ -635,6 +652,7 @@ describe("reconcile", () => {
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
 			makeHost,
 		});
 
@@ -710,6 +728,7 @@ describe("reconcile", () => {
 		const reconciler = makeBuiltinsReconciler({
 			areas,
 			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
 			makeHost,
 		});
 		enabled.all();
@@ -775,6 +794,7 @@ describe("reconcile", () => {
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
 			makeHost,
 		});
 
@@ -826,6 +846,7 @@ describe("reconcile", () => {
 		const reconciler = makeBuiltinsReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
 			makeHost: sabotagingMakeHost,
 		});
 
@@ -848,5 +869,183 @@ describe("reconcile", () => {
 			.map((entry) => entry.message)
 			.join("\n");
 		expect(messages).toContain(sabotaged);
+	});
+});
+
+/* ---------------------------------------------------- per-contribution toggles */
+
+/**
+ * Task 4's filter: the real reconciler over the real `BUILTIN_AREAS`, the real
+ * `makeHost` and the real registries; only the enabled-state source — area and
+ * contribution alike — is injected, exactly as the production wiring reads it
+ * off the store.
+ *
+ * The assertions are written so that a **no-op filter** and an **area-level**
+ * filter both fail: a no-op leaves the disabled id standing in the registry,
+ * and an area-level filter empties the siblings each test requires to survive.
+ */
+
+describe("per-contribution toggles", () => {
+	test("app.tools: disabling one tool leaves its sibling registered", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		expect(registryIds(services).tools).toEqual(["fetch_url", "web_search"]);
+
+		enabled.setContribution("app.tools", "fetch_url", false);
+		await run(reconciler, services);
+
+		// `fetch_url` is not registered at all — off is indistinguishable from
+		// never existed — and its sibling is untouched.
+		expect(registryIds(services).tools).toEqual(["web_search"]);
+	});
+
+	test("a UI area: disabling one contribution leaves its siblings registered", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		await run(reconciler, services);
+		const before = registryIds(services).ui;
+		expect(before).toContain("shell.header.title");
+		expect(before).toContain("ui.root.layout");
+
+		enabled.setContribution("app.shell", "shell.header.title", false);
+		await run(reconciler, services);
+		const after = registryIds(services).ui;
+
+		// Exactly one entry gone — every sibling of its own area, and every
+		// other area's entry, still registered.
+		expect(after).toEqual(before.filter((id) => id !== "shell.header.title"));
+		expect(after).toContain("ui.root.layout");
+		expect(after).toContain("shell.header.system-prompt");
+		expect(after).toContain("composer.toolbar.attach");
+	});
+
+	test("a contribution toggle re-reconciles and registers the rest of the area", async () => {
+		// The interaction: a contribution toggle changes the snapshot, which
+		// triggers a full reconcile — and that reconcile must still register the
+		// rest of the area, not empty it. Driven through the real store, whose
+		// snapshot the deps read exactly as the production wiring does.
+		const services = makeServices();
+		const h = makeHarness();
+		h.store.start();
+
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: (areaId) => h.snapshot().builtins[areaId] === true,
+			contributionEnabledOf: (areaId, contributionId) =>
+				h.snapshot().contributions[areaId]?.[contributionId] !== false,
+			makeHost,
+		});
+
+		await run(reconciler, services);
+		const baseline = registryIds(services);
+
+		h.store.setContributionEnabled("app.tools", "fetch_url", false);
+		// The store really changed, so the app's subscription would reconcile.
+		expect(h.snapshot().contributions["app.tools"]?.fetch_url).toBe(false);
+		await run(reconciler, services);
+
+		const after = registryIds(services);
+		// The area is not emptied: its remaining tool is registered.
+		expect(after.tools).toEqual(["web_search"]);
+		// And nothing outside the area moved.
+		expect(after.ui).toEqual(baseline.ui);
+		expect(after.commands).toEqual(baseline.commands);
+		expect(after.providers).toEqual(baseline.providers);
+		expect(after.themes).toEqual(baseline.themes);
+	});
+
+	test("an unknown contribution id in stored state is ignored", async () => {
+		const services = makeServices();
+		const h = makeHarness(
+			withBuiltins({
+				"app.tools": {
+					contributions: { "renamed-contribution": false },
+				},
+			}),
+		);
+		h.store.start();
+
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: (areaId) => h.snapshot().builtins[areaId] === true,
+			contributionEnabledOf: (areaId, contributionId) =>
+				h.snapshot().contributions[areaId]?.[contributionId] !== false,
+			makeHost,
+		});
+
+		await run(reconciler, services);
+
+		// The stale id matches nothing to skip, so both tools register; no crash,
+		// no effect. The stored state is left exactly as found (no migration).
+		expect(registryIds(services).tools).toEqual(["fetch_url", "web_search"]);
+		expect(h.settings().builtins?.["app.tools"]?.contributions).toEqual({
+			"renamed-contribution": false,
+		});
+	});
+
+	test("a close that is interrupted does not log a fault", async () => {
+		// Parked item A: `closeQuietly` piped through `Effect.catchCause`, which
+		// recovers interruptions too — so a cancelled reconcile logged a bogus
+		// fault and could run to completion. Mirroring `host.run`, an interrupt
+		// must be re-raised, never logged.
+		const services = makeServices();
+		const area: BuiltinArea = {
+			id: "app.interrupt-test",
+			label: "Interrupt test",
+			description: "A test-only area whose teardown is an interruption.",
+			locked: false,
+			register: () => {},
+		};
+
+		// A finalizer that is a bare interruption: added to one area's scope the
+		// same way the host adds its own, so the next close's cause is an
+		// interrupt and nothing else — no timing to race.
+		const interruptingMakeHost = (
+			service: HostServicesShape,
+			areaId: string,
+			areaScope: Scope.Scope,
+		): Host => {
+			Effect.runSync(
+				Effect.provideService(
+					Scope.addFinalizer(areaScope, Effect.interrupt),
+					Scope.Scope,
+					areaScope,
+				),
+			);
+			return makeHost(service, areaId, areaScope);
+		};
+
+		const reconciler = makeBuiltinsReconciler({
+			areas: [area],
+			enabledOf: () => true,
+			contributionEnabledOf: () => true,
+			makeHost: interruptingMakeHost,
+		});
+
+		await run(reconciler, services);
+		clearLog();
+
+		// The next reconcile closes the live scope first; that close is
+		// interrupted, and the interrupt must propagate rather than be swallowed.
+		const exit = await Effect.runPromiseExit(reconciler.reconcile(services));
+		expect(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause)).toBe(true);
+		expect(getLogSnapshot()).toEqual([]);
 	});
 });

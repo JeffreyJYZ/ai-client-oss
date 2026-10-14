@@ -1,6 +1,13 @@
 import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
-import { type Host, type HostServicesShape, makeHost } from "@lib/plugins/host";
+import {
+	type Disposable,
+	type Host,
+	type HostRegistry,
+	type HostServicesShape,
+	makeHost,
+} from "@lib/plugins/host";
 import { recordLog } from "@lib/plugins/log";
+import type { RegistryEntry } from "@lib/plugins/registry";
 import { Cause, Effect, Exit, Scope } from "effect";
 import {
 	getBuiltinsSnapshot,
@@ -18,6 +25,13 @@ import {
  * A disabled contribution is therefore never registered at all: "off" is
  * indistinguishable from "never existed", the strongest guarantee available,
  * and it needs no read-time filter every consumer could forget.
+ *
+ * Task 4 applies that same rule one level down: an area's registrar is handed
+ * a **gated host** whose registration doors skip any contribution whose id the
+ * store records as `false` — the id the registry already holds (a UI entry's
+ * `id`, a tool's wire name, a command's id, a settings section's id). One entry
+ * off therefore leaves its siblings registered, and a contribution-only change
+ * (which still reconciles every area) can never empty one.
  *
  * The identities and registrars come from `areas.ts`; the *enabled* state comes
  * from the store (`state/builtins.ts`), which this module also imports so a
@@ -41,6 +55,17 @@ export interface BuiltinsReconcilerDeps {
 	readonly areas: readonly BuiltinArea[];
 	/** Whether an area is on right now — read per area, per reconcile. */
 	readonly enabledOf: (areaId: string) => boolean;
+	/**
+	 * Whether one contribution of an area is on right now — read per
+	 * registration, per reconcile. The id is the one the registry already holds
+	 * for it, so the toggle layer never invents a second namespace; absent (or
+	 * unknown) means on, which is what makes a renamed contribution's stale
+	 * state inert.
+	 */
+	readonly contributionEnabledOf: (
+		areaId: string,
+		contributionId: string,
+	) => boolean;
 	/** The host factory, so each area gets a host bound to its own id and scope. */
 	readonly makeHost: (
 		services: HostServicesShape,
@@ -58,11 +83,87 @@ export interface BuiltinsReconciler {
 }
 
 /**
- * Close one area's scope, reporting — never re-raising — a faulting finalizer.
- * `Scope.close`'s typed error is `never`, so a finalizer that dies escapes as a
- * defect: at boot that travels out of `runtime.runPromise` and leaves a blank
- * app. A defect is logged against the area id and the reconcile carries on; the
- * finalizers that did run have already undone their own work.
+ * An inert handle for a contribution that is off. Returned in place of the real
+ * one so a registrar that disposes what it registered cannot tell the
+ * difference — a skipped registration leaves no trace by construction.
+ */
+const skipped: Disposable = { dispose: () => {} };
+
+/** Whether one contribution id of the area being registered is on right now. */
+type ContributionFilter = (contributionId: string) => boolean;
+
+/**
+ * A registry view whose `register` skips a contribution that is off. The check
+ * is on the entry's own `id` — the id the registry already holds — so the
+ * filter needs no second namespace and every registry kind is covered by one
+ * helper.
+ */
+const gateRegistry = <E extends RegistryEntry>(
+	registry: HostRegistry<E>,
+	enabled: ContributionFilter,
+): HostRegistry<E> => ({
+	...registry,
+	register: (entry) => (enabled(entry.id) ? registry.register(entry) : skipped),
+});
+
+/**
+ * The host an area's registrar receives: the real host with every registration
+ * door gated on that area's contribution state, so a contribution that is off
+ * is never registered at all (spec "Registration, teardown, reconcile").
+ *
+ * Each door is keyed by the id the registry already holds: a UI entry's `id`, a
+ * tool's wire name, a command's or provider's `id`, a settings section's `id`, a
+ * renderer's kind, a theme's `id`. Everything that is not a registration —
+ * `run`, `on`, `log`, `chat`, `db`, and the registries' reads — passes through
+ * untouched.
+ */
+const gateHost = (host: Host, enabled: ContributionFilter): Host => ({
+	...host,
+	// `ui` is spread whole so its shared `kit` survives.
+	ui: {
+		...host.ui,
+		register: (entry) =>
+			enabled(entry.id) ? host.ui.register(entry) : skipped,
+	},
+	commands: gateRegistry(host.commands, enabled),
+	providers: gateRegistry(host.providers, enabled),
+	pipeline: gateRegistry(host.pipeline, enabled),
+	tools: {
+		...host.tools,
+		register: (tool, label) =>
+			enabled(tool.declaration.name)
+				? host.tools.register(tool, label)
+				: skipped,
+	},
+	settings: {
+		...host.settings,
+		registerSection: (section) =>
+			enabled(section.id) ? host.settings.registerSection(section) : skipped,
+	},
+	renderers: {
+		...host.renderers,
+		register: (kind, component) =>
+			enabled(kind) ? host.renderers.register(kind, component) : skipped,
+	},
+	themes: {
+		...host.themes,
+		register: (theme) =>
+			enabled(theme.id) ? host.themes.register(theme) : skipped,
+	},
+});
+
+/**
+ * Close one area's scope, reporting — but never treating as a fault —
+ * whatever the finalizers end with. `Scope.close`'s typed error is `never`, so
+ * a finalizer that dies escapes as a defect: at boot that travels out of
+ * `runtime.runPromise` and leaves a blank app. A defect is logged against the
+ * area id and the reconcile carries on; the finalizers that did run have
+ * already undone their own work.
+ *
+ * An **interruption is re-raised, not logged** — the rule `host.run` follows: a
+ * cancelled reconcile is a teardown, not a fault, and recovering it would emit
+ * a bogus error and run the reconcile to completion after its caller stopped
+ * it.
  */
 const closeQuietly = (
 	areaId: string,
@@ -70,13 +171,15 @@ const closeQuietly = (
 ): Effect.Effect<void> =>
 	Scope.close(scope, Exit.void).pipe(
 		Effect.catchCause((cause) =>
-			Effect.sync(() =>
-				recordLog(
-					areaId,
-					"error",
-					`closing the built-in area "${areaId}" faulted: ${Cause.pretty(cause)}`,
-				),
-			),
+			Cause.hasInterrupts(cause)
+				? Effect.failCause(cause)
+				: Effect.sync(() =>
+						recordLog(
+							areaId,
+							"error",
+							`closing the built-in area "${areaId}" faulted: ${Cause.pretty(cause)}`,
+						),
+					),
 		),
 	);
 
@@ -110,11 +213,17 @@ export const makeBuiltinsReconciler = (
 				yield* closeQuietly(area.id, area.scope);
 			}
 
-			// Register each enabled area into a scope of its own.
+			// Register each enabled area into a scope of its own, through a host
+			// gated on that area's contribution state so a disabled contribution
+			// is never registered.
 			for (const area of deps.areas) {
 				if (!deps.enabledOf(area.id)) continue;
 				const scope = yield* Scope.make();
-				const host = deps.makeHost(services, area.id, scope);
+				const host = gateHost(
+					deps.makeHost(services, area.id, scope),
+					(contributionId) =>
+						deps.contributionEnabledOf(area.id, contributionId),
+				);
 				const outcome = yield* Effect.exit(
 					Effect.try({
 						try: () => area.register(host),
@@ -146,6 +255,10 @@ export const makeBuiltinsReconciler = (
 const reconciler = makeBuiltinsReconciler({
 	areas: BUILTIN_AREAS,
 	enabledOf: (areaId) => getBuiltinsSnapshot().builtins[areaId] === true,
+	// The store's rule, verbatim: on unless explicitly `false`. An id no
+	// registry holds is simply never asked about, so stale state is inert.
+	contributionEnabledOf: (areaId, contributionId) =>
+		getBuiltinsSnapshot().contributions[areaId]?.[contributionId] !== false,
 	makeHost,
 });
 
