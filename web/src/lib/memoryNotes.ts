@@ -14,6 +14,20 @@ export const MEMORY_ID_PATTERN: RegExp = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 export const MEMORY_HISTORY_DEPTH = 5;
 export const MEMORY_DELETED_CAP = 20;
 
+/**
+ * The longest content a note may hold. This is the **store's** bound, so the
+ * two tools that write through `addMemory`/`updateMemory` refuse over-long
+ * content with a readable message naming it — a tool path has a model on the
+ * other end that can shorten the note and retry, and a refusal is a result.
+ *
+ * The tag path (`lib/memory.ts`'s `recordMemories`) **truncates** to this same
+ * constant instead of refusing: it parses a reply, where there is nobody to
+ * hand a refusal to. That divergence is deliberate and is the one way the two
+ * writers are not indistinguishable — they agree on shape and on this limit,
+ * and differ only in how a violation is handled.
+ */
+export const MAX_MEMORY_NOTE_LENGTH = 200;
+
 export interface MemoryEntry {
 	id: string;
 	content: string;
@@ -81,6 +95,23 @@ const mutateList = (
 
 const validId = (id: string): boolean => MEMORY_ID_PATTERN.test(id);
 
+/**
+ * Refuse a content over the length cap, naming the limit so a model that
+ * overshoots can correct itself. The length is a property of the argument
+ * alone, so it is decided before any store lookup — a refusal is a result, as
+ * this module's contract requires.
+ *
+ * The tag path does **not** reach this refusal with an over-long string: it
+ * truncates to the same constant before calling `addMemory`, because a reply
+ * has nobody to hand a refusal to (see `lib/memory.ts`).
+ */
+const overLength = (content: string): MemoryResult | undefined =>
+	content.length > MAX_MEMORY_NOTE_LENGTH
+		? fail(
+				`content is too long: ${content.length} characters, the limit is ${MAX_MEMORY_NOTE_LENGTH}`,
+			)
+		: undefined;
+
 const findIndex = (notes: readonly MemoryEntry[], id: string): number =>
 	notes.findIndex((note) => note.id === id);
 
@@ -90,6 +121,8 @@ export const addMemory = (
 	content: string,
 	now: number,
 ): MemoryResult => {
+	const tooLong = overLength(content);
+	if (tooLong) return tooLong;
 	if (!validId(id)) {
 		return fail(`id "${id}" does not match ${MEMORY_ID_PATTERN.source}`);
 	}
@@ -123,6 +156,8 @@ export const updateMemory = (
 	content: string,
 	now: number,
 ): MemoryResult => {
+	const tooLong = overLength(content);
+	if (tooLong) return tooLong;
 	const index = findIndex(notes, id);
 	if (index === -1) {
 		return fail(`id "${id}" not found`);

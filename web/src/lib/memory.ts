@@ -1,5 +1,12 @@
 import type { MemoryNote } from "@lib/db/types";
-import { addMemory, type MemoryEntry } from "@lib/memoryNotes";
+import {
+	addMemory,
+	MAX_MEMORY_NOTE_LENGTH,
+	type MemoryEntry,
+} from "@lib/memoryNotes";
+
+/** The note store's content bound, re-exported for the tag path and the UI. */
+export { MAX_MEMORY_NOTE_LENGTH };
 
 /**
  * Tag pair the model wraps memory blocks in, inside its own reply text. The
@@ -11,9 +18,15 @@ import { addMemory, type MemoryEntry } from "@lib/memoryNotes";
 export const MEMORY_TAG_OPEN = "<memory>";
 export const MEMORY_TAG_CLOSE = "</memory>";
 
-/** Caps so a chatty model cannot grow the injected prompt without bound. */
+/**
+ * The bound that actually governs the request: `memoryPrompt` sends at most
+ * this many live notes, newest first, so a chatty model cannot grow the
+ * injected prompt without bound. It is a bound on **what is sent**, never on
+ * what is stored — the store and the UI keep every note. The legacy
+ * `Settings.memories` mirror is capped by the same constant for its own
+ * historical reason; that cap no longer governs what reaches the wire.
+ */
 export const MAX_MEMORY_NOTES = 50;
-export const MAX_MEMORY_NOTE_LENGTH = 200;
 
 /** One complete block; the lazy quantifier keeps two blocks from merging. */
 const BLOCK = new RegExp(
@@ -40,6 +53,8 @@ export interface ExtractedMemories {
 	readonly malformed: boolean;
 }
 
+/** The tag path's id source, injected into `recordMemories` so it stays pure
+ *  and testable: the tag path generates the id, never the model. */
 const nextMemoryId = (): string => `memory-${crypto.randomUUID()}`;
 
 /** Normalise one block's content: collapse newlines to spaces, then trim. */
@@ -97,7 +112,15 @@ export const memoryLogLines = (
  * existed.
  */
 export const memoryPrompt = (notes: readonly MemoryEntry[]): string => {
-	const live = notes.filter((note) => note.deletedAt === undefined);
+	// The prompt bound, and the only bound on what a request carries: at most
+	// MAX_MEMORY_NOTES live notes, newest first (a newer memory supersedes a
+	// stale one). Notes beyond it stay in the store and in the UI — this bound
+	// decides what is *sent*, never what is kept, so nothing is deleted to
+	// satisfy it.
+	const live = notes
+		.filter((note) => note.deletedAt === undefined)
+		.sort((a, b) => b.updatedAt - a.updatedAt)
+		.slice(0, MAX_MEMORY_NOTES);
 	if (live.length === 0) return "";
 	const list = live.map((note) => `${note.id} — ${note.content}`).join("\n");
 	return [
@@ -110,6 +133,8 @@ export const memoryPrompt = (notes: readonly MemoryEntry[]): string => {
 		"  not a fact about the user.",
 		"- A newer memory supersedes a stale one; when two disagree, trust the",
 		"  one with the later timestamp.",
+		`- Keep each memory short: content over ${MAX_MEMORY_NOTE_LENGTH} characters`,
+		"  is refused, so shorten it instead of retrying unchanged.",
 		"",
 		"End your reply with one or more <memory> blocks to durably remember facts",
 		"about the user (preferences, environment, ongoing projects). Put one fact",
@@ -123,9 +148,15 @@ export const memoryPrompt = (notes: readonly MemoryEntry[]): string => {
 };
 
 /**
- * The one dedupe decision, shared by both writers: trim (and cap the length
+ * The one dedupe decision the tag path's write makes: trim (and cap the length
  * of) each addition, drop duplicates case-insensitively against the existing
  * notes and within the additions, and keep order. Pure.
+ *
+ * The length cap **truncates** here rather than refusing, because this is the
+ * tag path — it parses a reply, where there is nobody to hand a refusal to.
+ * The tools refuse an over-long content instead (`lib/memoryNotes.ts`): the
+ * same limit, handled by writer, and the one deliberate asymmetry between
+ * them.
  */
 const acceptedTexts = (
 	legacy: readonly MemoryNote[],
@@ -146,27 +177,6 @@ const acceptedTexts = (
 		accepted.push(text);
 	}
 	return accepted;
-};
-
-/**
- * Merge newly extracted note texts into the stored legacy list. Pure: the
- * clock is passed in, never read from the environment. Trims, drops duplicates
- * case-insensitively (against existing notes and within the additions), stamps
- * id/createdAt/`source: "model"`, then caps at MAX_MEMORY_NOTES keeping the
- * newest. The user path (`ui/Settings.tsx`) and the tag mirror below share
- * {@link acceptedTexts}, so the same decision is never re-derived.
- */
-export const mergeMemories = (
-	existing: readonly MemoryNote[],
-	additions: readonly string[],
-	now: number,
-): readonly MemoryNote[] => {
-	const merged = [...existing];
-	for (const text of acceptedTexts(existing, [], additions)) {
-		merged.push({ id: nextMemoryId(), text, createdAt: now, source: "model" });
-	}
-	// Keep the newest MAX_MEMORY_NOTES: the additions sit at the tail.
-	return merged.slice(-MAX_MEMORY_NOTES);
 };
 
 /** The pair of stores one tag-path write touches, both of them. */

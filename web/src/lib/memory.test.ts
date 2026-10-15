@@ -7,7 +7,6 @@ import {
 	MEMORY_TAG_OPEN,
 	memoryLogLines,
 	memoryPrompt,
-	mergeMemories,
 	recordMemories,
 } from "./memory";
 import { addMemory, type MemoryEntry } from "./memoryNotes";
@@ -41,12 +40,47 @@ describe("memoryPrompt", () => {
 		expect(prompt).toContain("Never record a tool's availability");
 		expect(prompt).toContain("Never record per-session transient state");
 		expect(prompt).toContain("A newer memory supersedes a stale one");
+		// The content limit is named, so the model can stay inside it.
+		expect(prompt).toContain(String(MAX_MEMORY_NOTE_LENGTH));
 	});
 
 	test("a removed memory is not injected", () => {
 		expect(
 			memoryPrompt([{ ...live("gone", "stale"), deletedAt: NOW + 1 }]),
 		).toBe("");
+	});
+
+	test("the injected prompt carries the newest MAX_MEMORY_NOTES, not the older ones", () => {
+		// More notes in the store than the bound: the assertion can tell
+		// "capped" from "all".
+		const total = MAX_MEMORY_NOTES + 5;
+		const newest = total - 1;
+		const oldestKept = total - MAX_MEMORY_NOTES;
+		const oldestDropped = oldestKept - 1;
+		const notes: readonly MemoryEntry[] = Array.from(
+			{ length: total },
+			(_, i) => ({
+				id: `n-${i}`,
+				content: `fact number ${i}`,
+				updatedAt: NOW + i,
+				history: [],
+			}),
+		);
+		const prompt = memoryPrompt(notes);
+		// The newest note and the oldest one still inside the bound are sent...
+		expect(prompt).toContain(`n-${newest} — fact number ${newest}`);
+		expect(prompt).toContain(`n-${oldestKept} — fact number ${oldestKept}`);
+		// ...the ones past the bound are not, and nothing sent is older than them.
+		expect(prompt).not.toContain(
+			`n-${oldestDropped} — fact number ${oldestDropped}`,
+		);
+		expect(prompt).not.toContain("n-0 — fact number 0");
+		// Newest first: the bound decides which end is kept.
+		expect(prompt.indexOf(`n-${newest} —`)).toBeLessThan(
+			prompt.indexOf(`n-${oldestKept} —`),
+		);
+		// The bound is about what is *sent*: the store still holds every note.
+		expect(notes).toHaveLength(total);
 	});
 });
 
@@ -196,16 +230,6 @@ describe("the tag path routes through the one mutator", () => {
 		const stored = recorded.memories[0]?.text ?? "";
 		expect(stored).toHaveLength(MAX_MEMORY_NOTE_LENGTH);
 		expect(recorded.notes[0]?.content).toBe(stored);
-	});
-
-	test("mergeMemories behaviour is unchanged: dedupe then the newest cap", () => {
-		const merged = mergeMemories(
-			[{ id: "n-1", text: "kept", createdAt: 1, source: "user" }],
-			["kept", "  ", "fresh"],
-			NOW,
-		);
-		expect(merged.map((n) => n.text)).toEqual(["kept", "fresh"]);
-		expect(merged[0]?.id).toBe("n-1");
 	});
 
 	test("the tag path dedupes against the live store, not only the mirror", () => {

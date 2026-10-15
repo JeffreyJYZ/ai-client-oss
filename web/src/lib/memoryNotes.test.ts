@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	addMemory,
 	listMemories,
+	MAX_MEMORY_NOTE_LENGTH,
 	MEMORY_DELETED_CAP,
 	MEMORY_HISTORY_DEPTH,
 	MEMORY_ID_PATTERN,
@@ -179,6 +180,41 @@ describe("memoryNotes", () => {
 		const reverted = revertMemory([], "ghost", NOW);
 		expect(reverted.ok).toBe(false);
 		if (!reverted.ok) expect(reverted.message).toContain("ghost");
+	});
+
+	test("content over the cap is refused, naming the limit, and the store is unchanged", () => {
+		const over = "x".repeat(MAX_MEMORY_NOTE_LENGTH + 1);
+		// The refusal names the limit the model has to stay inside.
+		const added = addMemory([], "note-1", over, NOW);
+		expect(added.ok).toBe(false);
+		if (!added.ok) {
+			expect(added.message).toContain(String(MAX_MEMORY_NOTE_LENGTH));
+			expect(added.message).toContain("too long");
+		}
+		// An over-long update is refused too, and leaves the live note alone.
+		const seeded = addMemory([], "note-1", "kept", NOW);
+		expect(seeded.ok).toBe(true);
+		if (!seeded.ok) return;
+		const snapshot = JSON.stringify(seeded.notes);
+		const updated = updateMemory(seeded.notes, "note-1", over, NOW + 1);
+		expect(updated.ok).toBe(false);
+		if (!updated.ok)
+			expect(updated.message).toContain(String(MAX_MEMORY_NOTE_LENGTH));
+		expect(JSON.stringify(seeded.notes)).toBe(snapshot);
+	});
+
+	test("content at exactly the cap is accepted, one char over is not", () => {
+		const at = "x".repeat(MAX_MEMORY_NOTE_LENGTH);
+		const accepted = addMemory([], "note-1", at, NOW);
+		expect(accepted.ok).toBe(true);
+		if (!accepted.ok) return;
+		const over = updateMemory(
+			accepted.notes,
+			"note-1",
+			"y".repeat(MAX_MEMORY_NOTE_LENGTH + 1),
+			NOW + 1,
+		);
+		expect(over.ok).toBe(false);
 	});
 
 	test("history keeps the newest entries and drops the oldest, by name", () => {
