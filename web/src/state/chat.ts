@@ -404,6 +404,10 @@ const memoryActive = (): boolean =>
  * `extractMemories` and this logs what it flagged.
  */
 const commitMemories = (extracted: ExtractedMemories): void => {
+	// Deliberately redundant with the `memoryActive()` harvest in `finalize`
+	// (the `extracted` argument's build site): both gates exist so "off" is
+	// decided by one predicate at every memory surface; removing either alone
+	// changes nothing observably, only removing both fails a test.
 	if (!memoryActive()) return;
 	for (const line of memoryLogLines(extracted)) {
 		Effect.runFork(Effect.logWarning(line));

@@ -298,6 +298,7 @@ const runMemoryTurn = async (
 	readonly body: unknown;
 	readonly text: string;
 	readonly notes: readonly MemoryEntry[];
+	readonly logs: readonly string[];
 }> => {
 	let sent: unknown;
 	const provider = {
@@ -326,6 +327,7 @@ const runMemoryTurn = async (
 		activeProviderId: "t5-memory-provider",
 		...memory,
 	});
+	const log = spyOn(console, "log");
 	try {
 		const turn = subscribeTurnEnd();
 		try {
@@ -337,11 +339,17 @@ const runMemoryTurn = async (
 				body: sent,
 				text: last?.role === "assistant" ? last.text : "",
 				notes: getSettings().memoryNotes,
+				logs: log.mock.calls.map((args) =>
+					args
+						.map((arg) => (typeof arg === "string" ? arg : String(arg)))
+						.join(" "),
+				),
 			};
 		} finally {
 			turn.dispose();
 		}
 	} finally {
+		log.mockRestore();
 		handle.dispose();
 		setSettings({
 			providers: before.providers,
@@ -459,7 +467,7 @@ describe("the memory tag is prose when the feature is off", () => {
 
 	test("area on, flag off: the reply renders verbatim and nothing is stored", async () => {
 		const existing = liveNote(note);
-		const { text, notes } = await runMemoryTurn(
+		const { text, notes, logs } = await runMemoryTurn(
 			`t5-memory-verbatim-flag-${crypto.randomUUID()}`,
 			reply,
 			{
@@ -472,6 +480,7 @@ describe("the memory tag is prose when the feature is off", () => {
 
 		expect(text).toBe(reply);
 		expect(notes).toEqual([existing]);
+		expect(logs.filter((line) => line.includes(droppedLine))).toEqual([]);
 	});
 
 	test("live: the block is stripped and stored, the unterminated tag still truncates", async () => {
