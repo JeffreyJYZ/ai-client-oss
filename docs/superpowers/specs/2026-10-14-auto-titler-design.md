@@ -1,6 +1,6 @@
 # Auto-titler (P3) — design
 
-Status: **written; queued for review after P2** (the agreed sequence is P1 → P2 → P3).
+Status: **reviewed and amended** (2026-10-15; the agreed sequence was P1 → P2 → P3, and P2 shipped as 0.5.0). The review's three blockers are folded in — the operational trigger with its two-part guard, the run mechanism that actually works here (`resolveProviderSync` → an `R = never` effect owned by `host.run`), and the `renameConversation` write plus the schema's `.catch("derived")` — along with sanitization, honest no-op vs resolved-but-failing, and the area count.
 
 ## Purpose
 
@@ -16,9 +16,9 @@ A built-in area that names a conversation from its **first user query** using a 
 
 1. On the **first** user query of a conversation, ask a model for a short title and set it — **once**.
 2. **Never overwrite a title the user renamed.**
-3. A **configurable** model, defaulting to a **free** one by a deterministic rule (the app has no price table, so "free" is a choice, not a detection): if a provider whose base URL is on `opencode.ai` exists, its free lane (`step-5-preview-free`); else if an OpenRouter provider exists, `openrouter/free`; else **the titler stays off** with a one-line hint pointing at the model picker. Always overridable.
+3. A **configurable** model, defaulting to a **free** one by a deterministic rule (the app has no price table, so "free" is a choice, not a detection): if a provider whose base URL is on `opencode.ai` exists **with a key set and on a platform that can actually call it** — OpenCode's chat endpoint refuses a browser preflight, so on web this lane is unusable — its free lane (`step-5-preview-free`); else if an OpenRouter provider exists **with a key**, `openrouter/free`; else **the titler stays off** with a one-line hint pointing at the model picker. Always overridable. **A provider with no key counts as *unresolved*, not as a request that fails silently**, and a hardcoded free id is a snapshot of a list that moves (`step-5-preview-free` is documented free *for a limited time*; OpenRouter's free router is capped per day) — so the rule prefers an id the provider's own cached model list still carries and degrades **to off**, never to a paid call.
 4. A failure is invisible: the derived title stays, the reason is logged, the turn is never blocked or failed.
-5. Toggleable like any built-in (`app.titler`). The area is on by default; with no model resolved it simply does nothing — an honest no-op rather than a broken feature.
+5. Toggleable like any built-in (`app.titler` — the **13th** area, the second added after P1's mechanism exists; an earlier draft called it the tenth, written before P2's `app.memory` landed). The area is on by default; with no model resolved it simply does nothing — an honest no-op rather than a broken feature — and **resolved-but-failing** (a dead id, a refused preflight, a 401) is surfaced in that same one-line place rather than looking like a titler with nothing to say.
 
 ## Non-goals
 
@@ -28,14 +28,25 @@ Re-titling old conversations in bulk; a titler that runs on every message; emoji
 
 ### Storage (additive, no migration)
 
-- `Conversation.titleSource?: "derived" | "model" | "user"` — **absent means `"derived"`**, which is exactly what legacy conversations are, so nothing needs migrating.
+- `Conversation.titleSource?: "derived" | "model" | "user"` — **absent means `"derived"`**, which is exactly what legacy conversations are, so nothing needs migrating. **It must be `z.enum([...]).optional().catch("derived")`:** `conversationSchema` is a plain object and a failed `safeParse` **discards the whole conversation** (`db/web.ts`, `db/tauri.ts`), so one value outside the enum would make a conversation invisible; the repo's own precedent for a tolerated value is `providerConfigSchema.protocol`'s `.catch(...)`.
+- **`renameConversation` must write `titleSource: "user"` together with the title.** The entire never-overwrite guarantee rests on that write and it does not exist today — the function sets `title` alone (`state/chat.ts`). Two writes in that order (derived → user), after which a model title is refused.
 - `Settings.titler?: { providerId?: string; model?: string }` — absent means "use the rule above".
 
 ### The trigger
 
-- On the **first** user message of a conversation whose `titleSource` is not `"user"`: fire-and-forget, never awaited by the turn, a small completion through the **same transport** as chat, with a prompt that asks for the title only, bounded to a short word count (a named constant, not a literal).
-- On success: set the title with `titleSource: "model"`. On failure or refusal: log and leave the derived title.
-- Guarded so it runs **once per conversation** (an in-flight set keyed by conversation id), and never for a conversation already `"model"` or `"user"`.
+- **"The first user message" is defined operationally, because the signal that exists today cannot carry it.** `turn-start` is published *before* the message is appended (`state/chat.ts`) and its payload is `{conversationId, protocol}` only, so a synchronous subscriber sees a conversation with neither messages nor text. The trigger therefore fires **after the append**, and its condition is `messages.length === 1` — there were none before this send — **and** `titleSource` not in `{ "model", "user" }`. **Both halves are required:** `titleSource` alone re-fires on every later send after a first attempt that failed (the in-flight set clears when the request settles while the source stays derived), and it would also title a hydrated **old** conversation on its next send, which the non-goals forbid.
+- A first message with **no text** (attachments only) is not a title source: skip it and keep the derived title.
+- The prompt asks for a title and nothing else, bounded to a short word count (a named constant). **The reply is sanitized before use** — strip a leading `Title:` label, surrounding quotes, markdown emphasis and a trailing newline — because that is the normal failure mode of a small free model; then cap the length.
+- On success: set the title with `titleSource: "model"`. On failure or refusal: **log the reason** and leave the derived title. A *resolved-but-failing* model (a dead id, a refused preflight, a 401) looks identical to a titler with nothing to do, so it is surfaced in the model picker's one-line hint.
+- Guarded so it runs **once per conversation** (an in-flight set keyed by conversation id) and never for one already `"model"` or `"user"`. The set is **per page**: two tabs can title the same new conversation, which is harmless (the last write wins on a non-`user` title) but is not "once" — say so rather than implying a lock. **Cancellation:** an in-flight title is abandoned when the area is toggled off or its conversation is deleted, which the scope-owned run below provides.
+
+### How it runs (the mechanism — "fire-and-forget" is not one)
+
+- **The shape that works here:** resolve the provider **synchronously** (`resolveProviderSync`, which bridges to the runtime and supplies the context), pass the resolved provider **value** into a `titleFor(...)` whose effect requires **nothing** (`R = never`), and own it with **`host.run`** + `Effect.scoped` inside the area's scope — the structure the memory area already uses for its subscription. The two obvious alternatives fail: `host.run` **cannot run an effect requiring `HostServices`** (its parameter is `R = never` by type and it runs on the empty-context runtime), and `runtime.runFork` carries context but is not scope-owned and leaks past the area.
+- **The request is `sendStream`'s, not `testModel`'s.** `testModel` proves the *request* half — transport, endpoint headers, the native one on desktop — but it deliberately never reads a body (it cancels once the status is known). The titler needs the body, so it reuses `sendStream`, which already yields the parsed chunk stream, with its own message, no tools, and no display.
+- **Fold `kind === "text"` chunks only.** Chunks are tagged `text` or `reasoning`; a free model that reasons streams its scratchpad first, and folding everything would put the model's thinking into the sidebar.
+- **Pick the session id deliberately:** `testModel` sends a constant probe id and the chat path sends the conversation id. The titler titles a conversation, so it sends that conversation's id.
+- **Cost and rate, stated rather than implied:** one call per **new** conversation, on a provider that may differ from the chat's, subject to that provider's free-tier cap; an override onto a paid model costs money.
 
 ### Where it lives
 
