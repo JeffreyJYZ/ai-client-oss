@@ -64,12 +64,12 @@ memoryNotes: Array<{
 ```
 
 - **Recently deleted is a view**, not a second store: the UI (and `memory_list(includeDeleted)`) filter on `deletedAt`.
-- **Bounds:** history depth and the number of soft-deleted entries are both capped, so settings cannot grow without limit; the oldest beyond the cap are dropped (the *content* of a live memory is never dropped, only its older revisions). The exact depths are **named constants pinned in the plan**, not inline numbers here.
+- **Bounds:** history depth and the number of soft-deleted entries are both capped, so settings cannot grow without limit; the oldest beyond the cap are dropped (the *content* of a live memory is never dropped, only its older revisions). **The request is bounded separately and independently:** the prompt carries at most a fixed number of live notes (newest first, since a newer memory supersedes a stale one) and a note's content has a length cap enforced by the tools as a readable **refusal** — the tag path *truncates* instead, because a reply has nobody to hand a refusal to, and that asymmetry is deliberate and documented at both sites. The exact depths and caps are **named constants pinned in the plan**, not inline numbers here.
 - The legacy `Settings.memories` array **stays and keeps being written** by the **tag path** (the documented fallback), so a 0.2.3 or 0.3.0 install opening this data still works — the tolerance property the data layer was built for, and the requester's standing requirement. **Ruling on the ambiguity a review surfaced:** entries created by a **tool** or by the **UI** are written to `memoryNotes` only and do **not** mirror into the legacy array. The legacy array is a *downgrade-tolerance mirror*, not a second store; mirroring every writer would mean two writers on a lossy, capped list, and an older app reading a stale-but-working list is the property being bought. Consequence, stated so it is not a surprise: after a downgrade, notes created through tools or the UI are not visible to the older build.
 
 ### The first real migration
 
-`dataVersion` bumps by one; the migration seeds a `memoryNotes` entry for each legacy note: a **slug id derived from the content**, deduped with a numeric suffix on collision, `updatedAt` = migration time, empty history. The legacy array is **left intact** — the migration adds, it does not rewrite — so a downgrade still reads what it wrote. Guarded by the version, so it runs exactly once.
+`dataVersion` bumps by one; the migration seeds a `memoryNotes` entry for each legacy note: a **slug id derived from the content**, deduped with a numeric suffix on collision, `updatedAt` = **the legacy note's own `createdAt`** (not migration time: a legacy note carries one, so no age is invented, and a clock read would break `migrate.ts`'s documented purity), empty history. The legacy array is **left intact** — the migration adds, it does not rewrite — so a downgrade still reads what it wrote. Guarded by the version, so it runs exactly once.
 
 ### The prompt, and the tag fallback
 
@@ -92,7 +92,7 @@ The Memories section **moves out of `Settings.tsx` into a registered section** (
 1. **No refusal defects the turn.** A tool that throws, and a refusal, both leave the turn alive with a readable outcome.
 2. **No marker truncates a message.** A complete block mid-prose keeps everything before and after it; a reply merely *quoting* a partial marker renders whole; a stream ending in a partial tag neither chops the text nor loses a complete block; an **unterminated** block is dropped with a log line, never half-stored.
 3. **Revert is honest.** One step per call; empty history is a refusal with a message.
-4. **The agent cannot destroy live content.** No tool reaches purge, and no tool can delete a live note. A soft-deleted note is restorable within the recently-deleted cap — the cap evicts **oldest-first**, so restoration is bounded by that constant rather than unbounded, and the cap's existence is the only reason a tool can indirectly age a deleted note out.
+4. **The agent cannot destroy live content.** No tool reaches purge, and no tool can remove a live note **permanently** — the only removal a tool has is the soft, revertable one. A soft-deleted note is restorable within the recently-deleted cap — the cap evicts **oldest-first**, so restoration is bounded by that constant rather than unbounded, and the cap's existence is the only reason a tool can indirectly age a deleted note out.
 5. **The migration is one-shot and additive.** Legacy ids become unique, slug-safe ids; the legacy array is untouched; running it twice changes nothing.
 6. **An older app is unaffected.** New fields are ignored, and the legacy array is still written.
 
