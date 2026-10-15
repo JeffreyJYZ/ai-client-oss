@@ -1,6 +1,7 @@
 import {
 	addMemory,
 	listMemories,
+	MAX_MEMORY_NOTE_LENGTH,
 	type MemoryEntry,
 	type MemoryResult,
 	removeMemory,
@@ -145,7 +146,7 @@ const ID_PARAMETER = {
 
 const CONTENT_PARAMETER = {
 	type: "string",
-	description: "The fact to remember.",
+	description: `The fact to remember, at most ${MAX_MEMORY_NOTE_LENGTH} characters.`,
 } as const;
 
 const ADD_DESCRIPTION =

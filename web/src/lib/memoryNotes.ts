@@ -2,9 +2,9 @@
  * The note store and its one mutator.
  *
  * Pure TypeScript: no Effect, no UI, no storage. Every write (add, update,
- * remove, revert) goes through `mutateList`, the single mutator — the shape
- * seam that lets a later task route the legacy tag path (`lib/memory.ts`)
- * through it so both writers converge on one shape.
+ * remove, revert) goes through `mutateList`, the single mutator shared by the
+ * memory tools and the legacy tag path (`lib/memory.ts`), so both writers stay
+ * on one shape.
  */
 
 /** Id allowlist. Own schema: ids guard a different thing than plugin ids or

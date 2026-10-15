@@ -66,7 +66,10 @@ describe("memoryPrompt", () => {
 				history: [],
 			}),
 		);
-		const prompt = memoryPrompt(notes);
+		// The notes array is the store under test: memoryPrompt may read it but must
+		// not mutate or trim it.
+		const store = notes;
+		const prompt = memoryPrompt(store);
 		// The newest note and the oldest one still inside the bound are sent...
 		expect(prompt).toContain(`n-${newest} — fact number ${newest}`);
 		expect(prompt).toContain(`n-${oldestKept} — fact number ${oldestKept}`);
@@ -79,8 +82,8 @@ describe("memoryPrompt", () => {
 		expect(prompt.indexOf(`n-${newest} —`)).toBeLessThan(
 			prompt.indexOf(`n-${oldestKept} —`),
 		);
-		// The bound is about what is *sent*: the store still holds every note.
-		expect(notes).toHaveLength(total);
+		// The bound governs what is sent, never what is kept: the store holds all.
+		expect(store).toHaveLength(total);
 	});
 });
 
