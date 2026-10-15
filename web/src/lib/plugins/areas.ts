@@ -1,5 +1,6 @@
 import { registerCommandBuiltins } from "@lib/plugins/builtin/commands";
 import { registerComposerBuiltins } from "@lib/plugins/builtin/composer";
+import { registerMemoryBuiltins } from "@lib/plugins/builtin/memory";
 import { registerOverlayBuiltins } from "@lib/plugins/builtin/overlay";
 import { registerProviderBuiltins } from "@lib/plugins/builtin/providers";
 import { registerSettingsBuiltins } from "@lib/plugins/builtin/settings";
@@ -121,6 +122,7 @@ const registrars: Record<BuiltinId, (host: Host) => void> = {
 	"app.commands": registerCommandBuiltins,
 	"app.themes": registerThemeBuiltins,
 	"app.overlay": registerOverlayBuiltins,
+	"app.memory": registerMemoryBuiltins,
 	"app.builtins": registerManager,
 };
 

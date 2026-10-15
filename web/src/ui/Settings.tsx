@@ -8,11 +8,9 @@ import {
 	clearPreMigrationCapture,
 	db,
 	getPreMigrationCapture,
-	type MemoryNote,
 	type Profile,
 	type ProviderConfig,
 } from "@lib/db";
-import { MAX_MEMORY_NOTE_LENGTH, mergeMemories } from "@lib/memory";
 import { isDesktop } from "@lib/platform";
 import { protocolNames } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
@@ -789,122 +787,9 @@ export function WebSearchSection() {
 	);
 }
 
-/** The durable-memory list and its editor (`settings.sections`, open-closed). */
-export function MemorySection() {
-	const settings = useSettings();
-	const [memoryDraft, setMemoryDraft] = useState("");
-
-	const setMemoriesEnabled = (on: boolean): void => {
-		setSettings({ memoriesEnabled: on });
-	};
-
-	/**
-	 * Add a user-typed note through the same merge as the model path, then
-	 * re-stamp the added note `source: "user"` (the merge stamps its additions
-	 * "model"). Identity, not position, decides what is new: a duplicate adds
-	 * nothing and the cap evicts the oldest.
-	 */
-	const addMemory = (): void => {
-		const text = memoryDraft.trim();
-		if (text === "") return;
-		const existingIds = new Set(settings.memories.map((note) => note.id));
-		const merged: MemoryNote[] = mergeMemories(
-			settings.memories,
-			[text],
-			Date.now(),
-		).map((note) =>
-			existingIds.has(note.id) ? note : { ...note, source: "user" as const },
-		);
-		setSettings({ memories: merged });
-		setMemoryDraft("");
-	};
-
-	const removeMemory = (id: string): void => {
-		setSettings({
-			memories: settings.memories.filter((note) => note.id !== id),
-		});
-	};
-
-	return (
-		<Section
-			className={SECTION}
-			summaryClassName={SECTION_SUMMARY_WRAP}
-			open={false}
-			heading={
-				<>
-					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-						Memory
-					</h3>
-					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
-						Enabled
-						<input
-							type="checkbox"
-							checked={settings.memoriesEnabled}
-							onChange={(event) => setMemoriesEnabled(event.target.checked)}
-							className="h-4 w-4 accent-neutral-300"
-						/>
-					</label>
-				</>
-			}
-		>
-			<p className="text-xs text-neutral-500">
-				One list of durable facts for every chat, sent with each request. The
-				model can save notes in its replies; you can add or remove them here.
-			</p>
-			{settings.memories.length === 0 ? (
-				<p className="text-sm text-neutral-500">No memories yet.</p>
-			) : (
-				<ul className="flex flex-col gap-2">
-					{[...settings.memories].reverse().map((note) => (
-						<li
-							key={note.id}
-							className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
-						>
-							<span className="flex min-w-0 flex-1 flex-col items-start text-left">
-								<span className="w-full text-sm text-neutral-100">
-									{note.text}
-								</span>
-								<span className="w-full truncate text-xs text-neutral-500">
-									{note.source === "model" ? "from the model" : "yours"} ·{" "}
-									{new Date(note.createdAt).toLocaleDateString()}
-								</span>
-							</span>
-							<ConfirmButton
-								label="Delete"
-								confirmLabel="Confirm?"
-								onConfirm={() => removeMemory(note.id)}
-								className={BUTTON}
-							/>
-						</li>
-					))}
-				</ul>
-			)}
-			<form
-				className="flex gap-2"
-				onSubmit={(event) => {
-					event.preventDefault();
-					addMemory();
-				}}
-			>
-				<input
-					type="text"
-					value={memoryDraft}
-					maxLength={MAX_MEMORY_NOTE_LENGTH}
-					onChange={(event) => setMemoryDraft(event.target.value)}
-					placeholder="Remember that…"
-					className={INPUT}
-				/>
-				<button
-					type="submit"
-					disabled={memoryDraft.trim() === ""}
-					className={BUTTON}
-				>
-					Add
-				</button>
-			</form>
-		</Section>
-	);
-}
+/** The durable-memory section moved to `ui/memory/MemorySection.tsx`: it is
+ *  registered by the `app.memory` area (`lib/plugins/builtin/memory.ts`), not
+ *  by this file's area, so the whole memory feature is one toggle. */
 
 /** The backup export/import block, with its banners (`settings.sections`). */
 export function BackupSection() {

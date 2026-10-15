@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
 import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
 import {
@@ -7,6 +7,7 @@ import {
 	makeBuiltinsReconciler,
 	makeCoalescingRunner,
 } from "@lib/plugins/builtin";
+import { MEMORY_TOOL_NAMES } from "@lib/plugins/builtin/memory";
 import {
 	BUILTIN_IDENTITIES,
 	LOCKED_BUILTIN_IDS,
@@ -30,9 +31,23 @@ import {
 	makeBuiltinsStore,
 	startBuiltins,
 } from "@/state/builtins";
+import { setSettings } from "@/state/settings";
 import { minimalHostView } from "@/ui/MinimalHost";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
 import { SettingsShell } from "@/ui/Settings";
+
+/**
+ * The tools registry with everything on: the tools area's own two, then the
+ * memory area's five, in `BUILTIN_AREAS` registration order. Derived from the
+ * memory registrar's own name list, so this suite tests the reconciler rather
+ * than re-typing (and being broken by) a renaming — the name pin is
+ * `builtin/memory.test.ts`'s.
+ */
+const ALL_TOOLS: readonly string[] = [
+	"fetch_url",
+	"web_search",
+	...MEMORY_TOOL_NAMES,
+];
 
 /**
  * The built-in store's semantics. No DOM: the store is a module snapshot plus a
@@ -48,6 +63,12 @@ import { SettingsShell } from "@/ui/Settings";
 // line from one test would otherwise be visible to the next.
 beforeEach(() => {
 	clearLog();
+	// `app.memory` reads the real settings store (`appMemorySettings`); make the
+	// assumption explicit rather than ambient so this suite is order-independent.
+	setSettings({ memoriesEnabled: true });
+});
+afterEach(() => {
+	setSettings({ memoriesEnabled: true });
 });
 
 interface Harness {
@@ -622,7 +643,7 @@ describe("reconcile", () => {
 
 		// Concrete anchors, one per registry the app's own areas fill.
 		expect(registered.ui).toContain("ui.root.layout");
-		expect(registered.tools).toEqual(["fetch_url", "web_search"]);
+		expect(registered.tools).toEqual(ALL_TOOLS);
 		expect(registered.providers).toEqual(
 			expect.arrayContaining(["anthropic", "responses", "chatcompletions"]),
 		);
@@ -688,12 +709,13 @@ describe("reconcile", () => {
 		}
 
 		// The direct case, for the smallest surface: disabling tools empties the
-		// tools registry and leaves `ui` untouched.
+		// tools area and leaves `ui` untouched. The memory area's tools are the
+		// only other tools, so they are what remains.
 		enabled.all();
 		enabled.set("app.tools", false);
 		await run(reconciler, services);
 		const direct = registryIds(services);
-		expect(direct.tools).toEqual([]);
+		expect(direct.tools).toEqual([...MEMORY_TOOL_NAMES]);
 		expect(direct.ui).toEqual(all.ui);
 	});
 
@@ -715,7 +737,9 @@ describe("reconcile", () => {
 		try {
 			enabled.set("app.tools", false);
 			await run(reconciler, services);
-			expect(registryIds(services).tools, "off empties the area").toEqual([]);
+			expect(registryIds(services).tools, "off empties the area").toEqual([
+				...MEMORY_TOOL_NAMES,
+			]);
 
 			enabled.set("app.tools", true);
 			await run(reconciler, services);
@@ -723,7 +747,9 @@ describe("reconcile", () => {
 
 			enabled.set("app.tools", false);
 			await run(reconciler, services);
-			expect(registryIds(services).tools, "off again empties it").toEqual([]);
+			expect(registryIds(services).tools, "off again empties it").toEqual([
+				...MEMORY_TOOL_NAMES,
+			]);
 
 			enabled.set("app.tools", true);
 			await run(reconciler, services);
@@ -785,7 +811,7 @@ describe("reconcile", () => {
 		enabled.all();
 		await run(reconciler, services);
 		const baseline = registryIds(services);
-		expect(baseline.tools).toEqual(["fetch_url", "web_search"]);
+		expect(baseline.tools).toEqual(ALL_TOOLS);
 
 		clearLog();
 		failing = true;
@@ -793,8 +819,9 @@ describe("reconcile", () => {
 
 		const after = registryIds(services);
 		// The failed area registered nothing: its one partial contribution was
-		// rolled back with its scope rather than left behind.
-		expect(after.tools).toEqual([]);
+		// rolled back with its scope rather than left behind. Only the memory
+		// area's tools remain.
+		expect(after.tools).toEqual([...MEMORY_TOOL_NAMES]);
 		expect(after.ui).not.toContain("test.partial");
 		// Every other area is intact.
 		expect(after.ui).toEqual(baseline.ui);
@@ -1165,7 +1192,10 @@ describe("the manager rides the locked core", () => {
 			(entry) => entry.slot === "settings.sections",
 		);
 
-		// The move kept the order: the nine Settings sections, then the manager.
+		// The move kept the render order: every section that lands in
+		// `settings.sections` by its explicit `order`, then the manager. Memory
+		// rides `app.memory` now (its area owns it) but still sorts here at 70;
+		// the order, not the owning area, is what this list pins.
 		expect(sections.map((entry) => entry.id)).toEqual([
 			"settings.section.notices",
 			"settings.section.providers",
@@ -1217,14 +1247,17 @@ describe("per-contribution toggles", () => {
 
 		enabled.all();
 		await run(reconciler, services);
-		expect(registryIds(services).tools).toEqual(["fetch_url", "web_search"]);
+		expect(registryIds(services).tools).toEqual(ALL_TOOLS);
 
 		enabled.setContribution("app.tools", "fetch_url", false);
 		await run(reconciler, services);
 
 		// `fetch_url` is not registered at all — off is indistinguishable from
 		// never existed — and its sibling is untouched.
-		expect(registryIds(services).tools).toEqual(["web_search"]);
+		expect(registryIds(services).tools).toEqual([
+			"web_search",
+			...MEMORY_TOOL_NAMES,
+		]);
 	});
 
 	test("a UI area: disabling one contribution leaves its siblings registered", async () => {
@@ -1283,7 +1316,7 @@ describe("per-contribution toggles", () => {
 
 		const after = registryIds(services);
 		// The area is not emptied: its remaining tool is registered.
-		expect(after.tools).toEqual(["web_search"]);
+		expect(after.tools).toEqual(["web_search", ...MEMORY_TOOL_NAMES]);
 		// And nothing outside the area moved.
 		expect(after.ui).toEqual(baseline.ui);
 		expect(after.commands).toEqual(baseline.commands);
@@ -1314,7 +1347,7 @@ describe("per-contribution toggles", () => {
 
 		// The stale id matches nothing to skip, so both tools register; no crash,
 		// no effect. The stored state is left exactly as found (no migration).
-		expect(registryIds(services).tools).toEqual(["fetch_url", "web_search"]);
+		expect(registryIds(services).tools).toEqual(ALL_TOOLS);
 		expect(h.settings().builtins?.["app.tools"]?.contributions).toEqual({
 			"renamed-contribution": false,
 		});
@@ -1501,6 +1534,30 @@ describe("the coalescing runner", () => {
 			expect(new Set(list).size, `${name} has no duplicates`).toBe(list.length);
 		}
 		expect(ids.ui).toContain("ui.root.layout");
-		expect(ids.tools).toEqual(["fetch_url", "web_search"]);
+		expect(ids.tools).toEqual(ALL_TOOLS);
+	});
+});
+
+describe("memory tools follow the stored flag (explicit, not ambient)", () => {
+	test("memoriesEnabled off ⇒ the five are absent; on ⇒ present", async () => {
+		const services = makeServices();
+		const enabled = makeEnabled();
+		const reconciler = makeBuiltinsReconciler({
+			areas: BUILTIN_AREAS,
+			enabledOf: enabled.enabledOf,
+			contributionEnabledOf: enabled.contributionEnabledOf,
+			makeHost,
+		});
+
+		enabled.all();
+		setSettings({ memoriesEnabled: false });
+		await run(reconciler, services);
+		const off = registryIds(services);
+		expect(off.tools).toEqual(["fetch_url", "web_search"]);
+
+		setSettings({ memoriesEnabled: true });
+		await run(reconciler, services);
+		const on = registryIds(services);
+		expect(on.tools).toEqual(ALL_TOOLS);
 	});
 });

@@ -8,7 +8,7 @@ Replace the in-band `<memory>` tag as the *primary* path with agent-driven **too
 
 ## What exists today (facts, with the code that says so)
 
-- `web/src/lib/memory.ts`: `MEMORY_TAG_OPEN`/`MEMORY_TAG_CLOSE`, `extractMemories` (pure, idempotent, **safe mid-stream** — the visible text is derived from the whole raw accumulation and a *partial* tag is held back), `memoryPrompt(notes)` (returns `""` when there are no notes, so the request stays byte-identical), `mergeMemories`, `MAX_MEMORY_NOTE_LENGTH`.
+- `web/src/lib/memory.ts`: `MEMORY_TAG_OPEN`/`MEMORY_TAG_CLOSE`, `extractMemories` (pure, idempotent, **safe mid-stream** — the visible text is derived from the whole raw accumulation; as of P2's T4 a *partial* tag is **not** held back, because a partial tag is prose and must render whole — the behaviour that reverses the earlier chop — while a **complete** opening tag with no close is a malformed block and is dropped), `memoryPrompt(notes)` (returns `""` when there are no notes, so the request stays byte-identical, and carries at most the newest `MAX_MEMORY_NOTES` — the bound that actually governs the request), `MAX_MEMORY_NOTES`, `MAX_MEMORY_NOTE_LENGTH`.
 - Memories **already carry ids** (`MemoryNote`; `nextMemoryId()` → `memory-<uuid>`) — but they are auto-generated and the model can neither edit nor remove one: the tag path is append-only.
 - The Memories UI lives **inline in `ui/Settings.tsx`** (a master `memoriesEnabled` toggle, a list, add/remove), not as a registered settings section.
 - **The tool path exists** (T10 + T24a): `host.tools.register` announces a tool on the wire for endpoints that have a function-tool mechanism, the turn loop executes it, the result is correlated back with no orphan, and a **faulting executor becomes a failed outcome rather than a defect**.
@@ -51,6 +51,9 @@ A semantic dedupe/similarity engine; vector recall or embeddings (all live memor
 One new field, deliberately a single list rather than two:
 
 ```ts
+// MemoryEntry, defined in lib/memoryNotes.ts. Deliberately NOT named `MemoryNote`:
+// db/types.ts already exports `MemoryNote` for the legacy {id, text, createdAt, source}
+// shape, which stays (the legacy array keeps being written).
 memoryNotes: Array<{
   id: string;
   content: string;
@@ -61,12 +64,12 @@ memoryNotes: Array<{
 ```
 
 - **Recently deleted is a view**, not a second store: the UI (and `memory_list(includeDeleted)`) filter on `deletedAt`.
-- **Bounds:** history depth and the number of soft-deleted entries are both capped, so settings cannot grow without limit; the oldest beyond the cap are dropped (the *content* of a live memory is never dropped, only its older revisions). The exact depths are **named constants pinned in the plan**, not inline numbers here.
-- The legacy `Settings.memories` array **stays and keeps being written**, so a 0.2.3 or 0.3.0 install opening this data still works — the tolerance property the data layer was built for, and the requester's standing requirement.
+- **Bounds:** history depth and the number of soft-deleted entries are both capped, so settings cannot grow without limit; the oldest beyond the cap are dropped (the *content* of a live memory is never dropped, only its older revisions). **The request is bounded separately and independently:** the prompt carries at most a fixed number of live notes (newest first, since a newer memory supersedes a stale one) and a note's content has a length cap enforced by the tools as a readable **refusal** — the tag path *truncates* instead, because a reply has nobody to hand a refusal to, and that asymmetry is deliberate and documented at both sites. The exact depths and caps are **named constants pinned in the plan**, not inline numbers here.
+- The legacy `Settings.memories` array **stays and keeps being written** by the **tag path** (the documented fallback), so a 0.2.3 or 0.3.0 install opening this data still works — the tolerance property the data layer was built for, and the requester's standing requirement. **Ruling on the ambiguity a review surfaced:** entries created by a **tool** or by the **UI** are written to `memoryNotes` only and do **not** mirror into the legacy array. The legacy array is a *downgrade-tolerance mirror*, not a second store; mirroring every writer would mean two writers on a lossy, capped list, and an older app reading a stale-but-working list is the property being bought. Consequence, stated so it is not a surprise: after a downgrade, notes created through tools or the UI are not visible to the older build.
 
 ### The first real migration
 
-`dataVersion` bumps by one; the migration seeds a `memoryNotes` entry for each legacy note: a **slug id derived from the content**, deduped with a numeric suffix on collision, `updatedAt` = migration time, empty history. The legacy array is **left intact** — the migration adds, it does not rewrite — so a downgrade still reads what it wrote. Guarded by the version, so it runs exactly once.
+`dataVersion` bumps by one; the migration seeds a `memoryNotes` entry for each legacy note: a **slug id derived from the content**, deduped with a numeric suffix on collision, `updatedAt` = **the legacy note's own `createdAt`** (not migration time: a legacy note carries one, so no age is invented, and a clock read would break `migrate.ts`'s documented purity), empty history. The legacy array is **left intact** — the migration adds, it does not rewrite — so a downgrade still reads what it wrote. Guarded by the version, so it runs exactly once.
 
 ### The prompt, and the tag fallback
 
@@ -89,7 +92,7 @@ The Memories section **moves out of `Settings.tsx` into a registered section** (
 1. **No refusal defects the turn.** A tool that throws, and a refusal, both leave the turn alive with a readable outcome.
 2. **No marker truncates a message.** A complete block mid-prose keeps everything before and after it; a reply merely *quoting* a partial marker renders whole; a stream ending in a partial tag neither chops the text nor loses a complete block; an **unterminated** block is dropped with a log line, never half-stored.
 3. **Revert is honest.** One step per call; empty history is a refusal with a message.
-4. **The agent cannot destroy.** No tool reaches purge; a soft-deleted memory is restorable after any number of tool calls.
+4. **The agent cannot destroy live content.** No tool reaches purge, and no tool can remove a live note **permanently** — the only removal a tool has is the soft, revertable one. A soft-deleted note is restorable within the recently-deleted cap — the cap evicts **oldest-first**, so restoration is bounded by that constant rather than unbounded, and the cap's existence is the only reason a tool can indirectly age a deleted note out.
 5. **The migration is one-shot and additive.** Legacy ids become unique, slug-safe ids; the legacy array is untouched; running it twice changes nothing.
 6. **An older app is unaffected.** New fields are ignored, and the legacy array is still written.
 

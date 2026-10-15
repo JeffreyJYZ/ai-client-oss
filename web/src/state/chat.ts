@@ -1,6 +1,13 @@
 import { SendMsg } from "@lib/api";
 import { type ChatMessage, type Conversation, db } from "@lib/db";
-import { extractMemories, memoryPrompt, mergeMemories } from "@lib/memory";
+import {
+	type ExtractedMemories,
+	extractMemories,
+	memoryLogLines,
+	memoryPrompt,
+	recordMemories,
+} from "@lib/memory";
+import type { BuiltinId } from "@lib/plugins/builtinIdentity";
 import { HostServices } from "@lib/plugins/host";
 import {
 	composeTurnBody,
@@ -30,6 +37,7 @@ import type {
 } from "@lib/providers/types";
 import { Cause, Effect, Exit, Fiber, Option, Stream } from "effect";
 import { useSyncExternalStore } from "react";
+import { getBuiltinsSnapshot } from "@/state/builtins";
 import { getActiveProvider, getSettings, setSettings } from "./settings";
 
 export type ChatStatus = "idle" | "streaming";
@@ -241,11 +249,21 @@ const toolMarker = (name: string): string =>
 	/search/i.test(name) ? "🔍 searched the web" : `🔧 ${name}`;
 
 /**
- * The answer text of the accumulation: the model's own
- * words, memory blocks stripped. Markers never enter
- * it — `text` is exactly what may go on the wire.
+ * The text a reply renders with: memory blocks stripped while the feature is
+ * live, the raw accumulation while it is off. An area that is off interprets
+ * nothing of its own, so the tag is ordinary prose then — rendered whole, and
+ * never a truncation. (Live, a complete block is removed and an unterminated
+ * one drops the rest of the reply; see `extractMemories`.)
  */
-const answerText = (raw: RawText): string => extractMemories(raw.value).text;
+const displayText = (text: string): string =>
+	memoryActive() ? extractMemories(text).text : text;
+
+/**
+ * The answer text of the accumulation: the model's own
+ * words, memory blocks stripped while the feature is live. Markers
+ * never enter it — `text` is exactly what may go on the wire.
+ */
+const answerText = (raw: RawText): string => displayText(raw.value);
 
 /**
  * Record a display-only marker line at the current answer
@@ -259,15 +277,18 @@ const pushMarker = (raw: RawText, line: string): void => {
 };
 
 /**
- * Raw text accumulation shared with `appendChunk`. Memory tags are
- * stripped from the visible text, so the raw accumulation is the
- * single source both the visible text and the next-turn seed derive
- * from: re-extracting over the whole accumulation is idempotent, and
- * a tag split across chunks still never reaches the UI or the store.
- * Markers are kept apart from it — at the stripped answer length
- * each was inserted at — so the transcript interleaves them with the
- * answer text while the accumulation itself stays marker-free (a
- * marker is display-only and must never reach the wire).
+ * Raw text accumulation shared with `appendChunk`. Memory blocks are
+ * stripped from the visible text while the memory feature is live (and left
+ * verbatim while it is off), so the raw accumulation is the single source both
+ * the visible text and the next-turn seed derive from: re-extracting over the
+ * whole accumulation is idempotent, and a complete block never reaches the UI
+ * or the store. A *partial* tag is ordinary prose and does render, so a marker
+ * split across chunks can appear for the frame that carries it — the spec's
+ * chosen trade, because chopping it would truncate real text. Markers are kept
+ * apart from it — at the stripped answer length each was inserted at — so the
+ * transcript interleaves them with the answer text while the accumulation
+ * itself stays marker-free (a marker is display-only and must never reach the
+ * wire).
  */
 interface RawText {
 	value: string;
@@ -342,16 +363,66 @@ const appendMarker = (
 };
 
 /**
- * Persist memory notes the model ended its reply with. Pure merge through
- * `mergeMemories`, then the settings store; a no-op when the reply carried
- * none or the feature is off.
+ * The `app.memory` area's id, pinned to the identity table's union so renaming
+ * the area there is a type error here rather than a silently ungated read.
  */
-const commitMemories = (additions: readonly string[]): void => {
-	if (additions.length === 0) return;
+const MEMORY_AREA_ID = "app.memory" satisfies BuiltinId;
+
+/**
+ * Whether the memory feature is live: the `app.memory` area **and** the
+ * `memoriesEnabled` setting. One predicate for the whole feature — the
+ * injected prompt, the note store and the reply-text strip all read it — so
+ * "off" means *nothing* about memory happens, not merely that its UI is
+ * hidden. With the area off the section and the five tools are gone, and a
+ * note recorded or injected anyway would be invisible, with no UI to see or
+ * remove it; with the setting off the feature retires one level in.
+ *
+ * Cheap and synchronous on purpose: the streaming render path calls it once
+ * per frame. The area is read from the builtins store's synchronous snapshot
+ * (`getBuiltinsSnapshot`), the same shape the Plugins manager reads: absent
+ * means on, and the store itself clamps a locked area on. `=== true` because
+ * `resolve` writes an explicit flag for every identity in the table, this one
+ * included.
+ */
+const memoryActive = (): boolean =>
+	getBuiltinsSnapshot().builtins[MEMORY_AREA_ID] === true &&
+	getSettings().memoriesEnabled;
+
+/**
+ * Persist memory notes the model ended its reply with. The tag path is the
+ * documented fallback for endpoints that cannot be sent tool declarations, so
+ * it routes through T1's single mutator (`recordMemories`) exactly as the five
+ * memory tools do: a complete block adds one entry to the note store under a
+ * generated id **and** mirrors the same dedupe decision into the legacy
+ * `memories` array.
+ *
+ * The whole feature's one predicate guards the write, before the malformed
+ * diagnostic: with the area off (or the setting off) nothing about memory
+ * happens, so neither the store nor the console mentions a tag that is, then,
+ * ordinary prose. The malformed diagnostic is still emitted for a live
+ * feature even when the reply carried no block — the caller harvests
+ * `extractMemories` and this logs what it flagged.
+ */
+const commitMemories = (extracted: ExtractedMemories): void => {
+	// Deliberately redundant with the `memoryActive()` harvest in `finalize`
+	// (the `extracted` argument's build site): both gates exist so "off" is
+	// decided by one predicate at every memory surface; removing either alone
+	// changes nothing observably, only removing both fails a test.
+	if (!memoryActive()) return;
+	for (const line of memoryLogLines(extracted)) {
+		Effect.runFork(Effect.logWarning(line));
+	}
+	if (extracted.memories.length === 0) return;
 	const settings = getSettings();
-	if (!settings.memoriesEnabled) return;
+	const recorded = recordMemories(
+		settings.memories,
+		settings.memoryNotes,
+		extracted.memories,
+		Date.now(),
+	);
 	setSettings({
-		memories: [...mergeMemories(settings.memories, additions, Date.now())],
+		memories: [...recorded.memories],
+		memoryNotes: [...recorded.notes],
 	});
 };
 
@@ -361,7 +432,7 @@ const finalize = (
 	protocol: string,
 	exit: Exit.Exit<void, string>,
 	next: unknown,
-	memories: readonly string[],
+	extracted: ExtractedMemories,
 ): void => {
 	// A newer send (or a `stop`) invalidated this run; its finalizer must not
 	// touch shared state, or it would clobber the new stream's status/`prev`.
@@ -370,7 +441,7 @@ const finalize = (
 	streamConversationId = undefined;
 	if (Exit.isSuccess(exit)) {
 		prevByConversationProtocol.set(prevKey(conversationId, protocol), next);
-		commitMemories(memories);
+		commitMemories(extracted);
 	} else if (!Cause.hasInterruptsOnly(exit.cause)) {
 		// The turn failed: drop the stored body so the next turn
 		// rebuilds from the transcript — which carries this turn's
@@ -495,11 +566,13 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 
 	const settings = getSettings();
 	// The memory section is composed for the wire only: the conversation's own
-	// `systemPrompt` never changes, and with no notes (or the feature off)
-	// `memoryPrompt` is "" so the request is byte-identical to before.
-	const memory = settings.memoriesEnabled
-		? memoryPrompt(settings.memories)
-		: "";
+	// `systemPrompt` never changes, and with no live notes (or memory off)
+	// `memoryPrompt` is "" so the request is byte-identical to before. "Off"
+	// is the feature's one predicate: the area **and** the setting, because
+	// the area owns the feature, so its toggle has to take the injected prompt
+	// with the section, the tools and the reply-text strip, or an area
+	// switched off would keep steering every request.
+	const memory = memoryActive() ? memoryPrompt(settings.memoryNotes) : "";
 
 	// The TinyFish key rides the request's ctx (it decides
 	// the `web_search` declaration) and every tool
@@ -753,14 +826,19 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 			run.pipe(
 				Effect.onExit((exit) =>
 					Effect.gen(function* () {
-						const extracted = extractMemories(raw.value);
+						// Harvest the reply's blocks only while the feature is
+						// live; off, the tag is prose, so there is nothing to
+						// extract and nothing to store.
+						const extracted: ExtractedMemories = memoryActive()
+							? extractMemories(raw.value)
+							: { text: raw.value, memories: [], malformed: false };
 						// `afterReply` inspects or rewrites the final reply before
 						// it is stored (spec §5). Only a successful turn has a
 						// reply to rewrite; a failed or stopped turn ignores it.
 						const reply = Exit.isSuccess(exit)
 							? yield* runPipeline(
 									"afterReply",
-									extractMemories(raw.value.slice(finalTextStart)).text,
+									displayText(raw.value.slice(finalTextStart)),
 									meta,
 								)
 							: "";
@@ -769,11 +847,11 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 							conversationId,
 							protocol,
 							exit,
-							// The final round's text (memory tags
-							// stripped), appended to the body the tool
-							// loop extended.
+							// The final round's text (memory tags stripped
+							// while the feature is live), appended to the body
+							// the tool loop extended.
 							appendAssistant(wire, reply),
-							extracted.memories,
+							extracted,
 						);
 					}),
 				),

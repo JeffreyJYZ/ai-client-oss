@@ -4,7 +4,7 @@ import { Section } from "@/ui/kit";
 
 /**
  * The settings-sections service (spec §4/§5): `settings.registerSection(...)`
- * is a thin, typed wrapper over the `settings.sections` slot the nine built-in
+ * is a thin, typed wrapper over the `settings.sections` slot the ten built-in
  * sections already register into (Task 9), so a plugin's section renders,
  * reorders and hides exactly like a built-in's — same slot, same `order` sort
  * key, same `hidden` filter in the slot resolver.

@@ -31,7 +31,7 @@ Each line gets its test in the task named, because the spec implies the behaviou
 2. **A marker truncating a message** — a complete block mid-prose, a reply merely quoting a partial marker, a partial tag at end-of-stream, an unterminated block. *(T4)*
 3. **A migration that runs twice, or rewrites the legacy array** — must be one-shot and additive, with the legacy array untouched. *(T2)*
 4. **A path to purge from a tool** — there must be none; only the UI may purge. *(T5)*
-5. **The two writers disagreeing** — a tag-created memory and a tool-created one must be indistinguishable afterwards. *(T1)*
+5. **The two writers disagreeing** — a tag-created memory and a tool-created one must be indistinguishable afterwards. *(T4 — not T1)*: the tag path (`lib/memory.ts`'s `mergeMemories`) only routes through T1's single mutator in T4, so a test placed in T1 called one function twice and **could not fail**. It belongs where the second writer exists.
 
 ## File Structure
 
@@ -51,7 +51,7 @@ Each line gets its test in the task named, because the spec implies the behaviou
 - Create: `web/src/lib/memoryNotes.ts`, `web/src/lib/memoryNotes.test.ts`
 
 **Interfaces:**
-- Produces: `MEMORY_ID_PATTERN: RegExp`; `interface MemoryNote { id: string; content: string; updatedAt: number; deletedAt?: number; history: readonly { content: string; at: number }[] }`; `type MemoryResult = { ok: true; notes: readonly MemoryNote[] } | { ok: false; message: string }`; `addMemory(notes, id, content, now): MemoryResult`, `updateMemory(...)`, `removeMemory(...)`, `revertMemory(...)`, `listMemories(notes, includeDeleted?)`, and the bounds constants (`MEMORY_HISTORY_DEPTH`, `MEMORY_DELETED_CAP`).
+- Produces: `MEMORY_ID_PATTERN: RegExp`; `interface MemoryEntry { id: string; content: string; updatedAt: number; deletedAt?: number; history: readonly { content: string; at: number }[] }` (renamed from this plan's earlier `MemoryNote`: `db/types.ts` already exports that name for the legacy `{id, text, createdAt, source}` shape, which stays); `type MemoryResult = { ok: true; notes: readonly MemoryEntry[] } | { ok: false; message: string }`; `addMemory(notes, id, content, now): MemoryResult`, `updateMemory(...)`, `removeMemory(...)`, `revertMemory(...)`, `listMemories(notes, includeDeleted?)`, and the bounds constants (`MEMORY_HISTORY_DEPTH`, `MEMORY_DELETED_CAP`).
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -61,8 +61,8 @@ test("adding a taken id is refused with the id in the message", …);
 test("remove is soft: the entry stays, with deletedAt set", …);
 test("revert undoes a removal, and undoes an edit", …);
 test("revert with empty history is a refusal, not a no-op", …);
-test("history and the deleted list are bounded", …);
-test("a tag-created note and a tool-created note are indistinguishable", …);  // Review Focus 5
+test("history and the deleted list are bounded", …);  // assert the surviving contents by name and the evicted id: length alone passes if the NEWEST were kept
+test("the input store is unchanged by every operation", …);  // immutability: read the return value only and an in-place mutation still passes
 ```
 
 - [ ] **Step 2: Run them and watch them fail** — `cd web && bun test src/lib/memoryNotes.test.ts`.
@@ -84,14 +84,14 @@ Pure functions over an immutable list: one private mutator that every operation 
 - Test: `web/src/lib/db/migrate.test.ts` (or the existing migration test file)
 
 **Interfaces:**
-- Consumes: T1's `MemoryNote`.
-- Produces: `Settings.memoryNotes: MemoryNote[]` (optional, defaulting to `[]`) and one entry in `migrations` whose `to` is the bumped `DATA_VERSION`.
+- Consumes: T1's `MemoryEntry`.
+- Produces: `Settings.memoryNotes: MemoryEntry[]` (optional, defaulting to `[]`) and one entry in `migrations` whose `to` is the bumped `DATA_VERSION`.
 
 - [ ] **Step 1: Write the failing tests** — an absent `memoryNotes` field means no notes (not a failure); a legacy-only blob migrates **once** into unique slug ids; running the migration again changes nothing; the legacy array is **byte-identical** afterwards; and the **frozen 0.2.3 fixture still parses** the new blob (the tolerance guarantee, using the fixtures the data-safety phase froze).
 
 - [ ] **Step 2: Run them and watch them fail.**
 
-- [ ] **Step 3: Implement** — the schema field (optional, so nothing needs migrating on its own account) and the migration: for each legacy note, a slug id derived from content, deduped with a numeric suffix; `updatedAt` = migration time (a legacy note's true age is unknown, and inventing one would be a lie); empty history; the legacy array untouched.
+- [ ] **Step 3: Implement** — the schema field (optional, so nothing needs migrating on its own account) and the migration: for each legacy note, a slug id derived from content, deduped with a numeric suffix; `updatedAt` = **the legacy note's own `createdAt`** (legacy notes carry one, so no age is invented) — **not** a clock read, because `migrate.ts` documents `run` as a pure, idempotent transform and `Date.now()` would make two runs differ; empty history; the legacy array untouched.
 
 - [ ] **Step 4: Run them and watch them pass.**
 
@@ -131,7 +131,7 @@ Pure functions over an immutable list: one private mutator that every operation 
 - Consumes: T1/T2's store; the existing `memoryPrompt` and `extractMemories`.
 - Produces: a grown `memoryPrompt(notes)` and a tag path that writes through T1's mutator.
 
-- [ ] **Step 1: Write the failing tests** — the prompt is **byte-identical** when there are no memories (the preserved property) and carries `id — content` plus the four rules when there are (update in place; never record tool availability; never record per-session transient state; a newer memory supersedes a stale one); the tag path creates a note **and** mirrors into the legacy array; and the **truncation suite** of Review Focus 2 — a complete block mid-prose keeps everything before and after, a reply merely *quoting* a partial marker renders whole, a stream ending in a partial tag neither chops the text nor loses a complete block, and an **unterminated** block is dropped with a log line rather than half-stored.
+- [ ] **Step 1: Write the failing tests** — the prompt is **byte-identical** when there are no memories (the preserved property) and carries `id — content` plus the four rules when there are (update in place; never record tool availability; never record per-session transient state; a newer memory supersedes a stale one); **Review Focus 5** — a tag-created note and a tool-created note are indistinguishable afterwards (deep-equal modulo the generated vs chosen id), testable *here* because the tag path now routes through T1's mutator and **not testable in T1**, where both sides were one function; the tag path creates a note **and** mirrors into the legacy array; and the **truncation suite** of Review Focus 2 — a complete block mid-prose keeps everything before and after, a reply merely *quoting* a partial marker renders whole, a stream ending in a partial tag neither chops the text nor loses a complete block, and an **unterminated** block is dropped with a log line rather than half-stored.
 
 - [ ] **Step 2: Run them and watch them fail.**
 
@@ -147,7 +147,7 @@ Pure functions over an immutable list: one private mutator that every operation 
 
 **Files:**
 - Create: `web/src/ui/memory/MemorySection.tsx` + a pure view-model test
-- Modify: `web/src/ui/Settings.tsx` (the inline block goes), `web/src/lib/plugins/builtin/memory.ts` (registers the section)
+- Modify: `web/src/ui/Settings.tsx` (the inline block goes), `web/src/lib/plugins/builtin/memory.ts` (registers the section), **`web/src/lib/plugins/builtin/settings.ts`** (the registration must **move**, not be added — T5 is not "make it a registered section": P1 already registered `MemorySection` as `settings.section.memory`, order 70, under the **`app.settings`** area. The section has to be owned by `app.memory` so toggling that area removes it, so the entry leaves `settings.ts` (whose doc comment counts "nine `settings.sections` entries" and becomes eight) and appears in `memory.ts`. Leaving both is not a double render: the registry refuses a duplicate id first-wins and logs a fault, so the section would silently stay owned by `app.settings` — the move must therefore **remove** the old entry, not just add the new one.)
 
 **Interfaces:**
 - Produces: `memoryRows(notes, now): readonly MemoryRow[]` — a pure view-model with the live list (each carrying its **id**), the recently-deleted list, and for each a `canRevert` flag with a `reason` when it cannot.
@@ -191,9 +191,9 @@ Pure functions over an immutable list: one private mutator that every operation 
 
 **Step scan:** every step names a file, a command, or an exact assertion; no step carries a body the signature and test already determine.
 
-**Type consistency:** `MemoryNote`, `MemoryResult` and the five operation names are defined once in T1 and used verbatim in T2–T6; `MEMORY_ID_PATTERN` is T1's alone; the tool names in T3 match those in T6's assertions.
+**Type consistency:** `MemoryEntry`, `MemoryResult` and the five operation names are defined once in T1 and used verbatim in T2–T6; `MEMORY_ID_PATTERN` is T1's alone; the tool names in T3 match those in T6's assertions. (`db/types.ts` keeps its own legacy `MemoryNote` for `{id, text, createdAt, source}` — a different type, deliberately not the same name.)
 
-**Review Focus:** all five lines have their test in the named task (1 → T3, 2 → T4, 3 → T2, 4 → T5, 5 → T1).
+**Review Focus:** all five lines have their test in the named task (1 → T3, 2 → T4, 3 → T2, 4 → T5, 5 → T4 — moved off T1, which could not make it fail).
 
 **Proportion:** six tasks, one test cycle each; the spec is the argument, this is the decision list.
 

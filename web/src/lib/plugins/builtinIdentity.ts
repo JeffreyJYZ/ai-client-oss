@@ -141,6 +141,16 @@ export const BUILTIN_IDENTITIES = [
 		locked: false,
 	},
 	{
+		id: "app.memory",
+		label: "Memory",
+		// What the registrar owns: the Memory **settings section** (always, so
+		// its switch is reachable) and the five tools (only while
+		// `memoriesEnabled` is on, so "off" means absent from the registry).
+		description:
+			"The Memory settings section, the five memory tools, and the memory the model sends and records; with this off, all of it is gone.",
+		locked: false,
+	},
+	{
 		id: "app.builtins",
 		label: "Plugins manager",
 		// The registrar (`areas.ts` `registerManager`) registers

@@ -81,6 +81,19 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 		"composer.actions.send",
 	],
 	"app.overlay": ["overlay.toasts", "overlay.modal"],
+	// A tool's key is its wire name, exactly as for `app.tools`; the five are
+	// registered only while memory is on, so the gate and this catalog agree
+	// about what the area contributes. The Memory **settings section** is the
+	// area's sixth contribution — always registered with the area, and the one
+	// control that turns the five on.
+	"app.memory": [
+		"memory_add",
+		"memory_update",
+		"memory_remove",
+		"memory_revert",
+		"memory_list",
+		"settings.section.memory",
+	],
 	"app.settings": [
 		"settings.section.notices",
 		"settings.section.providers",
@@ -88,7 +101,6 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 		"settings.section.profiles",
 		"settings.section.profile-editor",
 		"settings.section.web-search",
-		"settings.section.memory",
 		"settings.section.backup",
 		"settings.section.updates",
 		"app.sidebar.chats",
