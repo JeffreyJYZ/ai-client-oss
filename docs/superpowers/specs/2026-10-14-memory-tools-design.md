@@ -65,7 +65,7 @@ memoryNotes: Array<{
 
 - **Recently deleted is a view**, not a second store: the UI (and `memory_list(includeDeleted)`) filter on `deletedAt`.
 - **Bounds:** history depth and the number of soft-deleted entries are both capped, so settings cannot grow without limit; the oldest beyond the cap are dropped (the *content* of a live memory is never dropped, only its older revisions). The exact depths are **named constants pinned in the plan**, not inline numbers here.
-- The legacy `Settings.memories` array **stays and keeps being written**, so a 0.2.3 or 0.3.0 install opening this data still works — the tolerance property the data layer was built for, and the requester's standing requirement.
+- The legacy `Settings.memories` array **stays and keeps being written** by the **tag path** (the documented fallback), so a 0.2.3 or 0.3.0 install opening this data still works — the tolerance property the data layer was built for, and the requester's standing requirement. **Ruling on the ambiguity a review surfaced:** entries created by a **tool** or by the **UI** are written to `memoryNotes` only and do **not** mirror into the legacy array. The legacy array is a *downgrade-tolerance mirror*, not a second store; mirroring every writer would mean two writers on a lossy, capped list, and an older app reading a stale-but-working list is the property being bought. Consequence, stated so it is not a surprise: after a downgrade, notes created through tools or the UI are not visible to the older build.
 
 ### The first real migration
 

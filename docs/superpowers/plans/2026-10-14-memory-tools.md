@@ -85,7 +85,7 @@ Pure functions over an immutable list: one private mutator that every operation 
 
 **Interfaces:**
 - Consumes: T1's `MemoryEntry`.
-- Produces: `Settings.memoryNotes: MemoryNote[]` (optional, defaulting to `[]`) and one entry in `migrations` whose `to` is the bumped `DATA_VERSION`.
+- Produces: `Settings.memoryNotes: MemoryEntry[]` (optional, defaulting to `[]`) and one entry in `migrations` whose `to` is the bumped `DATA_VERSION`.
 
 - [ ] **Step 1: Write the failing tests** — an absent `memoryNotes` field means no notes (not a failure); a legacy-only blob migrates **once** into unique slug ids; running the migration again changes nothing; the legacy array is **byte-identical** afterwards; and the **frozen 0.2.3 fixture still parses** the new blob (the tolerance guarantee, using the fixtures the data-safety phase froze).
 
