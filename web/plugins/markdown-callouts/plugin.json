@@ -1,0 +1,11 @@
+{
+	"id": "example.markdown-callouts",
+	"name": "Markdown callouts",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "Overrides the markdown renderer to render > [!note]-style callouts as styled boxes, delegating every other document to the built-in kit renderer.",
+	"author": "AI Client examples"
+}
