@@ -12,7 +12,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 ## Search
 
-- **`rg`, always scoped to a path — never `grep`, and never the `grep` tool.** The `grep` alias excludes `.git`/VCS but not `node_modules`, so an unscoped recursive grep walks all deps. Scope it (`rg <pat> web/src`) or exclude (`rg -g '!node_modules' <pat> .`).
+- **`rg`, always scoped to a path — never `grep`, and never the `grep` tool.** The `grep` alias excludes `.git`/VCS but not `node_modules`, so an unscoped recursive grep walks all deps. Scope it (`rg <pat> web/src`) or exclude (`rg -g '!node_modules' <pat> .`). **Never `find`/`fd` from `$HOME` or `/`** — every tool a lane needs is on `PATH`, and a bare broad scan burns a core for minutes against the user's files (2026-10-19: a lane ran `find` over the home dir).
 
 ## Fonts
 
@@ -105,6 +105,8 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - **Plugin native commands = `web/src-tauri/src/lib.rs`: nine (`plugin_{list,read_file,write_file,remove,data_dir}` + `plugin_fs_{read,write,list,delete}`), all through one scope helper (`resolve_within` + `safe_id`).** `plugin-data/<id>` is the **only enforced** capability; `net` is unenforceable; the rest consent-only. Never call it a sandbox.
 - **Two real containment traps, both fixed once and both easy to reintroduce.** (1) `PathBuf::join`/`push` **discards the base** when the pushed path has a *prefix* (Windows `C:`), so a plugin `id` must be an **allowlist** (`[A-Za-z0-9._-]+`), never a denylist of `/ \ . ..` — mirrored in `manifestSchema.id` so a bad id fails at install. (2) Re-appending a **non-existent** suffix is not safe by itself: a *dangling* symlink makes `canonicalize` return `NotFound`, the walk treats it as a plain name and returns the symlink, and the write follows it out of the root — so check `symlink_metadata` per re-appended component.
 - `resolve_within` `create_dir_all`s the root, so a *read* command creates the dir; and a `rel_path` of `""`/`"."`/`"subdir/.."` resolves to the root itself (a whole-dir delete is the plugin's own dir). Documented, not guarded.
+
+- **Branch worktrees from `origin/main`, never the bare `main` ref** — local `main` is checked out in `/Users/jyz/dev/monorepos/ai-client-oss` and never advances when a release or `HEAD:main` push moves the remote, so `git worktree add … -b <name> main` silently bases lanes on the last release (measured 2026-10-19: four lanes started at 0.5.0). `origin/main` is the only current ref here.
 
 ## Release & CI
 
