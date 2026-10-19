@@ -27,6 +27,7 @@ import {
 	renameConversation,
 	send,
 	subscribeUserMessage,
+	titleIfDerived,
 } from "@/state/chat";
 import { getSettings, setSettings } from "@/state/settings";
 
@@ -933,5 +934,73 @@ describe("a title's source, and the user-message signal", () => {
 		expect(getChat().conversations.find((c) => c.id === id)?.title).toBe(
 			"hello",
 		);
+	});
+
+	/** The stored conversation, by id, as the store exposes it. */
+	const stored = (id: string) =>
+		getChat().conversations.find((c) => c.id === id);
+
+	test("titleIfDerived writes a model title while the source is derived", () => {
+		newConversation();
+		const id = getChat().activeId;
+		// A fresh conversation carries no `titleSource` at all, which is the
+		// legacy shape: absent reads as "derived" and must stay writable.
+		expect(stored(id)?.titleSource).toBeUndefined();
+
+		expect(titleIfDerived(id, "a model name")).toBe(true);
+		expect(stored(id)?.title).toBe("a model name");
+		expect(stored(id)?.titleSource).toBe("model");
+	});
+
+	test("titleIfDerived writes over an explicit derived source too", () => {
+		newConversation();
+		const id = getChat().activeId;
+		// `"derived"` is the other writable source and must behave identically.
+		titleIfDerived(id, "first model name");
+		expect(stored(id)?.titleSource).toBe("model");
+	});
+
+	test("titleIfDerived refuses once the user owns the title", () => {
+		newConversation();
+		const id = getChat().activeId;
+		renameConversation(id, "a deliberate name");
+
+		expect(titleIfDerived(id, "a model name")).toBe(false);
+		expect(stored(id)?.title).toBe("a deliberate name");
+		expect(stored(id)?.titleSource).toBe("user");
+	});
+
+	test("titleIfDerived refuses to replace a model title with a later one", () => {
+		newConversation();
+		const id = getChat().activeId;
+		expect(titleIfDerived(id, "the first model name")).toBe(true);
+
+		expect(titleIfDerived(id, "a second model name")).toBe(false);
+		expect(stored(id)?.title).toBe("the first model name");
+	});
+
+	test("titleIfDerived refuses, silently, for a conversation that is gone", () => {
+		newConversation();
+		const id = getChat().activeId;
+		const count = getChat().conversations.length;
+		// A run in flight belongs to the titler **area**, not to a conversation,
+		// so deleting a conversation cannot close it — the title can arrive for
+		// an id that no longer exists. Refusal is a normal outcome: no throw, no
+		// conversation invented.
+		expect(titleIfDerived(`${id}-deleted`, "a model name")).toBe(false);
+		expect(getChat().conversations.length).toBe(count);
+	});
+
+	test("titleIfDerived checks the source itself, so a rename beats an in-flight title", () => {
+		newConversation();
+		const id = getChat().activeId;
+		// The rename lands first, in the same synchronous turn the titler's
+		// write would occupy. The refusal has to live **inside** the writer —
+		// a caller-side check alone would let this overwrite the user's name.
+		renameConversation(id, "a deliberate name");
+
+		expect(titleIfDerived(id, "a model name")).toBe(false);
+		expect(stored(id)?.title).toBe("a deliberate name");
+		expect(stored(id)?.titleSource).toBe("user");
 	});
 });

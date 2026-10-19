@@ -972,7 +972,40 @@ export const renameConversation = (id: string, title: string): void => {
 	persistConversationById(id);
 };
 
-/** Update the active conversation's system prompt and persist it. */
+/**
+ * Write a model title, but only while the conversation is still the titler's
+ * to name — the second half of the never-overwrite guarantee (the first is
+ * `renameConversation`'s `titleSource: "user"`).
+ *
+ * Refusal is a normal outcome, not an error: the caller decides what a
+ * refusal means, so this neither throws nor logs.
+ *
+ * The existence check covers a conversation **deleted while a title was in
+ * flight**: a titler run's scope belongs to the area, not to a conversation,
+ * so deleting a conversation cannot close the request that would title it.
+ *
+ * The presence check, the source check and the write are one synchronous
+ * step — the conversation is read **inside** the update callback — so a rename
+ * landing between the two cannot be overwritten (the spec's own risk).
+ */
+export const titleIfDerived = (id: string, title: string): boolean => {
+	if (findConversation(id) === undefined) return false;
+	let wrote = false;
+	updateConversation(id, (conversation) => {
+		if (
+			conversation.titleSource === "model" ||
+			conversation.titleSource === "user"
+		) {
+			return conversation;
+		}
+		wrote = true;
+		return { ...conversation, title, titleSource: "model" };
+	});
+	if (!wrote) return false;
+	refresh();
+	persistConversationById(id);
+	return true;
+};
 export const setSystemPrompt = (text: string): void => {
 	const conversation = activeConversation();
 	if (conversation === undefined) return;
