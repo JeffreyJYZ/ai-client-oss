@@ -1,0 +1,11 @@
+{
+	"id": "example.zen-view",
+	"name": "Zen view",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "Owns the whole window: a fixed full-viewport root layout opened by a command and closed by Escape, reading host.chat through host.run.",
+	"author": "AI Client examples"
+}

@@ -60,7 +60,7 @@ A pasted/installed plugin's source is imported from a `Blob`, which is the **pro
 
 | `host.` | Adds | Example |
 |---|---|---|
-| `ui.register` | a component into a named `slot` | `hello-world/main.ts` |
+| `ui.register` | a component into a named `slot` | `hello-world/main.ts`; `zen-view/main.tsx` (a full-window `ui.root.layout`) |
 | `ui.kit` | the app's own primitives — `Button`, `Panel`, `Section`, `FieldRow`, `Markdown`, `cls`, and the class constants — so plugin UI matches a built-in's without copying Tailwind strings | `hello-world/main.ts`, `theme-solarized/main.ts` |
 | `commands.register` | a command (+ optional keybinding) for the palette | `export-conversation/main.ts` |
 | `settings.registerSection` | a foldable Settings section | `theme-solarized/main.ts` |
