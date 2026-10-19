@@ -6,6 +6,7 @@ import { registerProviderBuiltins } from "@lib/plugins/builtin/providers";
 import { registerSettingsBuiltins } from "@lib/plugins/builtin/settings";
 import { registerShellBuiltins } from "@lib/plugins/builtin/shell";
 import { registerThemeBuiltins } from "@lib/plugins/builtin/themes";
+import { registerTitlerBuiltins } from "@lib/plugins/builtin/titler";
 import { registerToolBuiltins } from "@lib/plugins/builtin/tools";
 import { registerTranscriptBuiltins } from "@lib/plugins/builtin/transcript";
 import {
@@ -123,6 +124,7 @@ const registrars: Record<BuiltinId, (host: Host) => void> = {
 	"app.themes": registerThemeBuiltins,
 	"app.overlay": registerOverlayBuiltins,
 	"app.memory": registerMemoryBuiltins,
+	"app.titler": registerTitlerBuiltins,
 	"app.builtins": registerManager,
 };
 

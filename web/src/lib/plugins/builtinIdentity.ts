@@ -151,6 +151,17 @@ export const BUILTIN_IDENTITIES = [
 		locked: false,
 	},
 	{
+		id: "app.titler",
+		label: "Titler",
+		// What the registrar owns: one scope-limited run per new conversation,
+		// which asks the titler's own model for a title from the first message.
+		// It contributes no registry entry of its own yet, so it is also the one
+		// area with an empty catalog.
+		description:
+			"Names a new conversation from its first message using the titler's own model; with this off, that first message is never sent for a title.",
+		locked: false,
+	},
+	{
 		id: "app.builtins",
 		label: "Plugins manager",
 		// The registrar (`areas.ts` `registerManager`) registers

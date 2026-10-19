@@ -94,6 +94,12 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 		"memory_list",
 		"settings.section.memory",
 	],
+	// The one area with an **empty** catalog today: `app.titler` registers no
+	// registry entry of its own yet — its only contribution is the scope-owned
+	// run that titles a conversation, which no registry holds and so has no key
+	// for the gate to filter. A later task that registers the Titler settings
+	// section adds its id here.
+	"app.titler": [],
 	"app.settings": [
 		"settings.section.notices",
 		"settings.section.providers",
@@ -232,10 +238,13 @@ function AreaRow({ row }: { readonly row: BuiltinRow }) {
 				<p className="text-xs text-amber-300/80">{row.lockedReason}</p>
 			)}
 
-			{/* No empty-state branch: every area in `BUILTIN_CONTRIBUTIONS` has at
-			    least one id, and a mismatch between that catalog and what the
-			    real registries hold fails `BuiltinsArea.test.ts`'s catalog
-			    check. */}
+			{/* No empty-state branch: this list is what the gate keys on, and a
+			    mismatch between that catalog and what the real registries hold
+			    fails `BuiltinsArea.test.ts`'s catalog check. An area with an
+			    empty catalog renders an empty list (`app.titler` today — it
+			    registers no registry entry yet, only a scope-owned run), and an
+			    "empty" branch here would be the one place that list could
+			    silently disagree with the gate. */}
 			<details className="flex flex-col gap-2">
 				{/* No onClick on the summary: nothing here needs one, and a
 				    preventDefault would cancel a control's own activation. */}

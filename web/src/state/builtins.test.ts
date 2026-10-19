@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
-import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
+import {
+	BUILTIN_AREAS,
+	type BuiltinArea,
+	type BuiltinId,
+} from "@lib/plugins/areas";
 import {
 	areaEnabled,
 	contributionEnabled,
@@ -33,6 +37,7 @@ import {
 } from "@/state/builtins";
 import { setSettings } from "@/state/settings";
 import { minimalHostView } from "@/ui/MinimalHost";
+import { BUILTIN_CONTRIBUTIONS } from "@/ui/plugins/BuiltinsArea";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
 import { SettingsShell } from "@/ui/Settings";
 
@@ -605,11 +610,12 @@ describe("reconcile", () => {
 		await run(reconciler, services);
 		const all = registryIds(services);
 
-		// Every area with a registrar contributes something — the two locked ones
-		// included: `app.builtins` carries the manager's section (Task 5a's move)
-		// and `app.substrate` the settings surface its sections render into (this
-		// round's move, so the manager keeps a surface when `app.settings` is off).
-		// Read each area alone, through the same reconciler, and union the results.
+		// Every area whose contribution catalog is non-empty registers something —
+		// the two locked ones included: `app.builtins` carries the manager's
+		// section (Task 5a's move) and `app.substrate` the settings surface its
+		// sections render into (this round's move, so the manager keeps a surface
+		// when `app.settings` is off). Read each area alone, through the same
+		// reconciler, and union the results.
 		const union: Record<RegistryName, Set<string>> = {
 			ui: new Set(),
 			commands: new Set(),
@@ -617,15 +623,23 @@ describe("reconcile", () => {
 			providers: new Set(),
 			themes: new Set(),
 		};
+		// The anti-vacuity guard for the union below: an area that declares a
+		// contribution registers at least one. `app.titler` declares none yet (an
+		// empty catalog — it registers no registry entry, only a scope-owned run),
+		// so it is exempt; a later task adds its settings section and closes the
+		// gap. The catalog is checked against the real registries in
+		// `ui/plugins/BuiltinsArea.test.ts`.
 		for (const area of BUILTIN_AREAS) {
 			enabled.only(area.id);
 			await run(reconciler, services);
 			const alone = registryIds(services);
 			const seen = REGISTRIES.flatMap((name) => alone[name]);
-			expect(
-				seen.length,
-				`${area.id} contributes at least one entry`,
-			).toBeGreaterThan(0);
+			if (BUILTIN_CONTRIBUTIONS[area.id as BuiltinId].length > 0) {
+				expect(
+					seen.length,
+					`${area.id} contributes at least one entry`,
+				).toBeGreaterThan(0);
+			}
 			for (const name of REGISTRIES) {
 				for (const id of alone[name]) union[name].add(id);
 			}
@@ -679,9 +693,14 @@ describe("reconcile", () => {
 			await run(reconciler, services);
 			const alone = registryIds(services);
 
-			// Each toggleable area contributes something, so "what that area
-			// alone contributes" is a real remainder, not an empty set.
-			if (area.locked !== true) {
+			// Each toggleable area that declares a contribution contributes
+			// something, so "what that area alone contributes" is a real remainder,
+			// not an empty set. `app.titler` declares none yet (an empty catalog),
+			// so it is exempt — disabling it removes no registry entry.
+			if (
+				area.locked !== true &&
+				BUILTIN_CONTRIBUTIONS[area.id as BuiltinId].length > 0
+			) {
 				expect(
 					REGISTRIES.flatMap((name) => alone[name]).length,
 					`${area.id} contributes something to remove`,
