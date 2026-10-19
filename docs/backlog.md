@@ -18,3 +18,7 @@ Queued work, not yet planned. Each item states what was asked and the constraint
 **Content sources to draw from:** `README.md`, `docs/superpowers/specs/*` (designs), `docs/superpowers/plans/*` (implementation plans), and later `web/plugins/README.md` (the plugin author guide, added by the plugin-system plan's Task 19).
 
 **Open question for whoever picks this up:** curated user-facing docs (setup, providers, plugins, trust model) versus rendering everything in `docs/` as-is. The former is a writing job; the latter is largely a rendering job.
+
+## Plugin examples — what is still uncovered
+
+**Status: the largest gaps closed 2026-10-19** — `history-pipeline`, `sidebar-notes`, `zen-view` and `markdown-callouts` shipped with `web/plugins/README.md`'s table pointing at each, and `web/src/lib/plugins/examples.test.ts` now typechecks every example and pins the registrations its `setup` makes. **Still without an example:** `providers.register` (a protocol is a full streaming implementation — a subtly wrong copy is worse than a pointer, so the guide points at `lib/plugins/builtin/` instead), `native.http`, six of the eight events, and 20 of the 22 slots. Add one when a real question needs it, and add its row to the guide in the same commit — `examples.test.ts` fails otherwise.

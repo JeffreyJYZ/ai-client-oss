@@ -1,6 +1,17 @@
 # Writing a plugin
 
-An author's checklist. The four plugins in this directory are the worked examples; read one alongside this page. The generated API reference (`/docs` in the app, source `web/src/docs/reference.generated.ts`) is the authoritative signature list.
+An author's checklist. The **eight** plugins in this directory are worked examples — read the one that covers what you are building (the table below says which) alongside this page. `globals-proof/` is not one of them: it has no manifest and exists only to prove the build's React/JSX globals.
+
+| Example | What it teaches |
+|---|---|
+| `hello-world/main.ts` | the smallest plugin: a slot contribution, the kit's `Button`, lifecycle |
+| `custom-tool/main.ts` | a model-callable tool, and the `onToolCall` stage that can veto it |
+| `export-conversation/main.ts` | a command, `chat.snapshot`, a native file write |
+| `theme-solarized/main.ts` | a theme, a settings section, storage |
+| `zen-view/main.tsx` | `ui.root.layout` (it **appends** — see §4), `host.chat.changes` through `host.run` |
+| `sidebar-notes/main.tsx` | a chrome slot with real storage (`keys`/`delete`), `notify.confirm`, an event |
+| `history-pipeline/main.ts` | three pipeline stages, one of which can abort a turn |
+| `markdown-callouts/main.tsx` | a renderer override that delegates everything it does not handle | The generated API reference (`/docs` in the app, source `web/src/docs/reference.generated.ts`) is the authoritative signature list.
 
 ---
 
@@ -33,7 +44,7 @@ export default { setup(host) { /* register things; return void or a Disposable *
 - **`main.tsx` is preferred** (JSX). `main.ts` works — use React's `createElement` then; that is what `theme-solarized/main.ts` does.
 - **JSX uses the automatic runtime** — no `import React` needed for it.
 - **`setup` is synchronous and must be cheap.** It is not bounded by the load timeout and cannot be preempted, so anything async belongs in an `Effect` you fork yourself. It receives one argument, `host`, and returns nothing or a `Disposable` whose `dispose` runs **first** on unload, before your registrations are collected.
-- **There is no Effect runner on `host`.** `host.chat.send`, `host.storage.*`, `host.native.*`, `host.notify.confirm` and `host.themes.apply`/`clear`/`active` return `Effect`s. The working route is to `import { Effect, Option } from "effect"` — the preset bundles it (a second copy, ~90 kB) and it runs effects the host built with its own copy. `Effect.runSync` for a `Sync`-based read/write, `Effect.runFork` to fire and forget. Reach for a host Effect only when you need one.
+- **There is no *synchronous* Effect runner on `host`.** `host.chat.send`, `host.storage.*`, `host.native.*`, `host.notify.confirm` and `host.themes.apply`/`clear`/`active` return `Effect`s. The working route is to `import { Effect, Option } from "effect"` — the preset bundles it (a second copy, ~90 kB) and it runs effects the host built with its own copy. `Effect.runSync` for a `Sync`-based read/write. **Long-lived work goes through `host.run(effect)`** (below) — its fibre is a child of your plugin's scope, so disabling the plugin stops it; never `Effect.runFork`, whose fibre belongs to nobody.
 - **A provider's `buildRequest` is called more than once per turn.** The tool loop replays the turn's body as `prev` with `skipUserMessage` set, and `buildRequest` re-runs over it inside `SendMsg`. It must therefore be **idempotent under `skipUserMessage`** — building over a body that already carries the user message reproduces it unchanged. A builder that mutates shared state or appends the message again breaks the single-body invariant: the question repeats once per tool round and the sent body drifts from the stored one.
 - **The build preset sets `rollupOptions.treeshake.propertyReadSideEffects: false`.** Consequence for you: reading a property is assumed side-effect free, so an unused React member you deliberately touch for its side effect would be dropped. Plain reads and function calls are unaffected; do not rely on a bare property read as a statement.
 
@@ -61,20 +72,20 @@ A pasted/installed plugin's source is imported from a `Blob`, which is the **pro
 | `host.` | Adds | Example |
 |---|---|---|
 | `ui.register` | a component into a named `slot` | `hello-world/main.ts`; `zen-view/main.tsx` (a full-window `ui.root.layout`) |
-| `ui.kit` | the app's own primitives — `Button`, `Panel`, `Section`, `FieldRow`, `Markdown`, `cls`, and the class constants — so plugin UI matches a built-in's without copying Tailwind strings | `hello-world/main.ts`, `theme-solarized/main.ts` |
-| `commands.register` | a command (+ optional keybinding) for the palette | `export-conversation/main.ts` |
+| `ui.kit` | the app's own primitives — `Button`, `Panel`, `Section`, `FieldRow`, `Markdown`, `cls`, and the class constants — so plugin UI matches a built-in's without copying Tailwind strings | `hello-world/main.ts`, `theme-solarized/main.ts`, `zen-view/main.tsx` |
+| `commands.register` | a command (+ optional keybinding) for the palette | `export-conversation/main.ts`, `zen-view/main.tsx` |
 | `settings.registerSection` | a foldable Settings section | `theme-solarized/main.ts` |
 | `tools.register` | a model-callable tool (`declaration` + `execute`) | `custom-tool/main.ts` |
-| `pipeline.register` | a stage: `beforeSend`, `transformBody`, `onChunk`, `afterReply`, `onToolCall`, `onHistory` | `custom-tool/main.ts` (`onToolCall`) |
+| `pipeline.register` | a stage: `beforeSend`, `transformBody`, `onChunk`, `afterReply`, `onToolCall`, `onHistory` | `custom-tool/main.ts` (`onToolCall`); `history-pipeline/main.ts` (`beforeSend`, `afterReply`, `onHistory`) |
 | `themes.register` / `apply` / `clear` / `active` | a theme (variables + optional `css`), and apply or clear it through the app's one theme service — the same `<style>` element and `data-theme` marker the built-in uses | `theme-solarized/main.ts` |
 | `providers.register` | a wire protocol (`send`/`buildRequest`/…) | host implementation (`lib/providers/chatCompletions.ts`); no plugin example |
 | `renderers.register` | override `message`/`markdown`/`marker`/`reasoning` | `markdown-callouts/main.tsx` (the `markdown` kind, delegating every other document to `ui.kit.Markdown`) |
-| `chat.snapshot()` | the active conversation (synchronous) | `export-conversation/main.ts` |
-| `storage.get/set/delete/keys` | your own KV, persisted in `Settings.plugins[].data` | `theme-solarized/main.ts` |
-| `notify.toast/banner/modal` | host-rendered notices (synchronous) | `hello-world/main.ts` |
+| `chat.snapshot()` | the active conversation (synchronous) | `export-conversation/main.ts`, `zen-view/main.tsx` |
+| `storage.get/set/delete/keys` | your own KV, persisted in `Settings.plugins[].data` | `theme-solarized/main.ts`, `sidebar-notes/main.tsx` |
+| `notify.toast/banner/modal` | host-rendered notices (synchronous) | `hello-world/main.ts`, `sidebar-notes/main.tsx` (`confirm`) |
 | `native` | `Option<NativeHandle>` — `none` on web; the file members `read`/`write`/`list`/`remove`/`dataDir` are scoped to `plugin-data/<id>/` | `export-conversation/main.ts` |
 | `native.http` | an unrestricted network request on the app's own `http_request` command — **not path-scoped**; it rides the `net` capability, which is **unenforceable** (§5) | — |
-| `on(event, handler)` | subscribe to `turn-start`/`chunk`/`turn-end`/`conversation-changed`/`settings-changed`/`tool-called`/`plugin-loaded`/`plugin-unloaded` | `hello-world/main.ts` |
+| `on(event, handler)` | subscribe to `turn-start`/`chunk`/`turn-end`/`conversation-changed`/`settings-changed`/`tool-called`/`plugin-loaded`/`plugin-unloaded` | `hello-world/main.ts`, `sidebar-notes/main.tsx` (`conversation-changed`) |
 | `log.info/warn/error/debug` | the scoped logger, shown in the Plugins log panel | any |
 | `db` | the app's own settings/conversation adapter | — |
 | `version` | `{ app, api }` | `hello-world/main.ts` |
