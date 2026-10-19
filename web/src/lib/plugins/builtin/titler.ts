@@ -15,6 +15,7 @@ import {
 	type UserMessageSignal,
 } from "@/state/chat";
 import { getSettings } from "@/state/settings";
+import { TitlerSection } from "@/ui/titler/TitlerSection";
 
 /**
  * The `app.titler` area (P3): one model-written title per new conversation,
@@ -113,12 +114,16 @@ const resolveTarget = (): TitlerTarget | undefined => {
 	const settings = getSettings();
 	const resolved = resolveTitlerModel(settings, isDesktop);
 	if (resolved === undefined) return undefined;
-	const provider = resolveProviderSync(resolved.providerId);
-	if (Option.isNone(provider)) return undefined;
 	const config = settings.providers.find(
 		(candidate) => candidate.id === resolved.providerId,
 	);
 	if (config === undefined) return undefined;
+	// The rule returns the provider's **own id** (`provider-<uuid>` from the
+	// Settings path); `resolveProviderSync` resolves **wire protocol names**, a
+	// separate field. Handing it the id silently resolves nothing for every
+	// real user while the hint still names a model.
+	const provider = resolveProviderSync(config.protocol);
+	if (Option.isNone(provider)) return undefined;
 	return {
 		provider: provider.value,
 		baseUrl: config.baseUrl,
@@ -155,8 +160,9 @@ const realDeps: TitlerDeps = {
 };
 
 /**
- * The `app.titler` area's registrar: the first-message subscription, owned by
- * the area's scope.
+ * The `app.titler` area's registrar: the Titler settings section — the row that
+ * says which model titles and what the last attempt did — and the first-message
+ * subscription, owned by the area's scope.
  *
  * The subscription is installed inside the scoped run's acquire and removed by
  * its release, so closing the area (a reconcile, a toggle) stops it — and, from
@@ -167,6 +173,20 @@ export const registerTitlerBuiltins = (
 	host: Host,
 	deps: TitlerDeps = realDeps,
 ): void => {
+	// The settings row is the area's **own** registration: switching the area
+	// off closes its scope and takes the row (and the model choice it explains)
+	// with it. It is registered unconditionally while the area is on — the
+	// picker is the only way to answer the rule's "no model" state — and it is
+	// deliberately **not** in `builtin/settings.ts`: a section id registered
+	// twice is refused first-wins, which would silently leave the row owned by
+	// the wrong area and keep it rendered with this area off.
+	host.ui.register({
+		id: "settings.section.titler",
+		slot: "settings.sections",
+		component: TitlerSection,
+		order: 75,
+	});
+
 	/**
 	 * Guarded so one tab fires once per conversation. **This set is per page:**
 	 * two tabs can title the same new conversation at the same time, and that is

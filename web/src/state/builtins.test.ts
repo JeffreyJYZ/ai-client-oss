@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Settings, settingsDefaults } from "@lib/db";
-import {
-	BUILTIN_AREAS,
-	type BuiltinArea,
-	type BuiltinId,
-} from "@lib/plugins/areas";
+import { BUILTIN_AREAS, type BuiltinArea } from "@lib/plugins/areas";
 import {
 	areaEnabled,
 	contributionEnabled,
@@ -37,10 +33,36 @@ import {
 } from "@/state/builtins";
 import { setSettings } from "@/state/settings";
 import { minimalHostView } from "@/ui/MinimalHost";
-import { BUILTIN_CONTRIBUTIONS } from "@/ui/plugins/BuiltinsArea";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
 import { SettingsShell } from "@/ui/Settings";
 
+/**
+ * Test hygiene: every reconciler created in this file (most of which leave their
+ * final live scopes open) is tracked here and closed in `afterEach`, so the
+ * `app.titler` area's subscription to `state/chat.ts`'s user-message bus does
+ * not leak into later test files (which would make their request counts depend
+ * on how many reconciles ran first).
+ */
+const createdReconcilers: ReturnType<typeof makeBuiltinsReconciler>[] = [];
+const trackedReconciler = (
+	deps: Parameters<typeof makeBuiltinsReconciler>[0],
+): ReturnType<typeof makeBuiltinsReconciler> => {
+	const r = makeBuiltinsReconciler(deps);
+	createdReconcilers.push(r);
+	return r;
+};
+afterEach(async () => {
+	for (const r of createdReconcilers) {
+		for (const area of r.live()) {
+			await Effect.runPromise(
+				Scope.close(area.scope, Exit.void).pipe(
+					Effect.catchCause(() => Effect.void),
+				),
+			);
+		}
+	}
+	createdReconcilers.length = 0;
+});
 /**
  * The tools registry with everything on: the tools area's own two, then the
  * memory area's five, in `BUILTIN_AREAS` registration order. Derived from the
@@ -599,7 +621,7 @@ describe("reconcile", () => {
 	test("with everything on, every area's contributions are registered", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -610,12 +632,11 @@ describe("reconcile", () => {
 		await run(reconciler, services);
 		const all = registryIds(services);
 
-		// Every area whose contribution catalog is non-empty registers something —
-		// the two locked ones included: `app.builtins` carries the manager's
-		// section (Task 5a's move) and `app.substrate` the settings surface its
-		// sections render into (this round's move, so the manager keeps a surface
-		// when `app.settings` is off). Read each area alone, through the same
-		// reconciler, and union the results.
+		// Every area with a registrar contributes something — the two locked ones
+		// included: `app.builtins` carries the manager's section (Task 5a's move)
+		// and `app.substrate` the settings surface its sections render into (this
+		// round's move, so the manager keeps a surface when `app.settings` is off).
+		// Read each area alone, through the same reconciler, and union the results.
 		const union: Record<RegistryName, Set<string>> = {
 			ui: new Set(),
 			commands: new Set(),
@@ -623,23 +644,15 @@ describe("reconcile", () => {
 			providers: new Set(),
 			themes: new Set(),
 		};
-		// The anti-vacuity guard for the union below: an area that declares a
-		// contribution registers at least one. `app.titler` declares none yet (an
-		// empty catalog — it registers no registry entry, only a scope-owned run),
-		// so it is exempt; a later task adds its settings section and closes the
-		// gap. The catalog is checked against the real registries in
-		// `ui/plugins/BuiltinsArea.test.ts`.
 		for (const area of BUILTIN_AREAS) {
 			enabled.only(area.id);
 			await run(reconciler, services);
 			const alone = registryIds(services);
 			const seen = REGISTRIES.flatMap((name) => alone[name]);
-			if (BUILTIN_CONTRIBUTIONS[area.id as BuiltinId].length > 0) {
-				expect(
-					seen.length,
-					`${area.id} contributes at least one entry`,
-				).toBeGreaterThan(0);
-			}
+			expect(
+				seen.length,
+				`${area.id} contributes at least one entry`,
+			).toBeGreaterThan(0);
 			for (const name of REGISTRIES) {
 				for (const id of alone[name]) union[name].add(id);
 			}
@@ -668,7 +681,7 @@ describe("reconcile", () => {
 	test("disabling one area empties exactly that area's registrations", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -693,14 +706,9 @@ describe("reconcile", () => {
 			await run(reconciler, services);
 			const alone = registryIds(services);
 
-			// Each toggleable area that declares a contribution contributes
-			// something, so "what that area alone contributes" is a real remainder,
-			// not an empty set. `app.titler` declares none yet (an empty catalog),
-			// so it is exempt — disabling it removes no registry entry.
-			if (
-				area.locked !== true &&
-				BUILTIN_CONTRIBUTIONS[area.id as BuiltinId].length > 0
-			) {
+			// Each toggleable area contributes something, so "what that area
+			// alone contributes" is a real remainder, not an empty set.
+			if (area.locked !== true) {
 				expect(
 					REGISTRIES.flatMap((name) => alone[name]).length,
 					`${area.id} contributes something to remove`,
@@ -741,7 +749,7 @@ describe("reconcile", () => {
 	test("off → on → off → on leaves no duplicates", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -821,7 +829,7 @@ describe("reconcile", () => {
 					},
 		);
 
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -888,7 +896,7 @@ describe("reconcile", () => {
 		};
 
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -940,7 +948,7 @@ describe("reconcile", () => {
 			return makeHost(service, areaId, areaScope);
 		};
 
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -993,7 +1001,7 @@ describe("the invariant: every non-locked area off leaves exactly the locked cor
 	test("holds exactly the locked contributions, and restoring returns the prior ids", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -1058,7 +1066,7 @@ describe("the invariant: every non-locked area off leaves exactly the locked cor
 		// asserts the **reachable target**, not that something rendered.
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -1145,7 +1153,7 @@ describe("the manager rides the locked core", () => {
 	const reconcilerOverRealAreas = () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -1223,6 +1231,7 @@ describe("the manager rides the locked core", () => {
 			"settings.section.profile-editor",
 			"settings.section.web-search",
 			"settings.section.memory",
+			"settings.section.titler",
 			"settings.section.backup",
 			"settings.section.updates",
 			"settings.section.plugins",
@@ -1257,7 +1266,7 @@ describe("per-contribution toggles", () => {
 	test("app.tools: disabling one tool leaves its sibling registered", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -1282,7 +1291,7 @@ describe("per-contribution toggles", () => {
 	test("a UI area: disabling one contribution leaves its siblings registered", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -1317,7 +1326,7 @@ describe("per-contribution toggles", () => {
 		const h = makeHarness();
 		h.store.start();
 
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: (areaId) => areaEnabled(h.snapshot().builtins, areaId),
 			contributionEnabledOf: (areaId, contributionId) =>
@@ -1354,7 +1363,7 @@ describe("per-contribution toggles", () => {
 		);
 		h.store.start();
 
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: (areaId) => areaEnabled(h.snapshot().builtins, areaId),
 			contributionEnabledOf: (areaId, contributionId) =>
@@ -1404,7 +1413,7 @@ describe("per-contribution toggles", () => {
 			return makeHost(service, areaId, areaScope);
 		};
 
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: [area],
 			enabledOf: () => true,
 			contributionEnabledOf: () => true,
@@ -1465,7 +1474,7 @@ describe("per-contribution toggles", () => {
 			return makeHost(service, areaId, areaScope);
 		};
 
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas,
 			enabledOf: () => true,
 			contributionEnabledOf: () => true,
@@ -1503,7 +1512,7 @@ describe("the coalescing runner", () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
 		enabled.all();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
@@ -1561,7 +1570,7 @@ describe("memory tools follow the stored flag (explicit, not ambient)", () => {
 	test("memoriesEnabled off ⇒ the five are absent; on ⇒ present", async () => {
 		const services = makeServices();
 		const enabled = makeEnabled();
-		const reconciler = makeBuiltinsReconciler({
+		const reconciler = trackedReconciler({
 			areas: BUILTIN_AREAS,
 			enabledOf: enabled.enabledOf,
 			contributionEnabledOf: enabled.contributionEnabledOf,
