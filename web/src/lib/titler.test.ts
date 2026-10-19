@@ -21,38 +21,73 @@ const provider = (
 	overrides: Partial<ProviderConfig> = {},
 ): ProviderConfig => ({ ...emptyProviderConfig(id), ...overrides });
 
+/**
+ * A free id taken from the live zen list (measured 2026-10-19): the rule
+ * *finds* a free id in the provider's own cached list, it never hardcodes one.
+ * Fixtures must carry it in `models` or the case is blind to the rule.
+ */
+const OPENCODE_FREE_ID = "deepseek-v4.1-flash-free";
+/** OpenRouter's free-models router, from that lane's live list. */
+const OPENROUTER_FREE_ID = "openrouter/free";
+/** A paid id: neither lane may ever fall through to one. */
+const PAID_MODEL_ID = "deepseek-v4-pro";
+
 describe("resolveTitlerModel", () => {
 	test("an opencode provider with a key on desktop resolves to its free lane", () => {
 		const settings = {
-			providers: [provider("oc", { baseUrl: OPENCODE_URL, apiKey: "key" })],
+			providers: [
+				provider("oc", {
+					baseUrl: OPENCODE_URL,
+					apiKey: "key",
+					models: [PAID_MODEL_ID, OPENCODE_FREE_ID],
+				}),
+			],
 		};
 		expect(resolveTitlerModel(settings, true)).toEqual({
 			providerId: "oc",
-			model: "step-5-preview-free",
+			model: OPENCODE_FREE_ID,
 		});
 	});
 
 	test("an opencode provider with an EMPTY key resolves to nothing", () => {
 		const settings = {
-			providers: [provider("oc", { baseUrl: OPENCODE_URL, apiKey: "   " })],
+			providers: [
+				provider("oc", {
+					baseUrl: OPENCODE_URL,
+					apiKey: "   ",
+					models: [OPENCODE_FREE_ID],
+				}),
+			],
 		};
 		expect(resolveTitlerModel(settings, true)).toBeUndefined();
 	});
 
 	test("the opencode lane is not chosen on web, where its endpoint refuses the preflight", () => {
 		const settings = {
-			providers: [provider("oc", { baseUrl: OPENCODE_URL, apiKey: "key" })],
+			providers: [
+				provider("oc", {
+					baseUrl: OPENCODE_URL,
+					apiKey: "key",
+					models: [OPENCODE_FREE_ID],
+				}),
+			],
 		};
 		expect(resolveTitlerModel(settings, false)).toBeUndefined();
 	});
 
 	test("no opencode provider falls back to an OpenRouter free model", () => {
 		const settings = {
-			providers: [provider("or", { baseUrl: OPENROUTER_URL, apiKey: "key" })],
+			providers: [
+				provider("or", {
+					baseUrl: OPENROUTER_URL,
+					apiKey: "key",
+					models: [OPENROUTER_FREE_ID],
+				}),
+			],
 		};
 		expect(resolveTitlerModel(settings, true)).toEqual({
 			providerId: "or",
-			model: "openrouter/free",
+			model: OPENROUTER_FREE_ID,
 		});
 	});
 
@@ -87,22 +122,27 @@ describe("resolveTitlerModel", () => {
 	});
 
 	test("a free id the cached list no longer carries falls through to OpenRouter", () => {
+		// The opencode fixture is test 1's with the free id removed.
 		const settings = {
 			providers: [
 				provider("oc", {
 					baseUrl: OPENCODE_URL,
 					apiKey: "key",
-					models: ["deepseek-v4-flash", "glm-5.3"],
+					models: [PAID_MODEL_ID],
 				}),
-				provider("or", { baseUrl: OPENROUTER_URL, apiKey: "key" }),
+				provider("or", {
+					baseUrl: OPENROUTER_URL,
+					apiKey: "key",
+					models: [OPENROUTER_FREE_ID],
+				}),
 			],
 		};
 		const resolved = resolveTitlerModel(settings, true);
 		expect(resolved).toEqual({
 			providerId: "or",
-			model: "openrouter/free",
+			model: OPENROUTER_FREE_ID,
 		});
-		expect(resolved?.model).not.toBe("step-5-preview-free");
+		expect(resolved?.model).not.toBe(OPENCODE_FREE_ID);
 	});
 
 	test("a free id the cached list no longer carries never degrades to a paid call", () => {
@@ -116,6 +156,40 @@ describe("resolveTitlerModel", () => {
 			],
 		};
 		expect(resolveTitlerModel(settings, true)).toBeUndefined();
+	});
+
+	test("an empty cached model list carries no free id for either lane", () => {
+		// `models` is filled only by Settings' Fetch-models button, so an empty
+		// list is the normal state of a fresh provider: it must mean "not
+		// carried" and degrade rather than guess an id that may not exist.
+		expect(
+			resolveTitlerModel(
+				{
+					providers: [
+						provider("oc", {
+							baseUrl: OPENCODE_URL,
+							apiKey: "key",
+							models: [],
+						}),
+					],
+				},
+				true,
+			),
+		).toBeUndefined();
+		expect(
+			resolveTitlerModel(
+				{
+					providers: [
+						provider("or", {
+							baseUrl: OPENROUTER_URL,
+							apiKey: "key",
+							models: [],
+						}),
+					],
+				},
+				true,
+			),
+		).toBeUndefined();
 	});
 });
 
@@ -142,6 +216,21 @@ describe("cleanTitle", () => {
 		const cleaned = cleanTitle(wrapped);
 		expect(cleaned).toHaveLength(TITLER_MAX_TITLE_LENGTH);
 		expect(cleaned).not.toContain("*");
+	});
+
+	test("strips a Title: label the model wrapped in markdown or backticks", () => {
+		expect(cleanTitle("**Title:** Some Words")).toBe("Some Words");
+		expect(cleanTitle("`Title:` Some Words")).toBe("Some Words");
+	});
+
+	test("never splits an astral character at the length cap", () => {
+		// A code-unit cap cuts this emoji's surrogate pair in half, leaving a
+		// lone high surrogate that renders as a replacement character.
+		const boundary = `${"w".repeat(TITLER_MAX_TITLE_LENGTH - 1)}😀`;
+		const cleaned = cleanTitle(boundary);
+		expect(cleaned).toBe(boundary);
+		expect([...cleaned]).toHaveLength(TITLER_MAX_TITLE_LENGTH);
+		expect([...cleaned].at(-1)).toBe("😀");
 	});
 });
 
