@@ -1,10 +1,11 @@
+import type { ExamplesIndex, PluginExample } from "@lib/build/examplesIndex";
 import {
 	PLUGIN_TRUST_POINTS,
 	PLUGIN_TRUST_SUMMARY,
 } from "@lib/plugins/consent";
 import { pastedFiles } from "@lib/plugins/pasted";
 import { Effect } from "effect";
-import { type ChangeEvent, useRef, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import {
 	installFromText,
 	installFromUrl,
@@ -66,6 +67,24 @@ const readFiles = (
 		Effect.map((pairs) => Object.fromEntries(pairs) as Record<string, string>),
 	);
 
+/**
+ * The index a release ships, filtered to well-formed rows. It is a static file
+ * beside the chunks, so a malformed one must degrade to "no examples" rather
+ * than render a broken Install button.
+ */
+const examplesOf = (json: unknown): readonly PluginExample[] => {
+	const index = json as ExamplesIndex | undefined;
+	if (!Array.isArray(index?.examples)) return [];
+	return index.examples.filter(
+		(example): example is PluginExample =>
+			typeof example?.id === "string" &&
+			typeof example.name === "string" &&
+			typeof example.description === "string" &&
+			typeof example.entry === "string" &&
+			typeof example.manifest === "string",
+	);
+};
+
 export function PluginsSection() {
 	const plugins = usePlugins();
 	const [manifestText, setManifestText] = useState("");
@@ -73,7 +92,62 @@ export function PluginsSection() {
 	const [entryText, setEntryText] = useState("");
 	const [url, setUrl] = useState("");
 	const [pickError, setPickError] = useState<string | null>(null);
+	const [examples, setExamples] = useState<readonly PluginExample[]>([]);
+	const [exampleError, setExampleError] = useState<string | null>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+
+	/**
+	 * The examples a release ships. The index is written by
+	 * `scripts/build-plugins.ts` beside the chunks, so it is absent in a build
+	 * that skipped them — an empty list is the honest answer there, never a
+	 * hardcoded one.
+	 */
+	useEffect(() => {
+		let live = true;
+		void fetch("/plugins/examples.json")
+			.then((response) => (response.ok ? response.json() : undefined))
+			.then((json: unknown) => {
+				if (!live) return;
+				setExamples(examplesOf(json));
+			})
+			.catch(() => undefined);
+		return () => {
+			live = false;
+		};
+	}, []);
+
+	/** Install one shipped example: its manifest plus the chunk fetched now. */
+	const installExample = (example: PluginExample): void => {
+		setExampleError(null);
+		Effect.runFork(
+			Effect.tryPromise({
+				try: () =>
+					fetch(example.entry).then((response) =>
+						response.ok ? response.text() : "",
+					),
+				catch: () => `could not read ${example.entry}`,
+			}).pipe(
+				Effect.flatMap((source) =>
+					source === ""
+						? Effect.fail(`could not read ${example.entry}`)
+						: Effect.succeed(source),
+				),
+				Effect.tap((source) =>
+					Effect.sync(() => {
+						installFromText("", {
+							"plugin.json": example.manifest,
+							"main.js": source,
+						});
+					}),
+				),
+				Effect.catch((detail) =>
+					Effect.sync(() => {
+						setExampleError(detail);
+					}),
+				),
+			),
+		);
+	};
 
 	const installPasted = (): void => {
 		const files = pastedFiles(manifestText, entryName, entryText);
@@ -278,6 +352,45 @@ export function PluginsSection() {
 					name — {'{ "plugin.json": "…", "main.js": "…" }'} — and the fetch is
 					bounded to {PLUGIN_SOURCE_MAX_CHARS} characters.
 				</p>
+			</div>
+
+			<div className="flex flex-col gap-3 border-t border-neutral-800 pt-3">
+				<p className={HEADING}>Examples</p>
+				<p className="text-xs text-neutral-500">
+					Shipped with this build. Installing one copies its manifest and code
+					into your plugins — it is full-trust code like any other, so the
+					switch above must be on.
+				</p>
+				{examples.length === 0 ? (
+					<p className="text-xs text-neutral-500">
+						This build ships no examples.
+					</p>
+				) : (
+					<ul className="flex flex-col gap-2">
+						{examples.map((example) => (
+							<li
+								key={example.id}
+								className="flex items-start justify-between gap-3"
+							>
+								<div>
+									<p className="text-sm text-neutral-200">{example.name}</p>
+									<p className="text-xs text-neutral-500">
+										{example.description}
+									</p>
+								</div>
+								<Button
+									onClick={() => installExample(example)}
+									disabled={!plugins.enabled}
+								>
+									Install
+								</Button>
+							</li>
+						))}
+					</ul>
+				)}
+				{exampleError === null ? null : (
+					<p className="text-sm text-red-400">{exampleError}</p>
+				)}
 			</div>
 
 			<PluginLog />

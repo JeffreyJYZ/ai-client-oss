@@ -2,6 +2,8 @@
 
 An author's checklist. The **eight** plugins in this directory are worked examples — read the one that covers what you are building (the table below says which) alongside this page. `globals-proof/` is not one of them: it has no manifest and exists only to prove the build's React/JSX globals.
 
+They **ship with the app**: `bun run build` runs `scripts/build-plugins.ts`, which writes each chunk plus `public/plugins/examples.json`, and Settings → Plugins → **Examples** installs one with a click. Installing still copies the code into your own plugins, so it is full-trust like anything else.
+
 | Example | What it teaches |
 |---|---|
 | `hello-world/main.ts` | the smallest plugin: a slot contribution, the kit's `Button`, lifecycle |

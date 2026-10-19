@@ -24,11 +24,12 @@
  * the app's Vite config (its React/Tailwind plugins, its two HTML entries, its
  * `dist/`) entirely out of the way.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bareImports } from "../web/src/lib/build/bareImports";
+import { examplesIndex } from "../web/src/lib/build/examplesIndex";
 import { hostGlobalNames } from "../web/src/lib/plugins/globals";
 import { hostGlobalModules, reactExportNames } from "./pluginGlobals";
 
@@ -127,3 +128,35 @@ if (ids.length === 0) {
 		await buildPlugin(id);
 	}
 }
+
+/**
+ * The index the Settings list reads. Written from **every** example that has a
+ * manifest, not only from this run's targets: the file describes what the build
+ * ships, so a single-id rebuild must not shrink it. `globals-proof` has no
+ * manifest and is therefore absent — it is a build probe, not an example.
+ */
+const manifestRow = (id: string): { manifest: string; name: string; description: string } | null => {
+	const file = join(pluginsRoot, id, "plugin.json");
+	if (!existsSync(file)) return null;
+	const manifest = readFileSync(file, "utf8");
+	const parsed = JSON.parse(manifest) as { readonly name?: string; readonly description?: string };
+	return {
+		manifest,
+		name: parsed.name ?? id,
+		description: parsed.description ?? "",
+	};
+};
+
+const rows = targets().flatMap((id) => {
+	const manifest = manifestRow(id);
+	return manifest === null ? [] : [{ id, ...manifest }];
+});
+
+mkdirSync(outRoot, { recursive: true });
+writeFileSync(
+	join(outRoot, "examples.json"),
+	`${JSON.stringify(examplesIndex(rows), null, "\t")}\n`,
+);
+process.stdout.write(
+	`plugins: indexed ${rows.length} example(s) → web/public/plugins/examples.json\n`,
+);

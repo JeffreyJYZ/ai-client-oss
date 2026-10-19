@@ -151,6 +151,12 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
+            **New in 0.7.0**
+
+            - **The app ships working plugin examples.** Settings → Plugins → **Examples** lists eight, and one click installs the manifest and code into your own plugins. They are full-trust code like any other, and stay off until you enable the master switch.
+            - **Four new examples** cover the surfaces that had none: a view that owns the whole window (`zen-view`), a sidebar panel with real storage (`sidebar-notes`), three pipeline stages (`history-pipeline`), and a markdown renderer override with a safe fallback (`markdown-callouts`).
+            - **The examples are checked by the build.** They are typechecked with the app, and a test runs each one's `setup` and pins what it registers, so an example cannot drift from the API it teaches.
+
             **New in 0.6.0**
 
             - **Chats name themselves.** The first message a new conversation gets is handed to a free model, which returns a short title, so the sidebar stops showing the raw first line forever.
