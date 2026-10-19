@@ -3,12 +3,14 @@ import type { Backup } from "@lib/backup";
 import backupJson from "@lib/db/__fixtures__/backup-pre-plugins.json";
 import conversationJson from "@lib/db/__fixtures__/conversation-pre-plugins.json";
 import settingsJson from "@lib/db/__fixtures__/settings-pre-plugins.json";
+import { installConversationStore } from "@lib/db/__test-support__/fake-indexed-db";
 import {
 	clearInvokeCalls,
 	fakeInvoke,
 	installStorage,
 	invokeCalls,
 	setOutcome,
+	setStoredConversations,
 	setStoredSettings,
 	storedSettings,
 } from "@lib/db/__test-support__/fake-invoke";
@@ -21,7 +23,7 @@ import {
 	Settings,
 } from "@lib/db/types";
 import { web } from "@lib/db/web";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { z } from "zod";
 
 /** The 0.2.3 settings shape: nine keys, before the additive plugin fields. */
@@ -378,5 +380,72 @@ describe("a conversation's titleSource", () => {
 				titleSource: "user",
 			}).titleSource,
 		).toBe("user");
+	});
+});
+
+/* --------------------------- the listing path, not just the predicate */
+
+/**
+ * The gap `safeParse` alone leaves open: `success` is the predicate, but the app
+ * never calls it — the adapters run it inside their **listing path**
+ * (`web.ts`'s `getAll` + `flatMap` and `getConversation`, the desktop
+ * `tauri.ts`'s `db_list_conversations` + `parseConversation`), and a listing
+ * that returned nothing would still pass a predicate-only test. So a raw row
+ * carrying `{"titleSource": "weird"}` is put in the store and the adapter's own
+ * `listConversations` is driven over it.
+ *
+ * A second, genuinely unparseable row rides along: it must still be **dropped**,
+ * or a listing that ignored the schema entirely would satisfy the assertion.
+ */
+describe("a conversation with an unexpected titleSource survives the listing", () => {
+	/** The degrade's subject, plus a row no schema can accept. */
+	const weirdTitleSource = (): Record<string, unknown> => ({
+		...conversationFixture,
+		titleSource: "weird",
+	});
+	const unparseable = (): Record<string, unknown> => ({
+		...conversationFixture,
+		id: "conv-unparseable",
+		messages: "not an array",
+	});
+
+	test("the desktop adapter lists it as derived, and still drops the unparseable row", async () => {
+		setStoredConversations([weirdTitleSource(), unparseable()]);
+
+		const listed = await run(tauri.listConversations());
+
+		// Present, not vanished — the whole point of `catch("derived")`.
+		expect(listed.map((c) => c.id)).toEqual([conversationFixture.id]);
+		const survivor = listed[0];
+		expect(survivor?.titleSource).toBe("derived");
+		// Degraded, not abbreviated: the rest of the row is the fixture's.
+		expect(survivor?.title).toBe(conversationFixture.title);
+		expect(survivor?.messages).toEqual(conversationFixture.messages);
+	});
+
+	test("the web adapter lists it as derived, and still drops the unparseable row", async () => {
+		const store = installConversationStore();
+		try {
+			store.seed([weirdTitleSource(), unparseable()]);
+
+			const listed = await run(web.listConversations());
+
+			expect(listed.map((c) => c.id)).toEqual([conversationFixture.id]);
+			const survivor = listed[0];
+			expect(survivor?.titleSource).toBe("derived");
+			expect(survivor?.title).toBe(conversationFixture.title);
+			expect(survivor?.messages).toEqual(conversationFixture.messages);
+
+			// The second discard predicate in the same adapter: the single-row
+			// read keeps the same conversation, and refuses the unparseable one.
+			const fetched = await run(web.getConversation(conversationFixture.id));
+			expect(Option.isSome(fetched) && fetched.value.titleSource).toBe(
+				"derived",
+			);
+			const missing = await run(web.getConversation("conv-unparseable"));
+			expect(Option.isNone(missing)).toBe(true);
+		} finally {
+			store.restore();
+		}
 	});
 });

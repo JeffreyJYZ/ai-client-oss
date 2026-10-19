@@ -1,5 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { emptyProviderConfig, type Settings } from "@lib/db";
+import {
+	type Conversation,
+	db,
+	emptyProviderConfig,
+	type Settings,
+} from "@lib/db";
 import { extractMemories, MEMORY_TAG_OPEN, memoryLogLines } from "@lib/memory";
 import { addMemory, type MemoryEntry } from "@lib/memoryNotes";
 import {
@@ -905,6 +910,40 @@ describe("a title's source, and the user-message signal", () => {
 		// The whole never-overwrite guarantee rests on this write: the title
 		// alone is what a derived title also looks like.
 		expect(conversation?.titleSource).toBe("user");
+	});
+
+	test("the rename reaches the store, with the title and its source", () => {
+		newConversation();
+		const id = getChat().activeId;
+		// Read before the rename, so the assertions below cannot pass on the
+		// row the conversation already carried.
+		const derivedTitle = stored(id)?.title;
+		expect(derivedTitle).not.toBe("a deliberate name");
+
+		// The store's own read above is the *in-memory* copy; a rename is only
+		// durable if the composed `db` is handed it. `db` is the module's own
+		// object (the adapter `renameConversation` itself writes through), so
+		// this wraps that real writer — no project module is mocked — and
+		// passes the call through to it.
+		const written: Conversation[] = [];
+		const realUpsert = db.upsertConversation;
+		const spy = spyOn(db, "upsertConversation").mockImplementation(
+			(conversation) => {
+				written.push(conversation);
+				return realUpsert(conversation);
+			},
+		);
+		try {
+			renameConversation(id, "a deliberate name");
+		} finally {
+			spy.mockRestore();
+		}
+
+		// Exactly one row, the renamed one: a reload reads this back.
+		expect(written).toHaveLength(1);
+		expect(written[0]?.id).toBe(id);
+		expect(written[0]?.title).toBe("a deliberate name");
+		expect(written[0]?.titleSource).toBe("user");
 	});
 
 	test("the user-message signal fires once, after the row is stored, carrying the text", async () => {

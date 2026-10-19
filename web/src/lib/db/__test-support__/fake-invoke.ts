@@ -32,8 +32,32 @@ export const clearInvokeCalls = (): void => {
 };
 
 /**
+ * Raw stored conversation rows, keyed by id: exactly the JSON strings the Rust
+ * `db_list_conversations` serves and `db_upsert_conversation` receives. Seeded
+ * by a suite through {@link setStoredConversations}, so a conversation can be
+ * read back through the adapter's own listing path without an IndexedDB.
+ */
+const conversations = new Map<string, string>();
+
+/**
+ * Replace the desktop adapter's conversation store with `rows`, serialized the
+ * way Rust stores them. Nothing is validated here: a row may deliberately carry
+ * a value the schema has to degrade.
+ */
+export const setStoredConversations = (
+	rows: readonly Record<string, unknown>[],
+): void => {
+	conversations.clear();
+	for (const row of rows) {
+		conversations.set(String(row.id), JSON.stringify(row));
+	}
+};
+
+/**
  * The fake Tauri `invoke`: `db_get_settings` returns the seeded string and
- * `db_set_settings` records it; every other command resolves `null`.
+ * `db_set_settings` records it, the conversation commands serve and store
+ * {@link setStoredConversations}'s rows, and every other command resolves
+ * `null`.
  */
 export const fakeInvoke = mock(
 	(command: string, args?: Record<string, unknown>) => {
@@ -41,6 +65,16 @@ export const fakeInvoke = mock(
 		if (command === "db_get_settings") return Promise.resolve(stored);
 		if (command === "db_set_settings") {
 			stored = String(args?.json ?? "");
+			return Promise.resolve(null);
+		}
+		if (command === "db_list_conversations") {
+			return Promise.resolve([...conversations.values()]);
+		}
+		if (command === "db_get_conversation") {
+			return Promise.resolve(conversations.get(String(args?.id)) ?? null);
+		}
+		if (command === "db_upsert_conversation") {
+			conversations.set(String(args?.id), String(args?.json ?? ""));
 			return Promise.resolve(null);
 		}
 		return Promise.resolve(null);
