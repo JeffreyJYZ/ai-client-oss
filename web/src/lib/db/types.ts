@@ -201,6 +201,18 @@ export const Settings = z.object({
 			}),
 		)
 		.optional(),
+	/**
+	 * The user's explicit titler model choice, which wins over the
+	 * free-by-default rule (`lib/titler.ts`). Both fields are optional and
+	 * the whole object is optional: **absent means "use the rule"**, so
+	 * nothing migrates and an older app ignores it entirely.
+	 */
+	titler: z
+		.object({
+			providerId: z.string().optional(),
+			model: z.string().optional(),
+		})
+		.optional(),
 });
 
 export type Settings = z.infer<typeof Settings>;
