@@ -151,29 +151,21 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **New in 0.2.3**
+            **New in 0.6.0**
 
-            - Settings folds the Memory section by default, so its list no longer pushes everything else down the page.
+            - **Chats name themselves.** The first message a new conversation gets is handed to a free model, which returns a short title, so the sidebar stops showing the raw first line forever.
+            - **You choose who titles.** Settings → Titler picks a provider and model, or leaves it on **Automatic**: the automatic rule only ever uses a free model, and it reads that id from the provider's own fetched model list, so a stale hardcoded id can no longer silently dead-end.
+            - **A rename always wins.** The titler never overwrites a name you typed, and it never touches a conversation that already has a title. Deleting a conversation mid-flight writes nothing.
+            - **The row is honest.** It names the model that will title your chats and warns that the first message goes to *that* provider, which may differ from your chat's. When nothing resolves it says so and names the remedy — Fetch models, or pick a model. Switching the Built-ins → Titler area off removes the row, the naming and its background work together.
 
-            **New in 0.2.2**
+            **New in 0.5.0**
 
-            - Settings has an **Updates** section. Check for a new version whenever you like and install it there, so dismissing the notice no longer hides the only way to update.
-            - macOS installs with Homebrew: `brew trust jeffreyjyz/tap` once, then `brew install --cask jeffreyjyz/tap/oss-ai-client`.
+            - **Memory is a built-in area.** The model records a durable note when a conversation teaches it something, and Settings lists, edits and soft-deletes them, with a Recently deleted list to restore from.
+            - **Every built-in area can be switched off**, and its UI, its tools and its background work go with it.
 
-            **Fixed in 0.2.1**
+            **New in 0.4.0**
 
-            - Settings heading controls work again. The memory toggle and the web search switch could not be clicked in 0.2.0.
-            - A reloaded conversation keeps a turn's files and images, so a turn that was only an attachment no longer drops out of what the model sees.
-            - The tools block folds like the other settings sections.
-
-            **New in 0.2.0**
-
-            - The model can read a page you link, and with a TinyFish key it reads script-rendered pages too.
-            - Web search on endpoints that have none of their own, through TinyFish with your own API key. Local models included.
-            - Thinking streams properly from OpenRouter's newer reasoning shape, with a live count while it thinks.
-            - The model no longer forgets the conversation after a page reload or a failed request.
-            - Settings sections fold, and controls in a heading row still do their job.
-            - The app icon is inset on Apple's grid, so it no longer reads oversized in the Dock.
+            - **Plugins.** Plugins can add views, tools, slash commands and settings rows; the built-in areas are themselves plugins you can toggle in Built-ins.
 
             **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
 
