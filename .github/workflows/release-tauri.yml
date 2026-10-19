@@ -188,3 +188,31 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
+
+  # Repins the Homebrew cask as soon as the release exists. The tap is a
+  # separate repository, so this is the one cross-repo hop in the pipeline and
+  # it needs its own credential: a fine-grained PAT in `TAP_DISPATCH_TOKEN`
+  # (Contents: write, scoped to `JeffreyJYZ/homebrew-tap` only). It is
+  # **optional** — with no secret the step says so and exits 0, and the tap's
+  # own daily run still catches up.
+  tap:
+    needs: [version, build]
+    if: ${{ always() && needs.build.result == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch the cask repin
+        env:
+          TAP_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAP_TOKEN}" ]; then
+            echo "TAP_DISPATCH_TOKEN is unset; the tap repins on its own schedule"
+            exit 0
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${TAP_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/JeffreyJYZ/homebrew-tap/dispatches \
+            -d '{"event_type":"client-release"}'
+          echo "dispatched client-release to JeffreyJYZ/homebrew-tap"
