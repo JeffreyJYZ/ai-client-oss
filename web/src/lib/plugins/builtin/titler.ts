@@ -114,12 +114,16 @@ const resolveTarget = (): TitlerTarget | undefined => {
 	const settings = getSettings();
 	const resolved = resolveTitlerModel(settings, isDesktop);
 	if (resolved === undefined) return undefined;
-	const provider = resolveProviderSync(resolved.providerId);
-	if (Option.isNone(provider)) return undefined;
 	const config = settings.providers.find(
 		(candidate) => candidate.id === resolved.providerId,
 	);
 	if (config === undefined) return undefined;
+	// The rule returns the provider's **own id** (`provider-<uuid>` from the
+	// Settings path); `resolveProviderSync` resolves **wire protocol names**, a
+	// separate field. Handing it the id silently resolves nothing for every
+	// real user while the hint still names a model.
+	const provider = resolveProviderSync(config.protocol);
+	if (Option.isNone(provider)) return undefined;
 	return {
 		provider: provider.value,
 		baseUrl: config.baseUrl,

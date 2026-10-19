@@ -41,28 +41,25 @@ import { titlerRows } from "@/ui/titler/titlerRows";
  * real write landing on the real conversation. It does **not** re-test the
  * trigger's cases — those are injected, and counted, in the area's own suite.
  *
- * ## The provider id, and the defect this file documents
+ * ## The provider id and the protocol are different fields
  *
- * `Settings.providers[].id` must equal the registered protocol name here for
- * the chain to reach the provider at all, and that is not an accident of the
- * fixture: the area's `resolveTarget` passes the **model rule's** `providerId`
- * — a `Settings.providers[].id` (`lib/titler.ts` returns `provider.id`) — to
- * `resolveProviderSync`, which resolves **protocol names**
- * (`lib/plugins/providers.ts`). The app's own Settings UI mints
- * `provider-<uuid>` ids (`state/settings.ts` `addProvider`), which never match a
- * protocol name, so `resolveTarget` returns `undefined` and the titler is an
- * honest no-op for every real user — the hint would say a model resolves while
- * the area never fires. That mismatch lives in T4's `builtin/titler.ts`; it is
- * reported with T5 and deliberately left alone there. This suite aligns the two
- * ids so the rest of the chain can be exercised and, with the misaligned pair,
- * proves the no-op (see `titlerEndToEnd.mismatch` evidence in the task report).
+ * `Settings.providers[].id` is the app's own identity — `state/settings.ts`
+ * `addProvider` mints `provider-<uuid>` — while the wire protocol is a separate
+ * `protocol` field, a name a plugin registers. `resolveTitlerModel` returns the
+ * **provider id**, so the area must find the config by that id and hand
+ * `config.protocol` (never the id) to `resolveProviderSync`. Getting it wrong is
+ * silent: `resolveTarget` then returns `undefined` for every real user while the
+ * hint still claims a model, so the titler is an honest no-op. T4 shipped that
+ * mismatch and T5's review measured it; this fixture keeps the **uuid-shaped id
+ * plus a distinct protocol** — the shape the app actually stores — so the chain
+ * cannot pass again on an aligned pair that no user can produce.
  */
 
 /** The registered protocol name the fake provider answers to. */
 const PROTOCOL = "t5-titler-openrouter";
 
-/** See the module comment: this equals {@link PROTOCOL} on purpose. */
-const PROVIDER_ID = PROTOCOL;
+/** The app's own uuid-shaped provider identity — never a protocol name. */
+const PROVIDER_ID = "provider-fixture-0a1b2c3d";
 
 /** The free id the rule picks out of the seeded provider's own cached list. */
 const FREE_ID = "openrouter/free";
