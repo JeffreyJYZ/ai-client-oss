@@ -1,5 +1,7 @@
 import type { ProviderConfig, Settings } from "@lib/db/types";
+import type { ProviderEntry } from "@lib/plugins/providers";
 import { isOpencodeHost } from "@lib/providers/presets";
+import { Effect, Stream } from "effect";
 
 /**
  * The longest title the sidebar keeps. A free model asked for a few words
@@ -175,3 +177,64 @@ export const cleanTitle = (raw: string): string => {
 	const oneLine = unlabeled.replace(/\s+/g, " ").trim();
 	return stripDecoration(oneLine).slice(0, TITLER_MAX_TITLE_LENGTH);
 };
+
+/**
+ * One title request, through the **provider's own** `send` — the same member
+ * the chat path and `testModel` call — so the transport (the native shell on
+ * desktop, the webview's `fetch` on web), the endpoint's headers and the body
+ * builder are the ones already proven, and a test can hold the `ctx` a real
+ * request would send.
+ *
+ * The effect requires **nothing** (`R = never`): the provider *and* its
+ * credentials arrive as values, so this needs no `HostServices` and runs on the
+ * empty-context runtime the area's `host.run` supplies (see the spec's "How it
+ * runs"). Its failure is a typed `string` cause for the caller to log — a
+ * surface that cannot answer is *resolved-but-failing*, which the caller
+ * distinguishes from "nothing to do".
+ *
+ * The request carries the titler's own message (`TITLER_PROMPT` plus the first
+ * message), `fetchTool: false`, no `tools` and no `search` (a title needs no
+ * round trip), and **the conversation's own id** as the session — an endpoint
+ * that routes or caches per conversation (`x-opencode-session`) must not
+ * attribute this conversation's request to the probe's constant id.
+ *
+ * Only `kind === "text"` chunks are folded: a reasoning model streams its
+ * scratchpad first, and folding that would put the model's thinking in the
+ * sidebar. The fold is sanitized by {@link cleanTitle}; a reply that carries no
+ * text — or nothing left after the decoration is peeled — returns `undefined`,
+ * because an empty title is worse than the derived one.
+ */
+export const titleFor = (input: {
+	provider: ProviderEntry;
+	baseUrl: string;
+	apiKey: string;
+	model: string;
+	conversationId: string;
+	firstMessage: string;
+}): Effect.Effect<string | undefined, string> =>
+	Effect.gen(function* () {
+		const stream = yield* input.provider.send({
+			msg: `${TITLER_PROMPT}\n\n${input.firstMessage}`,
+			// Nothing is replayed: this request starts from the provider's own
+			// template exactly as the first round of a fresh turn does.
+			prev: input.provider.template,
+			apiUrl: input.baseUrl,
+			apiKey: input.apiKey,
+			model: input.model,
+			// The conversation this request belongs to, so an endpoint that
+			// needs a per-conversation session header gets this one's id.
+			conversationId: input.conversationId,
+			// No tools, no search: a tool round has no caller here, and the
+			// answer is one line.
+			fetchTool: false,
+		});
+
+		const reply = yield* stream.pipe(
+			Stream.filter((chunk) => chunk.kind === "text"),
+			Stream.map((chunk) => chunk.text),
+			Stream.mkString,
+		);
+
+		const title = cleanTitle(reply);
+		return title === "" ? undefined : title;
+	});
