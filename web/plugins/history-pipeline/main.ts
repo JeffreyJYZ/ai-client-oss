@@ -1,4 +1,4 @@
-import type { Host, PipelineEntry } from "@lib/plugins/sdk";
+import type { Host, PipelineEntry, PipelineMeta } from "@lib/plugins/sdk";
 import type { HistoryTurn, SendCtx } from "@lib/providers/types";
 import { Effect, Option } from "effect";
 
@@ -49,14 +49,14 @@ export default {
 		const onHistoryStage: Omit<PipelineEntry, "owner"> = {
 			id: "example.history-pipeline.on-history",
 			kind: "onHistory",
-			run: (turns: readonly HistoryTurn[], _meta) =>
+			run: (turns: readonly HistoryTurn[], _meta: PipelineMeta) =>
 				Effect.succeed(trimHistory(turns)),
 		};
 
 		const beforeSendStage: Omit<PipelineEntry, "owner"> = {
 			id: "example.history-pipeline.before-send",
 			kind: "beforeSend",
-			run: (ctx: SendCtx, _meta) => {
+			run: (ctx: SendCtx, _meta: PipelineMeta) => {
 				if (isEmptyPrompt(ctx)) {
 					host.log.warn(
 						"history-pipeline: empty prompt after trimming; aborting the turn",
@@ -70,7 +70,7 @@ export default {
 		const afterReplyStage: Omit<PipelineEntry, "owner"> = {
 			id: "example.history-pipeline.after-reply",
 			kind: "afterReply",
-			run: (reply: string, _meta) =>
+			run: (reply: string, _meta: PipelineMeta) =>
 				Effect.sync(() => {
 					host.log.info(`history-pipeline: reply ${reply.length} chars`);
 					return reply;
