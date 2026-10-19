@@ -321,3 +321,62 @@ describe("the pre-plugin backup fixture", () => {
 		expect(written.dataVersion).toBe(DATA_VERSION);
 	});
 });
+
+/* ------------------------------------------------------- a title's source */
+
+/**
+ * `titleSource` records who wrote a conversation's title, and **absent means
+ * `"derived"`** — the first user message's text. That is exactly what every
+ * conversation stored before the field existed carries, and the frozen 0.2.3
+ * fixture above is one of them, so nothing needs migrating.
+ *
+ * The field is *tolerated* (`z.enum([...]).optional().catch("derived")`), and
+ * the second test is why: both adapters **discard** a conversation whose
+ * `conversationSchema.safeParse` fails (`web.ts`'s `listConversations` and
+ * `getConversation`, the desktop `tauri.ts`'s `parseConversation`), so a bare
+ * optional enum would turn one unexpected value into a conversation the user
+ * cannot see.
+ */
+describe("a conversation's titleSource", () => {
+	test("a conversation stored without one reads as derived, and stays absent", () => {
+		expect(conversationJson).not.toHaveProperty("titleSource");
+		// The field is declared, and declared *tolerated*: a row without it is
+		// a case the schema knows about, not an accident of the fixture.
+		expect(Object.keys(conversationSchema.shape)).toContain("titleSource");
+		const parsed = conversationSchema.parse(conversationFixture);
+
+		// Absent — never `"model"` or `"user"`, the two values the titler
+		// refuses to overwrite, so a legacy conversation stays titleable.
+		expect(parsed.titleSource).toBeUndefined();
+		expect(parsed.title).toBe(conversationFixture.title);
+		// A round-trip adds nothing: the absence is not "migrated" into a value.
+		expect(JSON.parse(JSON.stringify(parsed))).not.toHaveProperty(
+			"titleSource",
+		);
+	});
+
+	test("a value outside the enum degrades instead of dropping the conversation", () => {
+		const parsed = conversationSchema.safeParse({
+			...conversationFixture,
+			titleSource: "weird",
+		});
+
+		// `success` is the whole assertion: it is the predicate both adapters
+		// keep a conversation by, so the row reads instead of vanishing.
+		expect(parsed.success).toBe(true);
+		if (!parsed.success) return;
+		expect(parsed.data.titleSource).toBe("derived");
+		// Degraded, not abbreviated: the rest of the conversation is intact.
+		expect(parsed.data.title).toBe(conversationFixture.title);
+		expect(parsed.data.messages).toEqual(conversationFixture.messages);
+	});
+
+	test("a value inside the enum is kept, not caught", () => {
+		expect(
+			conversationSchema.parse({
+				...conversationFixture,
+				titleSource: "user",
+			}).titleSource,
+		).toBe("user");
+	});
+});

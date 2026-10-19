@@ -253,6 +253,20 @@ export type ChatMessage = z.infer<typeof chatMessageSchema>;
 export const conversationSchema = z.object({
 	id: z.string(),
 	title: z.string(),
+	/**
+	 * Who wrote the title: the first user message's text (`"derived"`), a model
+	 * (`"model"`) or the user (`"user"`). **Absent means `"derived"`**, which is
+	 * exactly what a conversation stored before this field existed carries, so
+	 * nothing needs migrating.
+	 *
+	 * Enum, then optional, then `catch` — the same tolerance
+	 * `providerConfigSchema.protocol` applies, and for a sharper reason:
+	 * `conversationSchema` is a plain `z.object` and a failed `safeParse`
+	 * **discards the whole conversation** (`db/web.ts`, `db/tauri.ts`), so one
+	 * value outside the enum would make a conversation invisible rather than
+	 * degrade to the source it had before the field existed.
+	 */
+	titleSource: z.enum(["derived", "model", "user"]).optional().catch("derived"),
 	/** Per-conversation system prompt, sent on every request. Blank = none. */
 	systemPrompt: z.string().optional(),
 	messages: z.array(chatMessageSchema),

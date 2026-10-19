@@ -21,7 +21,13 @@ import { chatcompletions } from "@lib/providers/chatCompletions";
 import { FETCH_URL_NAME } from "@lib/providers/presets";
 import type { Chunk, SendCtx } from "@lib/providers/types";
 import { Effect, Exit, Scope, Stream } from "effect";
-import { getChat, send } from "@/state/chat";
+import {
+	getChat,
+	newConversation,
+	renameConversation,
+	send,
+	subscribeUserMessage,
+} from "@/state/chat";
 import { getSettings, setSettings } from "@/state/settings";
 
 /**
@@ -875,5 +881,57 @@ describe("the five memory tools, through a real tool turn", () => {
 		expect(turn.logs.filter((line) => line.includes(droppedLine))).toEqual([]);
 		expect(turn.text).toBe(reply);
 		expect(turn.notes).toEqual([]);
+	});
+});
+
+/* -------------------------------------- the title's source and the signal */
+
+/**
+ * The titler's two store-level halves (P3 T1). A rename has to be
+ * distinguishable from a derived title, or a model title cannot tell the one it
+ * may improve from the one it must never touch; and the turn's user message has
+ * to be observable **with its text**, or the titler has nothing to title from
+ * (`turn-start`, the event that exists, is published before the append).
+ */
+describe("a title's source, and the user-message signal", () => {
+	test("renameConversation records the title as user-authored, with the title", () => {
+		newConversation();
+		const id = getChat().activeId;
+		renameConversation(id, "a deliberate name");
+
+		const conversation = getChat().conversations.find((c) => c.id === id);
+		expect(conversation?.title).toBe("a deliberate name");
+		// The whole never-overwrite guarantee rests on this write: the title
+		// alone is what a derived title also looks like.
+		expect(conversation?.titleSource).toBe("user");
+	});
+
+	test("the user-message signal fires once, after the row is stored, carrying the text", async () => {
+		newConversation();
+		const id = getChat().activeId;
+		// Read inside the handler, so this is the store's state **at signal
+		// time** — the property that lets a subscriber title the message it was
+		// handed rather than guess at it later.
+		const seen: { id: string; text: string; stored: number }[] = [];
+		const stop = subscribeUserMessage((signal) => {
+			seen.push({
+				id: signal.conversationId,
+				text: signal.text,
+				stored: getChat().messages.length,
+			});
+		});
+		try {
+			await sentBody(`t1-signal-${crypto.randomUUID()}`);
+		} finally {
+			stop();
+		}
+
+		// Once, for the turn's own message, and the store already held it.
+		expect(seen).toEqual([{ id, text: "hello", stored: 1 }]);
+		// ...on a conversation whose (derived) title came from that message,
+		// which is the state the signal announces.
+		expect(getChat().conversations.find((c) => c.id === id)?.title).toBe(
+			"hello",
+		);
 	});
 });

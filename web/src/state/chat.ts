@@ -487,6 +487,65 @@ export const subscribe = (cb: () => void): (() => void) => {
 export const useChat = (): ChatSnapshot =>
 	useSyncExternalStore(subscribe, getChat);
 
+/** One turn's user message, as a subscriber sees it. */
+export interface UserMessageSignal {
+	readonly conversationId: string;
+	readonly text: string;
+}
+
+/** Everyone watching {@link subscribeUserMessage}. */
+const userMessageHandlers = new Set<(signal: UserMessageSignal) => void>();
+
+/**
+ * Publish one already-appended user message. Each handler runs in its own
+ * isolated step, exactly as `publishHostEvent` does: the subscriber is another
+ * module's code (the `app.titler` area), and a turn must never fail because an
+ * observer did — the signal is an observation, not a step in the send.
+ */
+const publishUserMessage = (signal: UserMessageSignal): void => {
+	for (const handler of [...userMessageHandlers]) {
+		Effect.runSync(
+			Effect.sync(() => handler(signal)).pipe(
+				Effect.catchCause((cause) =>
+					Effect.logWarning(
+						`a user-message subscriber faulted and was skipped: ${Cause.pretty(cause)}`,
+					),
+				),
+			),
+		);
+	}
+};
+
+/**
+ * The user message of one `send`, published **once the row is in the store** —
+ * the signal a titler titles a conversation from.
+ *
+ * **Why not `turn-start`:** it is published *before* this turn's user row is
+ * appended, and its payload is `{conversationId, protocol}` only — no messages,
+ * no text — so a synchronous subscriber sees a conversation with nothing to
+ * title. The same point's other existing signal, `conversation-changed` (and
+ * `host.chat.changes`), does carry the snapshot, but it fires on *every* store
+ * write — each streamed chunk, `finalize` — so it cannot say "this is a new
+ * turn's message"; and a new host event *name* is an edit to the bus's closed
+ * vocabulary (`lib/plugins/ids.ts`), not to the store. This signal is the
+ * store's own, fired synchronously from the send path.
+ *
+ * **Per send, not per conversation.** It fires for the user row of every turn
+ * that appends one as the turn's newest row — never for the `unknown protocol`
+ * path, whose write also adds an `error` row. Deciding that this was a
+ * conversation's *first* message (`messages.length === 1`) is the subscriber's
+ * job, beside the title-source check, because both halves belong to the
+ * trigger that consumes this.
+ */
+export const subscribeUserMessage = (
+	handler: (signal: UserMessageSignal) => void,
+): (() => void) => {
+	userMessageHandlers.add(handler);
+	return () => {
+		userMessageHandlers.delete(handler);
+	};
+};
+
 export const send = (msg: string, parts: AttachmentPart[]): void => {
 	if (status === "streaming") return;
 	if (msg.trim() === "" && parts.length === 0) return;
@@ -640,6 +699,10 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	}));
 	status = "streaming";
 	refresh();
+	// The user's row is in the store, so a subscriber can now read it with its
+	// text (`subscribeUserMessage`). Published after `refresh`, so the snapshot
+	// a handler reads and this signal cannot disagree.
+	publishUserMessage({ conversationId, text: msg });
 
 	// Raw accumulation of every `text` chunk. `appendChunk` derives the
 	// visible text from it (extraction is idempotent), and the finalizer
@@ -897,7 +960,14 @@ export const selectConversation = (id: string): void => {
 
 export const renameConversation = (id: string, title: string): void => {
 	if (findConversation(id) === undefined) return;
-	updateConversation(id, (conversation) => ({ ...conversation, title }));
+	// The title and its source are written together: a title alone is exactly
+	// what a derived one looks like, and a model title must never replace a
+	// deliberate one, so the source is the only thing that distinguishes them.
+	updateConversation(id, (conversation) => ({
+		...conversation,
+		title,
+		titleSource: "user",
+	}));
 	refresh();
 	persistConversationById(id);
 };
