@@ -180,7 +180,15 @@ export const titlerRows = (input: {
 			selectionKey,
 		};
 	}
-	if (input.status !== undefined && !input.status.ok) {
+	// The record is one slot with no conversation id or timestamp, so a failure
+	// from a *different* model is not evidence about the one that resolves now.
+	// Show it only when the attempt that failed used exactly this model;
+	// otherwise the row is the plain "resolved" state.
+	if (
+		input.status !== undefined &&
+		!input.status.ok &&
+		input.status.model === input.resolved.model
+	) {
 		return {
 			state: "failed",
 			hint: failedHint(input.resolved, input.providers, input.status.reason),

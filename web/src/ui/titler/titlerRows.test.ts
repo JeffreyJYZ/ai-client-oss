@@ -136,6 +136,28 @@ describe("the hint's three states", () => {
 		expect(rows.hint).not.toContain("failed");
 	});
 
+	test("a failure recorded for a different model is not attributed to this one", () => {
+		// The record is a single slot with no conversation id, so a failure from
+		// a model the user has since switched away from says nothing about the
+		// model resolving now. The row must read as resolved, and the old reason
+		// must not appear.
+		const rows = rowsFor({
+			resolved: { providerId: "or", model: "openrouter/free" },
+			providers: [
+				provider("or", { label: "OpenRouter", models: ["openrouter/free"] }),
+			],
+			status: {
+				model: "a-model-that-was-tried-before",
+				ok: false,
+				reason: "the endpoint refused the request",
+			},
+		});
+
+		expect(rows.state).toBe("resolved");
+		expect(rows.hint).not.toContain("the endpoint refused the request");
+		expect(rows.hint).not.toContain("failed");
+	});
+
 	test("resolved and then failed reads the status record and names its reason", () => {
 		const rows = rowsFor({
 			resolved: { providerId: "or", model: "openrouter/free" },
