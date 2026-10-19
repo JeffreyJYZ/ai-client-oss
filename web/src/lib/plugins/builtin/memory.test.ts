@@ -341,11 +341,11 @@ describe("the app.memory area", () => {
 		expect(typeof appMemorySettings.subscribe).toBe("function");
 	});
 
-	test("the table has ten toggleable areas, and app.memory is the tenth", () => {
-		// Ten **toggleable** areas, the plan's count: the table carries two more
-		// entries because the substrate and the manager are locked.
+	test("the table has eleven toggleable areas, and app.memory is the tenth", () => {
+		// Eleven **toggleable** areas, the plan's count: the table carries two
+		// more entries because the substrate and the manager are locked.
 		expect(BUILTIN_AREAS.filter((area) => area.locked !== true)).toHaveLength(
-			10,
+			11,
 		);
 		expect(BUILTIN_AREAS).toHaveLength(BUILTIN_IDENTITIES.length);
 		expect(BUILTIN_IDENTITIES.map((identity) => identity.id)).toContain(
