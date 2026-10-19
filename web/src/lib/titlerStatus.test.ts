@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import {
 	getTitlerOutcome,
 	recordTitlerOutcome,
@@ -41,5 +41,33 @@ describe("titlerStatus", () => {
 		stop();
 		recordTitlerOutcome({ model: "free", ok: true, reason: "titled" });
 		expect(calls).toBe(1);
+	});
+
+	test("one throwing listener is isolated: the rest run and the record stands", () => {
+		const seen: string[] = [];
+		const first = subscribeTitlerOutcome(() => {
+			throw new Error("listener one exploded");
+		});
+		const second = subscribeTitlerOutcome(() => {
+			seen.push("second");
+		});
+		const logged = spyOn(console, "log");
+		try {
+			recordTitlerOutcome({ model: "free", ok: true, reason: "titled" });
+		} finally {
+			logged.mockRestore();
+			first();
+			second();
+		}
+
+		// The fault is isolated, so the listener after it still runs...
+		expect(seen).toEqual(["second"]);
+		// ...and the record is the attempt's own, not a failure invented from
+		// the listener's throw.
+		expect(getTitlerOutcome()).toEqual({
+			model: "free",
+			ok: true,
+			reason: "titled",
+		});
 	});
 });

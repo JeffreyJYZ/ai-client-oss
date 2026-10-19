@@ -15,7 +15,12 @@ import {
 	makeHost,
 } from "@lib/plugins/host";
 import type { ProviderEntry } from "@lib/plugins/providers";
-import type { TitlerOutcome } from "@lib/titlerStatus";
+import {
+	getTitlerOutcome,
+	recordTitlerOutcome,
+	subscribeTitlerOutcome,
+	type TitlerOutcome,
+} from "@lib/titlerStatus";
 import { Deferred, Effect, Exit, Scope } from "effect";
 import type { UserMessageSignal } from "@/state/chat";
 
@@ -72,6 +77,11 @@ interface Options {
 	readonly resolve?: () => TitlerTarget | undefined;
 	/** The request, per signal. Defaults to a title that comes back immediately. */
 	readonly titleFor?: TitlerDeps["titleFor"];
+	/**
+	 * The recorder, when a test drives the **real** status module — the one the
+	 * settings hint reads. Defaults to collecting into this harness.
+	 */
+	readonly recordOutcome?: TitlerDeps["recordOutcome"];
 	readonly conversations?: readonly (readonly [string, TitlerConversation])[];
 }
 
@@ -121,9 +131,11 @@ const makeDeps = (options: Options = {}) => {
 			writes.push([id, title]);
 			return true;
 		},
-		recordOutcome: (outcome) => {
-			outcomes.push(outcome);
-		},
+		recordOutcome:
+			options.recordOutcome ??
+			((outcome) => {
+				outcomes.push(outcome);
+			}),
 	};
 
 	return {
@@ -242,8 +254,29 @@ describe("the app.titler area", () => {
 	});
 
 	test("a conversation the user renamed is never titled", async () => {
+		// A **real** first message, so the length half passes and the source
+		// half is what refuses: with `messages: []` the count decided and this
+		// test could not see the source check at all.
 		const h = await makeHarness({
-			conversations: [["c1", { messages: [], titleSource: "user" }]],
+			conversations: [
+				["c1", { messages: firstMessage(), titleSource: "user" }],
+			],
+		});
+
+		h.emit(SIGNAL);
+		await settle();
+
+		expect(h.requests()).toBe(0);
+	});
+
+	test("a conversation the model already titled is never re-titled", async () => {
+		// The other source value, same half of the trigger: `"model"` refuses
+		// too, so a hydrated conversation whose first attempt landed is left
+		// alone on a later send.
+		const h = await makeHarness({
+			conversations: [
+				["c1", { messages: firstMessage(), titleSource: "model" }],
+			],
 		});
 
 		h.emit(SIGNAL);
@@ -295,7 +328,34 @@ describe("the app.titler area", () => {
 		expect(h.writes()).toEqual([]);
 		expect(h.outcomes().at(-1)?.ok).toBe(false);
 		expect(h.outcomes().at(-1)?.reason).toContain("send threw");
+		// The model is known by then: the fault came from the request, not from
+		// the resolver, so it must not be recorded as an unresolved attempt.
+		expect(h.outcomes().at(-1)?.model).toBe("free-model");
 		expect(calls).toBeGreaterThan(0);
+	});
+
+	test("a title that comes back as nothing records why and keeps the derived title", async () => {
+		// T3's honest answer: the reply carried no text (or only decoration).
+		// `undefined` is not a failure of the request, but it *is* an attempt
+		// the hint must explain — a silent skip would look like a dead titler.
+		const h = await makeHarness({
+			conversations: [["c1", { messages: firstMessage() }]],
+			titleFor: () => Effect.succeed(undefined),
+		});
+
+		h.emit(SIGNAL);
+		await settle();
+
+		expect(h.requests()).toBe(1);
+		expect(h.writes()).toEqual([]);
+		expect(h.titles.get("c1")).toBeUndefined();
+		expect(h.outcomes()).toEqual([
+			{
+				model: "free-model",
+				ok: false,
+				reason: "the model returned no usable title",
+			},
+		]);
 	});
 
 	test("with no model resolved, no request is made at all", async () => {
@@ -310,6 +370,61 @@ describe("the app.titler area", () => {
 		expect(h.requests()).toBe(0);
 		// An honest no-op is not an attempt: nothing to explain in the hint.
 		expect(h.outcomes()).toEqual([]);
+	});
+
+	test("a signal that resolves nothing frees the id, so a later signal still titles", async () => {
+		// The fresh-install default: the first send resolves no model, so the
+		// run leaves the effect before the request pipeline exists. If the
+		// release only hung off that pipeline, the conversation's id would stay
+		// in `inFlight` for the life of the page and *no later send could ever
+		// title it* — measured on this shape.
+		let resolved: TitlerTarget | undefined;
+		const h = await makeHarness({
+			conversations: [["c1", { messages: firstMessage() }]],
+			resolve: () => resolved,
+		});
+
+		h.emit(SIGNAL);
+		await settle();
+		expect(h.requests()).toBe(0);
+
+		// The user adds a key / fetches models, so a model resolves now. A
+		// second signal arrives for the same, still-untitled conversation.
+		resolved = target();
+		h.emit(SIGNAL);
+		await settle();
+
+		expect(h.requests()).toBe(1);
+		expect(h.titles.get("c1")).toBe("A Model Title");
+	});
+
+	test("a resolver that throws frees the id and its fault is recorded", async () => {
+		// The other path that leaves before the pipeline: `resolveTarget` is a
+		// synchronous read of the settings and the provider registry, so it can
+		// throw. The defect must free the id (or the conversation is dead to
+		// this page) *and* reach the status record (or the hint shows nothing).
+		let broken = true;
+		const h = await makeHarness({
+			conversations: [["c1", { messages: firstMessage() }]],
+			resolve: () => {
+				if (broken) throw new Error("the settings read exploded");
+				return target();
+			},
+		});
+
+		h.emit(SIGNAL);
+		await settle();
+
+		expect(h.requests()).toBe(0);
+		expect(h.outcomes().at(-1)?.ok).toBe(false);
+		expect(h.outcomes().at(-1)?.reason).toContain("the settings read exploded");
+
+		broken = false;
+		h.emit(SIGNAL);
+		await settle();
+
+		expect(h.requests()).toBe(1);
+		expect(h.titles.get("c1")).toBe("A Model Title");
 	});
 
 	test("an attachments-only first message (empty text) is skipped", async () => {
@@ -347,6 +462,43 @@ describe("the app.titler area", () => {
 		});
 	});
 
+	test("a throwing status listener neither skips the next nor invents a failure", async () => {
+		const seen: string[] = [];
+		const first = subscribeTitlerOutcome(() => {
+			throw new Error("the settings hint exploded");
+		});
+		const second = subscribeTitlerOutcome(() => {
+			seen.push("second");
+		});
+		try {
+			// The **real** recorder — the one the hint reads — because this is
+			// the shape that matters: `recordOutcome` runs inside the titler's
+			// own effect, so an unisolated listener throw would defect that
+			// effect and the `catchCause` would overwrite the real outcome with
+			// the listener's error.
+			const h = await makeHarness({
+				conversations: [["c1", { messages: firstMessage() }]],
+				recordOutcome: recordTitlerOutcome,
+			});
+
+			h.emit(SIGNAL);
+			await settle();
+
+			expect(h.writes()).toEqual([["c1", "A Model Title"]]);
+			// The listener after the fault still ran...
+			expect(seen).toEqual(["second"]);
+			// ...and the record is the attempt's own, not the listener's error.
+			expect(getTitlerOutcome()).toEqual({
+				model: "free-model",
+				ok: true,
+				reason: "titled",
+			});
+		} finally {
+			first();
+			second();
+		}
+	});
+
 	test("the area closes its run when toggled off", async () => {
 		const held = Effect.runSync(Deferred.make<string | undefined>());
 		const h = await makeHarness({
@@ -369,6 +521,11 @@ describe("the app.titler area", () => {
 		Effect.runSync(Deferred.succeed(held, "A Model Title"));
 		await settle();
 		expect(h.writes()).toEqual([]);
+
+		// And the interruption is **re-raised**, never recorded: a toggle-off is
+		// a teardown, not the titler faulting — the settings hint must not read
+		// "cannot read properties of undefined" as this area's failure.
+		expect(h.outcomes()).toEqual([]);
 
 		// And a later signal cannot reach a released subscription.
 		h.emit(SIGNAL);

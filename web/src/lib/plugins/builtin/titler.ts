@@ -136,6 +136,13 @@ const resolveTarget = (): TitlerTarget | undefined => {
 const failureReason = (cause: Cause.Cause<string>): string =>
 	Option.getOrElse(Cause.findErrorOption(cause), () => Cause.pretty(cause));
 
+/**
+ * The model id recorded when the attempt failed **before** any model was known
+ * — a throw out of `deps.resolveTarget()`, so there is no real id to name. A
+ * real id is never invented; the outcome's reason carries what went wrong.
+ */
+const UNKNOWN_MODEL = "unresolved";
+
 /** The app's real collaborators, one identity. */
 const realDeps: TitlerDeps = {
 	subscribe: subscribeUserMessage,
@@ -170,79 +177,103 @@ export const registerTitlerBuiltins = (
 	 */
 	const inFlight = new Set<string>();
 
-	/** One title request, forked into the area's scope by the caller. */
-	const title = (signal: UserMessageSignal): Effect.Effect<void, string> =>
-		Effect.suspend(() => {
-			const target = deps.resolveTarget();
-			if (target === undefined) return Effect.void;
-			const model = target.model;
-			// The call sits in its own `suspend` so a **synchronous throw** out
-			// of `send` becomes a defect of this effect and reaches the
-			// `matchCause` below; a throw evaluated by the outer thunk would
-			// escape it and land on `host.run`'s logger instead, recorded
-			// nowhere.
-			return Effect.suspend(() =>
-				deps.titleFor({
-					provider: target.provider,
-					baseUrl: target.baseUrl,
-					apiKey: target.apiKey,
-					model,
-					conversationId: signal.conversationId,
-					firstMessage: signal.text,
+	/**
+	 * The one failure path: an interruption is **re-raised** — a teardown is not
+	 * a fault — and anything else is recorded for the hint and logged. It has two
+	 * callers because a throw out of the resolver happens before a model is known
+	 * ({@link UNKNOWN_MODEL}).
+	 */
+	const onFailure =
+		(model: string, signal: UserMessageSignal) =>
+		(cause: Cause.Cause<string>): Effect.Effect<void, string> => {
+			if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
+			const reason = failureReason(cause);
+			return Effect.andThen(
+				Effect.sync(() => {
+					deps.recordOutcome({ model, ok: false, reason });
 				}),
-			).pipe(
-				// The success half does the work and discards the title, so the
-				// effect's value is `void` and only a **failure** reaches the
-				// `catchCause` below — there is no sentinel to confuse with the
-				// legitimate "the model returned nothing" answer.
-				Effect.flatMap((title) =>
-					Effect.sync(() => {
-						if (title === undefined) {
-							deps.recordOutcome({
-								model,
-								ok: false,
-								reason: "the model returned no usable title",
-							});
-							return;
-						}
-						const wrote = deps.writeTitle(signal.conversationId, title);
-						deps.recordOutcome({
-							model,
-							ok: true,
-							reason: wrote
-								? "titled"
-								: "the conversation was renamed or deleted first",
-						});
-					}),
-				),
-				// `catchCause`, not the typed-error form, and not `matchEffect`
-				// (which re-raises a defect): a protocol whose `send` throws
-				// synchronously **defects** `titleFor` — the chat path isolates
-				// that in `sendThrough`, `titleFor` does not — and a defect must
-				// still be logged and recorded, or a faulting provider looks like a
-				// titler that never ran. An interruption is re-raised: a teardown
-				// is not a fault.
-				Effect.catchCause((cause) => {
-					if (Cause.hasInterruptsOnly(cause)) return Effect.failCause(cause);
-					const reason = failureReason(cause);
-					return Effect.andThen(
-						Effect.sync(() => {
-							deps.recordOutcome({ model, ok: false, reason });
-						}),
-						Effect.logWarning(
-							`the titler could not title conversation ${signal.conversationId}: ${reason}`,
-						),
-					);
-				}),
-				// Always, including on a defect or an interruption: a conversation
-				// left in the set would never be retried by this page.
-				Effect.ensuring(
-					Effect.sync(() => {
-						inFlight.delete(signal.conversationId);
-					}),
+				Effect.logWarning(
+					`the titler could not title conversation ${signal.conversationId}: ${reason}`,
 				),
 			);
-		});
+		};
+
+	/**
+	 * One title request, forked into the area's scope by the caller.
+	 *
+	 * **The `ensuring` is a finalizer of the outermost effect, never of the
+	 * request pipeline.** Two paths leave this effect *before* that pipeline
+	 * exists — an unresolved target and a throw out of `deps.resolveTarget()` —
+	 * and an ensure hung off the pipeline never runs for either, so the id stayed
+	 * in `inFlight` for the life of the page and every later signal on that
+	 * conversation was refused by `inFlight.has`. On a fresh install (nothing
+	 * resolves) that is *every* conversation the user sends.
+	 *
+	 * The resolver sits in its own `sync`, under the `catchCause`, so a
+	 * **synchronous throw** out of the settings read is a recorded failure
+	 * instead of a defect that escapes to `host.run`'s logger with the hint left
+	 * empty. "Nothing resolved" stays the honest no-op — no request and no
+	 * outcome — so it is never confused with the request's own "no title" answer.
+	 */
+	const title = (signal: UserMessageSignal): Effect.Effect<void, string> =>
+		Effect.sync(() => deps.resolveTarget()).pipe(
+			Effect.flatMap((target) =>
+				target === undefined
+					? Effect.void
+					: Effect.suspend(() =>
+							deps.titleFor({
+								provider: target.provider,
+								baseUrl: target.baseUrl,
+								apiKey: target.apiKey,
+								model: target.model,
+								conversationId: signal.conversationId,
+								firstMessage: signal.text,
+							}),
+						).pipe(
+							// The success half does the work and discards the title, so
+							// the effect's value is `void` and only a **failure** reaches
+							// the `catchCause` below — there is no sentinel to confuse
+							// with the legitimate "the model returned nothing" answer.
+							Effect.flatMap((title) =>
+								Effect.sync(() => {
+									if (title === undefined) {
+										deps.recordOutcome({
+											model: target.model,
+											ok: false,
+											reason: "the model returned no usable title",
+										});
+										return;
+									}
+									const wrote = deps.writeTitle(signal.conversationId, title);
+									deps.recordOutcome({
+										model: target.model,
+										ok: true,
+										reason: wrote
+											? "titled"
+											: "the conversation was renamed or deleted first",
+									});
+								}),
+							),
+							// `catchCause`, not the typed-error form, and not
+							// `matchEffect` (which re-raises a defect): a protocol whose
+							// `send` throws synchronously **defects** `titleFor` — the
+							// chat path isolates that in `sendThrough`, `titleFor` does
+							// not — and a defect must still be logged and recorded, or a
+							// faulting provider looks like a titler that never ran.
+							Effect.catchCause(onFailure(target.model, signal)),
+						),
+			),
+			// Only a resolver throw reaches this one — the branch above ends in its
+			// own `catchCause`, so nothing from the request lands here.
+			Effect.catchCause(onFailure(UNKNOWN_MODEL, signal)),
+			// Always — the no-op branch, a defect and an interruption alike: a
+			// conversation left in the set would never be retried by this page.
+			Effect.ensuring(
+				Effect.sync(() => {
+					inFlight.delete(signal.conversationId);
+				}),
+			),
+		);
 
 	/** The signal handler: decide synchronously, then fork the request. */
 	const onSignal = (signal: UserMessageSignal): void => {
