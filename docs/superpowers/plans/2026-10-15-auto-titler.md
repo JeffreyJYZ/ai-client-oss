@@ -191,7 +191,7 @@ test("a conversation deleted while a title is in flight writes nothing", …);  
 
 **Files:**
 - Create: `web/src/ui/titler/TitlerSection.tsx`, `web/src/ui/titler/titlerRows.ts` (+ its pure test — every other section in this repo has one)
-- Modify: `web/src/lib/plugins/builtin/titler.ts` (register the section under `app.titler`), `web/src/ui/plugins/BuiltinsArea.tsx` (the catalog entry `[]` → `["settings.section.titler"]`), `web/src/state/builtins.test.ts` (the ordered `settings.sections` pin)
+- Modify: `web/src/lib/plugins/builtin/titler.ts` (register the section under `app.titler`), `web/src/ui/plugins/BuiltinsArea.tsx` (the catalog entry `[]` → `["settings.section.titler"]`, and the now-stale empty-catalog comment), `web/src/state/builtins.test.ts` (the ordered `settings.sections` pin, **and the anti-vacuity guard T4 had to exempt for `app.titler`**: with a non-empty catalog the exemption is always true, so remove the condition and restore the plain `toBeGreaterThan(0)` assertion + its comment — an exemption left behind is a guard nobody checks)
 - **No change** to `web/src/lib/plugins/builtin/settings.ts` (the section is owned by the area — registering it there is exactly the duplicate-id, first-wins trap Step 3 warns about) or to `web/src/ui/Settings.tsx` (it renders `<Slot id="settings.sections" />`; there is no inline sections list)
 
 **Interfaces:**
