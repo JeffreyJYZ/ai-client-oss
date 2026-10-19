@@ -1,0 +1,11 @@
+{
+	"id": "example.sidebar-notes",
+	"name": "Sidebar notes",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "A chrome slot (app.sidebar) with real per-conversation persistence: add and delete notes, storage keys/delete, confirm before delete, re-read on conversation-changed.",
+	"author": "AI Client examples"
+}

@@ -1,0 +1,11 @@
+{
+	"id": "example.history-pipeline",
+	"name": "History pipeline",
+	"version": "1.0.0",
+	"apiVersion": "0.1",
+	"entry": "main.js",
+	"capabilities": [],
+	"engines": { "app": "*" },
+	"description": "Three pipeline stages (onHistory trims to the last 4 turns, beforeSend aborts on an empty prompt, afterReply logs one stat line). Shows the fail-open contract.",
+	"author": "AI Client examples"
+}
