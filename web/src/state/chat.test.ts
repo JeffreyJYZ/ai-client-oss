@@ -22,6 +22,7 @@ import { FETCH_URL_NAME } from "@lib/providers/presets";
 import type { Chunk, SendCtx } from "@lib/providers/types";
 import { Effect, Exit, Scope, Stream } from "effect";
 import {
+	deleteConversation,
 	getChat,
 	newConversation,
 	renameConversation,
@@ -955,8 +956,20 @@ describe("a title's source, and the user-message signal", () => {
 	test("titleIfDerived writes over an explicit derived source too", () => {
 		newConversation();
 		const id = getChat().activeId;
-		// `"derived"` is the other writable source and must behave identically.
-		titleIfDerived(id, "first model name");
+		// `"derived"` is the enum's third value and must behave exactly like an
+		// absent one. Nothing in the app writes that string — it reaches a
+		// conversation from storage, where an out-of-enum value degrades to it —
+		// so the store's own object is seeded in place, which is the object the
+		// guard reads (`updateConversation` maps these same objects).
+		const seeded = stored(id);
+		if (seeded === undefined) throw new Error("no conversation to seed");
+		seeded.titleSource = "derived";
+		// Proven, not assumed: with the seed missing, the write below would be
+		// indistinguishable from the writable-absent case.
+		expect(stored(id)?.titleSource).toBe("derived");
+
+		expect(titleIfDerived(id, "first model name")).toBe(true);
+		expect(stored(id)?.title).toBe("first model name");
 		expect(stored(id)?.titleSource).toBe("model");
 	});
 
@@ -982,25 +995,22 @@ describe("a title's source, and the user-message signal", () => {
 	test("titleIfDerived refuses, silently, for a conversation that is gone", () => {
 		newConversation();
 		const id = getChat().activeId;
+		// A real delete, not an id that never existed: a run in flight belongs to
+		// the titler **area**, not to a conversation, so deleting a conversation
+		// cannot close it — the title can arrive for an id that is no longer
+		// there. Refusal is a normal outcome: no throw, no conversation invented.
+		deleteConversation(id);
+		expect(stored(id)).toBeUndefined();
 		const count = getChat().conversations.length;
-		// A run in flight belongs to the titler **area**, not to a conversation,
-		// so deleting a conversation cannot close it — the title can arrive for
-		// an id that no longer exists. Refusal is a normal outcome: no throw, no
-		// conversation invented.
-		expect(titleIfDerived(`${id}-deleted`, "a model name")).toBe(false);
+
+		expect(titleIfDerived(id, "a model name")).toBe(false);
 		expect(getChat().conversations.length).toBe(count);
 	});
 
-	test("titleIfDerived checks the source itself, so a rename beats an in-flight title", () => {
-		newConversation();
-		const id = getChat().activeId;
-		// The rename lands first, in the same synchronous turn the titler's
-		// write would occupy. The refusal has to live **inside** the writer —
-		// a caller-side check alone would let this overwrite the user's name.
-		renameConversation(id, "a deliberate name");
-
-		expect(titleIfDerived(id, "a model name")).toBe(false);
-		expect(stored(id)?.title).toBe("a deliberate name");
-		expect(stored(id)?.titleSource).toBe("user");
-	});
+	// Nothing here pins **where** the source check lives: the presence check, the
+	// source check and the write are one synchronous step, so a check inside the
+	// `updateConversation` callback and one in the caller cannot be told apart —
+	// no test can interleave a rename between them. A caller-side check only
+	// becomes lossy once that step is asynchronous, which is the shape a future
+	// change would have to introduce.
 });

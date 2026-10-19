@@ -1006,6 +1006,8 @@ export const titleIfDerived = (id: string, title: string): boolean => {
 	persistConversationById(id);
 	return true;
 };
+
+/** Update the active conversation's system prompt and persist it. */
 export const setSystemPrompt = (text: string): void => {
 	const conversation = activeConversation();
 	if (conversation === undefined) return;
