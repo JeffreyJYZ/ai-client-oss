@@ -150,13 +150,13 @@ test("the request carries no tools and the conversation's own session id", …);
 
 **Files:**
 - Create: `web/src/lib/plugins/builtin/titler.ts` (+ its test), `web/src/lib/titlerStatus.ts` (+ its test)
-- Modify: `web/src/lib/plugins/builtinIdentity.ts`, `web/src/lib/plugins/areas.ts`, `web/src/ui/plugins/BuiltinsArea.tsx` (its catalog — `[]` here), `web/src/lib/plugins/memory.test.ts` (the toggleable-area count, 10 → 11)
+- Modify: `web/src/lib/plugins/builtinIdentity.ts`, `web/src/lib/plugins/areas.ts`, `web/src/ui/plugins/BuiltinsArea.tsx` (its catalog — `[]` here), `web/src/lib/plugins/builtin/memory.test.ts` (the toggleable-area count, 10 → 11)
 - **No change** to `web/src/lib/plugins/builtin/index.ts` — it walks `BUILTIN_AREAS`, so there is no aggregator to add to (the earlier "if the aggregator needs it" was a phantom).
 
 **Interfaces:**
 - Consumes: T1's `subscribeUserMessage` signal and `titleSource`, T1b's `titleIfDerived`, T2's rule and `Settings.titler`, T3's `titleFor`, `resolveProviderSync` + its `ProviderEntry` (`lib/plugins/providers.ts`), `host.run` + `Effect.scoped`.
 - Produces: the **13th** built-in area, `app.titler`, whose registrar owns scope-limited runs that title each conversation once. Concretely: the export must be named `/^register.+Builtins$/` (`areas.test.ts` counts exports matching that); the identity entry uses **`label`**, not `title`, and must satisfy the identity shape test (one sentence, `<240` chars, one terminal period, **no interior `.`**); `areas.ts`'s registrar `Record<BuiltinId, …>` is exhaustive, so a missing entry is a `tsc` error; `BuiltinsArea.tsx`'s `Readonly<Record<BuiltinId, …>>` catalog gains `[]` — the area registers no contribution of its own yet, and `BuiltinsArea.test.ts` requires the catalog to equal what actually registers.
-- **The seams, because four of its tests cannot be written without them** (the memory area's injected `MemorySettingsSource` is the precedent): the registrar takes an injected `deps` — `{ titleFor, readConversation, writeTitle, recordOutcome }` — defaulting to the real ones, so a test can hold a title open (`Deferred`), land a rename mid-flight, and **count requests** ("with the area off, no request is made at all" needs a counter, not merely an unchanged title). `recordOutcome` writes `titlerStatus.ts`, which T5's hint reads.
+- **The seams, because four of its tests cannot be written without them** (the memory area's injected `MemorySettingsSource` is the precedent): the registrar takes an injected `deps` — **six members, as landed**: `{ titleFor, readConversation, writeTitle, recordOutcome, subscribe, resolveTarget }` (`subscribe` is the signal source and `resolveTarget` the model+credentials read, both so a test can drive the loop without the store or the provider registry) — defaulting to the real ones, so a test can hold a title open (`Deferred`), land a rename mid-flight, and **count requests** ("with the area off, no request is made at all" needs a counter, not merely an unchanged title). `recordOutcome` writes `titlerStatus.ts`, which T5's hint reads.
 
 - [ ] **Step 1: Write the failing tests**
 
