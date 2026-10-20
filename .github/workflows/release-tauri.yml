@@ -167,34 +167,6 @@ jobs:
             - **The Titler model picker is searchable.** Type to filter by model or provider instead of scrolling a list, with the keyboard driving the whole thing: arrows to move, Enter to pick, Escape to cancel.
             - **The plugin examples list is compact and honest.** One line per example, and an example you already installed says **Installed** instead of offering a second install. The result of an install is a toast, not a line that lingers in the section.
 
-            **New in 0.6.2**
-
-            - **Every Settings section folds.** Each section heading carries a ▶/▼ disclosure chevron, so a long Settings page collapses down to the parts you are working in, and every header row inside a section folds on its own too.
-            - **Child sections read as children.** A nested section sits on a rail and indents under its parent instead of looking like a second top-level heading, and a closed child inside an open parent keeps its own chevron rather than inheriting the parent's.
-            - **A heading's own controls still work.** A checkbox or button in a section heading toggles itself without folding the section.
-
-            **New in 0.6.1**
-
-            - **The app ships working plugin examples.** Settings → Plugins → **Examples** lists eight, and one click installs the manifest and code into your own plugins. They are full-trust code like any other, and stay off until you enable the master switch.
-            - **Four new examples** cover the surfaces that had none: a view that owns the whole window (`zen-view`), a sidebar panel with real storage (`sidebar-notes`), three pipeline stages (`history-pipeline`), and a markdown renderer override with a safe fallback (`markdown-callouts`).
-            - **The examples are checked by the build.** They are typechecked with the app, and a test runs each one's `setup` and pins what it registers, so an example cannot drift from the API it teaches.
-
-            **New in 0.6.0**
-
-            - **Chats name themselves.** The first message a new conversation gets is handed to a free model, which returns a short title, so the sidebar stops showing the raw first line forever.
-            - **You choose who titles.** Settings → Titler picks a provider and model, or leaves it on **Automatic**: the automatic rule only ever uses a free model, and it reads that id from the provider's own fetched model list, so a stale hardcoded id can no longer silently dead-end.
-            - **A rename always wins.** The titler never overwrites a name you typed, and it never touches a conversation that already has a title. Deleting a conversation mid-flight writes nothing.
-            - **The row is honest.** It names the model that will title your chats and warns that the first message goes to *that* provider, which may differ from your chat's. When nothing resolves it says so and names the remedy — Fetch models, or pick a model. Switching the Built-ins → Titler area off removes the row, the naming and its background work together.
-
-            **New in 0.5.0**
-
-            - **Memory is a built-in area.** The model records a durable note when a conversation teaches it something, and Settings lists, edits and soft-deletes them, with a Recently deleted list to restore from.
-            - **Every built-in area can be switched off**, and its UI, its tools and its background work go with it.
-
-            **New in 0.4.0**
-
-            - **Plugins.** Plugins can add views, tools, slash commands and settings rows; the built-in areas are themselves plugins you can toggle in Built-ins.
-
             **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
 
             **macOS**: open the `.dmg`, drag the app into Applications, then clear the download quarantine flag. These builds are unsigned and not notarized, and **right-click → Open no longer bypasses Gatekeeper** on current macOS:

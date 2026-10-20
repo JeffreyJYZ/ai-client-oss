@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
 	extractReleaseBody,
+	notesForVersion,
 	releaseNotesUrl,
 	releaseTag,
 	shouldShowReleaseNotes,
@@ -46,5 +47,47 @@ describe("releaseNotes", () => {
 
 	test("shouldShowReleaseNotes is false without a running version", () => {
 		expect(shouldShowReleaseNotes("", "")).toBe(false);
+	});
+});
+
+describe("the notes of one version", () => {
+	const stacked = [
+		"Download the installer for your platform from the assets below.",
+		"",
+		"**New in 0.6.3**",
+		"",
+		"- The nav rail.",
+		"",
+		"**New in 0.6.2**",
+		"",
+		"- Settings folds.",
+		"",
+		"**New in 0.6.1**",
+		"",
+		"- Plugin examples.",
+		"",
+		"**License:** GPL-3.0-only.",
+	].join("\n");
+
+	test("cuts the asked-for version out of a body that stacks several", () => {
+		const notes = notesForVersion(stacked, "0.6.2");
+		expect(notes).toContain("Settings folds");
+		expect(notes).not.toContain("The nav rail");
+		expect(notes).not.toContain("Plugin examples");
+	});
+
+	test("the newest section stops at the next version, and the oldest at the footer", () => {
+		expect(notesForVersion(stacked, "0.6.3")).not.toContain("0.6.2");
+		expect(notesForVersion(stacked, "0.6.1")).not.toContain("License");
+	});
+
+	test("a body with no version heading is returned whole", () => {
+		expect(notesForVersion("Just some prose.", "0.6.3")).toBe(
+			"Just some prose.",
+		);
+	});
+
+	test("an unknown version falls back to the whole body rather than nothing", () => {
+		expect(notesForVersion(stacked, "9.9.9")).toContain("The nav rail");
 	});
 });

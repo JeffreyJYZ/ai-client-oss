@@ -43,6 +43,49 @@ export const extractReleaseBody = (payload: unknown): string | null => {
 };
 
 /**
+ * The version a line announces, when it is one of the notes' section headings
+ * (`**New in 0.6.3**`, `## New in 0.6.3`). Everything else is `null`.
+ */
+const versionInHeading = (line: string): string | null => {
+	const text = line
+		.trim()
+		.replace(/^#+\s*/, "")
+		.replace(/\*\*/g, "")
+		.trim();
+	if (!/^new in\s+/i.test(text)) return null;
+	const version = text.replace(/^new in\s+/i, "").trim();
+	return version === "" ? null : version;
+};
+
+/** Where the release page's own boilerplate starts, after the version blocks. */
+const isFooter = (line: string): boolean => /^\s*\*\*license:/i.test(line);
+
+/**
+ * Only the asked-for version's section of a release body.
+ *
+ * Release bodies are written per release, but an older one may carry several
+ * versions' sections stacked (0.6.3's did, newest first), and the popup used to
+ * render all of them — so a user on 0.6.3 was told what changed in 0.6.2 and
+ * 0.6.1 too. The section runs from that version's heading to the next version's
+ * heading (or the licence/install footer); a body with no such heading is
+ * returned whole, so a single-section body is unaffected.
+ */
+export const notesForVersion = (body: string, version: string): string => {
+	const lines = body.split("\n");
+	const start = lines.findIndex((line) => versionInHeading(line) === version);
+	if (start === -1) return body.trim();
+	let end = lines.length;
+	for (let index = start + 1; index < lines.length; index += 1) {
+		const line = lines[index] ?? "";
+		if (versionInHeading(line) !== null || isFooter(line)) {
+			end = index;
+			break;
+		}
+	}
+	return lines.slice(start, end).join("\n").trim();
+};
+
+/**
  * Whether the running version's notes still need showing: the running version
  * differs from the one already dismissed. An empty running version (the shell
  * could not be asked) never shows anything.

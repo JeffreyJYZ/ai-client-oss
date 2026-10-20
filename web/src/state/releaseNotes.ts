@@ -1,6 +1,6 @@
 import { HostServices } from "@lib/plugins/host";
 import { runtime } from "@lib/plugins/runtime";
-import { shouldShowReleaseNotes } from "@lib/releaseNotes";
+import { notesForVersion, shouldShowReleaseNotes } from "@lib/releaseNotes";
 import { releaseNotesFor } from "@lib/updates";
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
@@ -87,11 +87,17 @@ const load = (version: string): Effect.Effect<void, never> =>
 		),
 		(body) =>
 			Effect.sync(() => {
-				if (body === null || body.trim() === "") {
+				// One version's notes, never the stacked history a release body may
+				// carry: the popup describes the build the user just moved to.
+				const notes =
+					body === null || body.trim() === ""
+						? null
+						: notesForVersion(body, version);
+				if (notes === null || notes === "") {
 					set({ status: "idle", version: null, body: null });
 					return;
 				}
-				set({ status: "ready", version, body });
+				set({ status: "ready", version, body: notes });
 			}),
 	);
 
