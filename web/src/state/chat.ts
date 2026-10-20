@@ -1,5 +1,11 @@
 import { SendMsg } from "@lib/api";
-import { type ChatMessage, type Conversation, db } from "@lib/db";
+import {
+	activeVariant,
+	type ChatMessage,
+	type Conversation,
+	db,
+	variantParamsOf,
+} from "@lib/db";
 import {
 	type ExtractedMemories,
 	extractMemories,
@@ -639,6 +645,14 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 	// route).
 	const tinyfishApiKey = settings.tinyfishApiKey;
 
+	// The active variant's parameters, if one is active. Read here, where the
+	// turn is built, so the body carries exactly the parameters the user chose
+	// — and carries none at all when no variant is active (the endpoint's own
+	// defaults then stand). A dangling id (a variant removed elsewhere) reads
+	// as no variant, the same as none active.
+	const chosen = activeVariant(settings);
+	const variant = chosen === undefined ? undefined : variantParamsOf(chosen);
+
 	const baseCtx: SendCtx = {
 		msg,
 		// The replay base is resolved inside the run: a seed goes through
@@ -664,6 +678,8 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		// tool (where the endpoint has no search of its own)
 		// and routes `fetch_url` through TinyFish first.
 		tinyfishApiKey,
+		// The active variant's generation parameters, when one is active.
+		variant,
 		systemPrompt: [conversation.systemPrompt ?? "", memory]
 			.filter((part) => part !== "")
 			.join("\n\n"),

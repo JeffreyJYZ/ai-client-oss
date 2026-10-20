@@ -10,10 +10,11 @@ import {
 	UpdatesSection,
 	WebSearchSection,
 } from "@/ui/Settings";
+import { VariantsSection } from "@/ui/variants/VariantsSection";
 
 /**
  * The settings and sidebar area's built-in contributions (spec §4/§12): its
- * eight sections (`settings.sections`) and the conversation sidebar
+ * nine sections (`settings.sections`) and the conversation sidebar
  * (`app.sidebar` + `app.sidebar.actions`). Registered through the `Host` — the
  * same public API a plugin uses — so each region can be reordered, hidden or
  * replaced.
@@ -23,11 +24,11 @@ import {
  * a plugin) must be able to slot itself between two built-ins, not only after
  * all of them. `settings.nav` carries no built-in — it is a seam for plugins.
  *
- * The eight `settings.sections` entries, in render order: the page's warning
+ * The nine `settings.sections` entries, in render order: the page's warning
  * banners, Providers, the provider editor, Profiles, the profile editor, Web
- * search, Backup, Updates. Two sections that render into that same list do
- * **not** live here, and neither does the surface itself — all three by design
- * rather than oversight:
+ * search, Variants, Backup, Updates. Two sections that render into that same
+ * list do **not** live here, and neither does the surface itself — all three by
+ * design rather than oversight:
  *
  * - Memory rides `app.memory` (`builtin/memory.ts`), so the feature's area
  *   toggle takes the section, the five tools, the memory prompt sent with each
@@ -79,6 +80,12 @@ export const registerSettingsBuiltins = (host: Host): void => {
 		slot: "settings.sections",
 		component: WebSearchSection,
 		order: 60,
+	});
+	host.ui.register({
+		id: "settings.section.variants",
+		slot: "settings.sections",
+		component: VariantsSection,
+		order: 65,
 	});
 	host.ui.register({
 		id: "settings.section.backup",

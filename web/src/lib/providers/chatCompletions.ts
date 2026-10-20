@@ -8,6 +8,7 @@ import type {
 	SendCtx,
 	ToolCallData,
 } from "@lib/providers/types";
+import { chatCompletionsVariant, isTurnReplay } from "@lib/providers/variant";
 import { ChatCompletionsSend } from "@lib/types/protocols";
 import type { Effect, Stream } from "effect";
 
@@ -41,6 +42,8 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 								},
 					),
 				];
+	// The active variant's parameters, mapped to this protocol's field names.
+	const variant = chatCompletionsVariant(ctx.variant);
 	return {
 		...send,
 		// Request SSE explicitly: without `stream`, the endpoint returns a single
@@ -69,6 +72,24 @@ const buildRequest = (send: ChatCompletionsSend, ctx: SendCtx) => {
 		// prompt. Pinned to `undefined` so a replayed body cannot bring the
 		// plugin back.
 		plugins: undefined,
+		// The active variant's parameters, in this protocol's own field names.
+		// Written on the turn's fresh composition only: the tool loop replays
+		// the turn's own body, which already carries these parameters, so
+		// re-writing them there would clobber a `transformBody` stage's own
+		// value for the same field and break the replay's identity. On the
+		// fresh composition they are written explicitly, the unset ones as
+		// `undefined` (dropped at `JSON.stringify`): a value inherited from
+		// the previous turn's body — a removed variant's parameter — cannot
+		// survive into this turn, and a parameter the variant does not set is
+		// not sent at all, so the endpoint's own default stands.
+		...(isTurnReplay(ctx)
+			? {}
+			: {
+					temperature: variant.temperature,
+					top_p: variant.top_p,
+					max_tokens: variant.max_tokens,
+					reasoning_effort: variant.reasoning_effort,
+				}),
 	};
 };
 

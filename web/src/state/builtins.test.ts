@@ -1230,6 +1230,7 @@ describe("the manager rides the locked core", () => {
 			"settings.section.profiles",
 			"settings.section.profile-editor",
 			"settings.section.web-search",
+			"settings.section.variants",
 			"settings.section.memory",
 			"settings.section.titler",
 			"settings.section.backup",

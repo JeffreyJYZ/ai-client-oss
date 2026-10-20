@@ -9,6 +9,7 @@ import type {
 	SendCtx,
 	ToolCallData,
 } from "@lib/providers/types";
+import { anthropicVariant, isTurnReplay } from "@lib/providers/variant";
 import { AnthropicSend } from "@lib/types/protocols";
 import type { Effect, Stream } from "effect";
 
@@ -88,6 +89,8 @@ const buildRequest = (send: AnthropicSend, ctx: SendCtx) => {
 						];
 					}),
 				];
+	// The active variant's parameters, mapped to this protocol's field names.
+	const variant = anthropicVariant(ctx.variant);
 	return {
 		...send,
 		// Request SSE explicitly: without `stream`, the endpoint
@@ -115,6 +118,22 @@ const buildRequest = (send: AnthropicSend, ctx: SendCtx) => {
 		// turn's body, or a provider switch would resend the old
 		// endpoint's declaration.
 		tools: requestTools(ctx, "anthropic"),
+		// The active variant's parameters, mapped to this protocol's field
+		// names. Written on the turn's fresh composition only: the tool loop
+		// replays the turn's own body, which already carries these parameters,
+		// so re-writing them there would clobber a `transformBody` stage's own
+		// value for the same field and break the replay's identity. On the
+		// fresh composition they are written explicitly, the unset ones as
+		// `undefined` (dropped at `JSON.stringify`). `max_tokens` is the one
+		// parameter this API *requires*, so it falls back to the module's own
+		// cap; a variant's cap overrides it.
+		...(isTurnReplay(ctx)
+			? {}
+			: {
+					temperature: variant.temperature,
+					top_p: variant.top_p,
+					max_tokens: variant.max_tokens ?? MAX_TOKENS,
+				}),
 	};
 };
 
