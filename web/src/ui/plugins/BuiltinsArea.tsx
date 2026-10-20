@@ -10,7 +10,7 @@ import {
 	setContributionEnabled,
 	useBuiltins,
 } from "@/state/builtins";
-import { Button } from "@/ui/kit";
+import { Button, Disclosure, SUBHEADING, SubSection } from "@/ui/kit";
 
 /**
  * The Built-ins area of the Plugins section (spec "UI"): one row per built-in
@@ -41,7 +41,7 @@ import { Button } from "@/ui/kit";
  */
 
 /** The section's heading style, the Plugins section's own idiom. */
-const HEADING = "text-xs uppercase tracking-widest text-neutral-500";
+const HEADING = SUBHEADING;
 
 /** The id list is the gate's key list — see the module comment. */
 export const BUILTIN_CONTRIBUTIONS: Readonly<
@@ -244,8 +244,11 @@ function AreaRow({ row }: { readonly row: BuiltinRow }) {
 			<details className="flex flex-col gap-2">
 				{/* No onClick on the summary: nothing here needs one, and a
 				    preventDefault would cancel a control's own activation. */}
-				<summary className={`cursor-pointer select-none ${HEADING}`}>
-					Contributions ({row.contributions.length})
+				<summary className="flex cursor-pointer select-none items-center gap-2">
+					<Disclosure />
+					<span className={HEADING}>
+						Contributions ({row.contributions.length})
+					</span>
 				</summary>
 				<ul className="flex flex-col gap-1 pt-2">
 					{row.contributions.map((contribution) => (
@@ -294,25 +297,27 @@ export function BuiltinsArea() {
 	const rows = builtinRows(snapshot);
 
 	return (
-		<div className="flex flex-col gap-3 border-t border-neutral-800 pt-3">
-			<div className="flex flex-wrap items-center justify-between gap-2">
-				<p className={HEADING}>Built-ins</p>
-				<div className="flex flex-wrap items-center gap-2">
-					<Button
-						onClick={applyBarePreset}
-						title="Turn every built-in off except the locked core: a bare host with a way back"
-					>
-						Bare preset
-					</Button>
-					<Button
-						onClick={restoreAllBuiltins}
-						title="Turn every built-in area and contribution back on"
-					>
-						Restore all
-					</Button>
-				</div>
-			</div>
-
+		<SubSection
+			heading={
+				<>
+					<p className={HEADING}>Built-ins</p>
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							onClick={applyBarePreset}
+							title="Turn every built-in off except the locked core: a bare host with a way back"
+						>
+							Bare preset
+						</Button>
+						<Button
+							onClick={restoreAllBuiltins}
+							title="Turn every built-in area and contribution back on"
+						>
+							Restore all
+						</Button>
+					</div>
+				</>
+			}
+		>
 			<p className="text-xs text-neutral-500">{SWITCH_NOTE}</p>
 
 			<ul className="flex flex-col gap-2">
@@ -320,6 +325,6 @@ export function BuiltinsArea() {
 					<AreaRow key={row.id} row={row} />
 				))}
 			</ul>
-		</div>
+		</SubSection>
 	);
 }

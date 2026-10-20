@@ -50,6 +50,7 @@ import {
 	INPUT,
 	LABEL,
 	SECTION,
+	SECTION_HEADING,
 	SECTION_SUMMARY,
 	SECTION_SUMMARY_WRAP,
 	Section,
@@ -200,9 +201,7 @@ export function ProviderSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-						Providers
-					</h3>
+					<h3 className={SECTION_HEADING}>Providers</h3>
 					<button type="button" onClick={add} className={BUTTON}>
 						Add provider
 					</button>
@@ -506,9 +505,7 @@ export function ProfilesSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-						Profiles
-					</h3>
+					<h3 className={SECTION_HEADING}>Profiles</h3>
 					<button type="button" onClick={addProfileEntry} className={BUTTON}>
 						Add profile
 					</button>
@@ -974,9 +971,7 @@ export function BackupSection() {
 			summaryClassName={SECTION_SUMMARY_WRAP}
 			heading={
 				<>
-					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-						Backup
-					</h3>
+					<h3 className={SECTION_HEADING}>Backup</h3>
 					<div className="flex gap-2">
 						<button type="button" onClick={exportBackupFile} className={BUTTON}>
 							Export
@@ -1078,9 +1073,7 @@ export function UpdatesSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-						Updates
-					</h3>
+					<h3 className={SECTION_HEADING}>Updates</h3>
 					<button
 						type="button"
 						onClick={checkForUpdates}

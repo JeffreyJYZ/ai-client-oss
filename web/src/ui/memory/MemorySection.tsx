@@ -16,8 +16,11 @@ import {
 	cls,
 	INPUT,
 	SECTION,
+	SECTION_HEADING,
 	SECTION_SUMMARY_WRAP,
 	Section,
+	SUBHEADING,
+	SubSection,
 } from "@/ui/kit";
 import { memoryRows } from "@/ui/memory/memoryRows";
 
@@ -130,9 +133,7 @@ export function MemorySection() {
 			open={false}
 			heading={
 				<>
-					<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-						Memory
-					</h3>
+					<h3 className={SECTION_HEADING}>Memory</h3>
 					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
 						Enabled
 						<input
@@ -265,10 +266,7 @@ export function MemorySection() {
 			</form>
 
 			{rows.deleted.length === 0 ? null : (
-				<div className="flex flex-col gap-2 border-t border-neutral-800 pt-3">
-					<h4 className="text-xs uppercase tracking-widest text-neutral-500">
-						Recently deleted
-					</h4>
+				<SubSection heading={<p className={SUBHEADING}>Recently deleted</p>}>
 					<p className="text-xs text-neutral-500">
 						A removed note waits here, restorable, until you delete it forever.
 						Only the {MEMORY_DELETED_CAP} most recently removed are kept:
@@ -312,7 +310,7 @@ export function MemorySection() {
 							</li>
 						))}
 					</ul>
-				</div>
+				</SubSection>
 			)}
 		</Section>
 	);

@@ -1,5 +1,13 @@
 import type { ComponentProps, ReactNode } from "react";
-import { BUTTON, cls, LABEL, SECTION, SECTION_SUMMARY } from "@/ui/kit/classes";
+import {
+	BUTTON,
+	cls,
+	DISCLOSURE,
+	LABEL,
+	SECTION,
+	SECTION_SUMMARY,
+	SUBSECTION,
+} from "@/ui/kit/classes";
 
 /**
  * The component kit (spec §4): the host's own primitives, so plugin UI is
@@ -15,11 +23,15 @@ export {
 	BUTTON_PLAIN,
 	CONTROL,
 	cls,
+	DISCLOSURE,
 	INPUT,
 	LABEL,
 	SECTION,
+	SECTION_HEADING,
 	SECTION_SUMMARY,
 	SECTION_SUMMARY_WRAP,
+	SUBHEADING,
+	SUBSECTION,
 } from "@/ui/kit/classes";
 
 /** The bordered panel the Settings editor forms already use. */
@@ -50,6 +62,34 @@ interface SectionProps {
 }
 
 /**
+ * The disclosure chevron every `Section` renders in front of its heading. An
+ * SVG rather than a `▶` glyph: the mono stack's triangle sits off its optical
+ * centre, so a rotated glyph reads lopsided in a row of small text. The
+ * rotation is the `.fold-chevron` rule in `App.css`, and the icon is
+ * `aria-hidden` because `<details>`/`<summary>` already announce expanded
+ * state — a second "expanded" from the icon would be noise.
+ *
+ * Exported so a hand-rolled `<details>` (a fold inside a row, where `Section`'s
+ * card chrome would be wrong) carries the same mark instead of a bare marker.
+ */
+export function Disclosure() {
+	return (
+		<svg
+			aria-hidden="true"
+			viewBox="0 0 12 12"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth={1.6}
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			className={DISCLOSURE}
+		>
+			<path d="M4.25 2.5 7.75 6l-3.5 3.5" />
+		</svg>
+	);
+}
+
+/**
  * A foldable settings section: the summary carries the section's
  * heading row (its `<h3>` and controls), the children its content.
  * Open by default — a fold that starts closed would hide content
@@ -59,6 +99,11 @@ interface SectionProps {
  * canonical `SECTION`/`SECTION_SUMMARY`, so a plugin renders a native-looking
  * section without copying a class string. Pass `SECTION_SUMMARY_WRAP` (or a
  * `cls` composition) only for a heading row that genuinely needs to wrap.
+ *
+ * The chevron is the section's own mark: `▶` folded, `▼` open, drawn by CSS
+ * from the `<details open>` state. The heading goes inside a wrapper that
+ * takes the remaining width, so the icon can sit outside the heading's own
+ * left/right layout and every existing heading keeps its arrangement.
  */
 export function Section({
 	className = SECTION,
@@ -76,9 +121,41 @@ export function Section({
 			    "protect" the control: that cancels the control's own action
 			    too and leaves a heading checkbox untickable (browser-verified
 			    in both cases). */}
-			<summary className={summaryClassName}>{heading}</summary>
+			<summary className={summaryClassName}>
+				<Disclosure />
+				<span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-3">
+					{heading}
+				</span>
+			</summary>
 			{children}
 		</details>
+	);
+}
+
+/**
+ * A section nested inside another section's content: the same fold, indented
+ * behind a rail (`SUBSECTION`), so a sub-heading visibly belongs to the
+ * heading above it. Pass a `SUBHEADING` heading; nesting is the whole point,
+ * so there is no unindented variant.
+ */
+export function SubSection({
+	heading,
+	children,
+	open = true,
+}: {
+	readonly heading: ReactNode;
+	readonly children: ReactNode;
+	readonly open?: boolean;
+}) {
+	return (
+		<Section
+			className={SUBSECTION}
+			summaryClassName={SECTION_SUMMARY}
+			heading={heading}
+			open={open}
+		>
+			{children}
+		</Section>
 	);
 }
 

@@ -11,6 +11,8 @@
  * - `CONTROL`                    — `ui/ProfilePicker.tsx` / `ui/ProviderPicker.tsx`
  * - `SECTION` / `SECTION_SUMMARY` / `SECTION_SUMMARY_WRAP` — `ui/Settings.tsx`
  *   (the foldable section chrome; `Section` defaults to the first two)
+ * - `SECTION_HEADING` / `DISCLOSURE` / `SUBSECTION` / `SUBHEADING` —
+ *   `ui/kit/index.tsx` (the fold itself: heading style, chevron, nested rail)
  */
 
 /** Join class names, dropping the falsy ones (no dependency, one line). */
@@ -48,3 +50,34 @@ export const SECTION_SUMMARY =
 /** The summary row when a wide heading must wrap instead of clip. */
 export const SECTION_SUMMARY_WRAP =
 	"flex cursor-pointer select-none flex-wrap items-center justify-between gap-3";
+
+/**
+ * A section heading: small, dim, letter-spaced — the app's one heading style.
+ * Every built-in section uses this string, so headings cannot drift apart.
+ */
+export const SECTION_HEADING =
+	"text-xs uppercase tracking-widest text-neutral-500";
+
+/**
+ * The disclosure chevron `Section` renders before every heading: it points
+ * right while the section is folded and turns down when it opens. The rotation
+ * is the `.fold-chevron` rule in `App.css`, keyed on `details[open]` through
+ * **direct children** — a descendant match (a Tailwind `group-open:` variant
+ * included) also fires for an open ancestor, which turned a closed nested
+ * section's chevron down. Nothing here holds state or runs an `onClick`, so the
+ * native summary toggle stays the only handler and a control in the heading row
+ * stays clickable.
+ */
+export const DISCLOSURE = "fold-chevron size-3 shrink-0 text-neutral-600";
+
+/**
+ * A section nested inside another section's content: indented behind a rail, so
+ * a sub-heading is visibly *owned* by the heading above it. `SubSection` uses
+ * this, and the rail is the whole hierarchy signal — no second font size.
+ */
+export const SUBSECTION =
+	"ml-1 flex flex-col gap-2 border-l border-neutral-800 pl-3";
+
+/** A nested section's heading: one step smaller than its parent's. */
+export const SUBHEADING =
+	"text-[0.7rem] uppercase tracking-widest text-neutral-500";

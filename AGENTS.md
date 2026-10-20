@@ -30,6 +30,8 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 - **Settings sections fold with plain `<details>`/`<summary>`; never put an `onClick` on the summary that calls `preventDefault`.** A control in the heading row is the activation target, so the section won't fold on its own — and `preventDefault` also cancels that control's own activation, silently making heading checkboxes untickable (shipped 0.2.0). Both halves browser-verified.
 
+- **A fold's chevron is CSS keyed on *direct children*, never `group-open:`** — `details[open] summary svg` (and Tailwind's `group-open:`) also matches an open **ancestor**, so a closed section nested inside an open one showed a down chevron (measured in the production bundle; a named `group/section` does not fix it — the compiled selector is still a descendant match). `.fold-chevron` in `App.css` uses `details[open] > summary > .fold-chevron`; `Section` renders it and `SubSection` is the nested, rail-indented variant, so hierarchy is a rail + indent, not a second font size. `SECTION_HEADING`/`SUBHEADING` in `ui/kit/classes.ts` are the only heading strings.
+
 ## Linting
 
 - **Effect checking = two layers, both wired.** Biome GritQL is syntactic (no types); the Effect language service is type-aware.

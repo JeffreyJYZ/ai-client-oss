@@ -5,7 +5,7 @@ import {
 	subscribeLog,
 } from "@lib/plugins/log";
 import { useSyncExternalStore } from "react";
-import { BUTTON, Section } from "@/ui/kit";
+import { BUTTON, SECTION_HEADING, SubSection } from "@/ui/kit";
 
 /**
  * The plugin log (spec §9): the lines `host.log` produced, plus the manager's
@@ -14,7 +14,7 @@ import { BUTTON, Section } from "@/ui/kit";
  * chatty plugin cannot grow it without limit.
  */
 
-const HEADING = "text-xs uppercase tracking-widest text-neutral-500";
+const HEADING = SECTION_HEADING;
 
 const LEVEL_TONE: Record<PluginLogLevel, string> = {
 	debug: "text-neutral-600",
@@ -27,13 +27,11 @@ export function PluginLog() {
 	const entries = useSyncExternalStore(subscribeLog, getLogSnapshot);
 
 	return (
-		<Section
-			className="flex flex-col gap-2 border-t border-neutral-800 pt-3"
-			summaryClassName="flex cursor-pointer select-none items-center justify-between gap-3"
+		<SubSection
 			open={false}
 			heading={
 				<>
-					<h4 className={HEADING}>Plugin log</h4>
+					<p className={HEADING}>Plugin log</p>
 					<span className="text-xs text-neutral-500">
 						{entries.length === 0
 							? "empty"
@@ -79,6 +77,6 @@ export function PluginLog() {
 					Clear log
 				</button>
 			</div>
-		</Section>
+		</SubSection>
 	);
 }

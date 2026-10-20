@@ -32,6 +32,23 @@ body {
 	height: inherit;
 }
 
+/* The fold chevron (`ui/kit` `Section`, `Disclosure`): points right while a
+   section is folded, down when it opens. The **direct-child** combinators are
+   load-bearing, not style: `details[open] summary svg` — and equally Tailwind's
+   `group-open:` — also matches an open *ancestor*, so a closed section nested
+   inside an open one rendered a down chevron (measured in the production
+   bundle). A nested `<details>` sits in its parent's content, never in its
+   summary, so the child chain is unambiguous. */
+.fold-chevron {
+	transform: rotate(0deg);
+	transition: transform 150ms ease;
+}
+
+details[open] > summary > .fold-chevron {
+	transform: rotate(90deg);
+	color: var(--color-neutral-400, #a3a3a3);
+}
+
 /* Rendered assistant markdown (ui/Markdown.tsx). Dark-first,
    scoped under .md so it never leaks into the rest of the app. */
 .md {

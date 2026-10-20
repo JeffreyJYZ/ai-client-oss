@@ -19,8 +19,11 @@ import {
 	INPUT,
 	LABEL,
 	SECTION,
+	SECTION_HEADING,
 	SECTION_SUMMARY_WRAP,
 	Section,
+	SUBHEADING,
+	SubSection,
 } from "@/ui/kit";
 import { BuiltinsArea } from "@/ui/plugins/BuiltinsArea";
 import { PluginLog } from "@/ui/plugins/PluginLog";
@@ -45,7 +48,7 @@ import { PluginRow } from "@/ui/plugins/PluginRow";
  * plainly so the two are not read as one.
  */
 
-const HEADING = "text-xs uppercase tracking-widest text-neutral-500";
+const HEADING = SECTION_HEADING;
 const DEFAULT_ENTRY = "main.js";
 
 /** Read one picked file as text. `FileReader` is callback-based, hence `Effect.callback`. */
@@ -229,37 +232,47 @@ export function PluginsSection() {
 
 			<BuiltinsArea />
 
-			{plugins.plugins.length === 0 ? (
-				<p className="text-sm text-neutral-500">Nothing installed.</p>
-			) : (
-				<div className="flex flex-col gap-2">
-					<div className="flex flex-wrap items-center gap-2">
-						<Button
-							onClick={reloadAll}
-							disabled={!plugins.enabled}
-							title="Re-read every installed plugin's files and load it again"
-						>
-							Reload plugins
-						</Button>
-						<span className="text-xs text-neutral-500">
-							Re-reads each plugin&apos;s files. A reload whose new source is
-							invalid keeps the running version and reports why.
+			<SubSection
+				heading={
+					<p className={SUBHEADING}>
+						Installed{" "}
+						<span className="font-mono text-[0.65rem] tracking-normal text-neutral-600">
+							{plugins.plugins.length}
 						</span>
+					</p>
+				}
+			>
+				{plugins.plugins.length === 0 ? (
+					<p className="text-sm text-neutral-500">Nothing installed.</p>
+				) : (
+					<div className="flex flex-col gap-2">
+						<div className="flex flex-wrap items-center gap-2">
+							<Button
+								onClick={reloadAll}
+								disabled={!plugins.enabled}
+								title="Re-read every installed plugin's files and load it again"
+							>
+								Reload plugins
+							</Button>
+							<span className="text-xs text-neutral-500">
+								Re-reads each plugin&apos;s files. A reload whose new source is
+								invalid keeps the running version and reports why.
+							</span>
+						</div>
+						<ul className="flex flex-col gap-2">
+							{plugins.plugins.map((plugin) => (
+								<PluginRow
+									key={plugin.state.id}
+									plugin={plugin}
+									master={plugins.enabled}
+								/>
+							))}
+						</ul>
 					</div>
-					<ul className="flex flex-col gap-2">
-						{plugins.plugins.map((plugin) => (
-							<PluginRow
-								key={plugin.state.id}
-								plugin={plugin}
-								master={plugins.enabled}
-							/>
-						))}
-					</ul>
-				</div>
-			)}
+				)}
+			</SubSection>
 
-			<div className="flex flex-col gap-3 border-t border-neutral-800 pt-3">
-				<p className={HEADING}>Install</p>
+			<SubSection heading={<p className={SUBHEADING}>Install</p>}>
 				<label className={LABEL}>
 					Manifest (plugin.json)
 					<textarea
@@ -352,10 +365,9 @@ export function PluginsSection() {
 					name — {'{ "plugin.json": "…", "main.js": "…" }'} — and the fetch is
 					bounded to {PLUGIN_SOURCE_MAX_CHARS} characters.
 				</p>
-			</div>
+			</SubSection>
 
-			<div className="flex flex-col gap-3 border-t border-neutral-800 pt-3">
-				<p className={HEADING}>Examples</p>
+			<SubSection heading={<p className={SUBHEADING}>Examples</p>}>
 				<p className="text-xs text-neutral-500">
 					Shipped with this build. Installing one copies its manifest and code
 					into your plugins — it is full-trust code like any other, so the
@@ -391,7 +403,7 @@ export function PluginsSection() {
 				{exampleError === null ? null : (
 					<p className="text-sm text-red-400">{exampleError}</p>
 				)}
-			</div>
+			</SubSection>
 
 			<PluginLog />
 		</Section>

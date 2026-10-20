@@ -3,7 +3,7 @@ import { resolveTitlerModel } from "@lib/titler";
 import { getTitlerOutcome, subscribeTitlerOutcome } from "@lib/titlerStatus";
 import { useSyncExternalStore } from "react";
 import { setSettings, useSettings } from "@/state/settings";
-import { CONTROL, Section } from "@/ui/kit";
+import { CONTROL, SECTION_HEADING, Section } from "@/ui/kit";
 import {
 	AUTOMATIC_KEY,
 	type TitlerModelChoice,
@@ -63,13 +63,7 @@ export function TitlerSection() {
 	};
 
 	return (
-		<Section
-			heading={
-				<h3 className="text-xs uppercase tracking-widest text-neutral-500">
-					Titler
-				</h3>
-			}
-		>
+		<Section heading={<h3 className={SECTION_HEADING}>Titler</h3>}>
 			<p className="text-xs text-neutral-500">{rows.hint}</p>
 
 			<label className="flex flex-col gap-1 text-xs uppercase tracking-widest text-neutral-500">
