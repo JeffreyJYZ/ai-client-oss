@@ -38,7 +38,7 @@ export function SettingsNav() {
 	return (
 		<nav
 			aria-label="Settings sections"
-			className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1 bg-neutral-950/95 px-1 py-2 backdrop-blur"
+			className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1 bg-neutral-950 px-1 py-2"
 		>
 			{entries.map((entry) => (
 				<button

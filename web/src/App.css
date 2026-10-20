@@ -49,6 +49,15 @@ details[open] > summary > .fold-chevron {
 	color: var(--color-neutral-400, #a3a3a3);
 }
 
+/* A settings section's heading doubles as the settings nav's scroll target, so
+   a jump must clear the sticky nav instead of parking the heading underneath
+   it. Applies to the catalogue's built-in anchors and to a plugin section's
+   derived anchor (`lib/settingsSections.ts`). */
+[id^="settings-section-"],
+[id^="settings-plugin-section-"] {
+	scroll-margin-top: 3.5rem;
+}
+
 /* Rendered assistant markdown (ui/Markdown.tsx). Dark-first,
    scoped under .md so it never leaks into the rest of the app. */
 .md {

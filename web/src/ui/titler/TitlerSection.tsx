@@ -2,6 +2,7 @@ import { isDesktop } from "@lib/platform";
 import { resolveTitlerModel } from "@lib/titler";
 import { getTitlerOutcome, subscribeTitlerOutcome } from "@lib/titlerStatus";
 import { useId, useRef, useState, useSyncExternalStore } from "react";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import { setSettings, useSettings } from "@/state/settings";
 import { Button, INPUT, LABEL, SECTION_HEADING, Section } from "@/ui/kit";
 import { filterTitlerOptions } from "@/ui/titler/titlerFilter";
@@ -149,7 +150,13 @@ export function TitlerSection() {
 	};
 
 	return (
-		<Section heading={<h3 className={SECTION_HEADING}>Titler</h3>}>
+		<Section
+			heading={
+				<h3 id={SETTINGS_SECTIONS.titler.anchorId} className={SECTION_HEADING}>
+					{SETTINGS_SECTIONS.titler.title}
+				</h3>
+			}
+		>
 			<p className="text-xs text-neutral-500">{rows.hint}</p>
 
 			<label className={LABEL}>

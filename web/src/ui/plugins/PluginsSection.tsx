@@ -240,7 +240,7 @@ export function PluginsSection() {
 			summaryClassName={SECTION_SUMMARY_WRAP}
 			heading={
 				<>
-					<h3 id={SETTINGS_SECTIONS.plugins.id} className={HEADING}>
+					<h3 id={SETTINGS_SECTIONS.plugins.anchorId} className={HEADING}>
 						{SETTINGS_SECTIONS.plugins.title}
 					</h3>
 					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">

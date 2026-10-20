@@ -58,6 +58,18 @@ export const SETTINGS_SECTIONS = {
 		anchorId: "settings-section-memory",
 		keywords: ["memory", "notes", "remember"],
 	},
+	titler: {
+		id: "settings.section.titler",
+		title: "Titler",
+		anchorId: "settings-section-titler",
+		keywords: [
+			"titler",
+			"title",
+			"conversation name",
+			"automatic",
+			"free model",
+		],
+	},
 	backup: {
 		id: "settings.section.backup",
 		title: "Backup",

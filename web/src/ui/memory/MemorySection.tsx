@@ -134,7 +134,10 @@ export function MemorySection() {
 			open={false}
 			heading={
 				<>
-					<h3 id={SETTINGS_SECTIONS.memory.id} className={SECTION_HEADING}>
+					<h3
+						id={SETTINGS_SECTIONS.memory.anchorId}
+						className={SECTION_HEADING}
+					>
 						{SETTINGS_SECTIONS.memory.title}
 					</h3>
 					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
