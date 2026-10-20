@@ -135,13 +135,26 @@ if (ids.length === 0) {
  * ships, so a single-id rebuild must not shrink it. `globals-proof` has no
  * manifest and is therefore absent — it is a build probe, not an example.
  */
-const manifestRow = (id: string): { manifest: string; name: string; description: string } | null => {
+const manifestRow = (id: string): {
+	manifest: string;
+	pluginId: string;
+	name: string;
+	description: string;
+} | null => {
 	const file = join(pluginsRoot, id, "plugin.json");
 	if (!existsSync(file)) return null;
 	const manifest = readFileSync(file, "utf8");
-	const parsed = JSON.parse(manifest) as { readonly name?: string; readonly description?: string };
+	const parsed = JSON.parse(manifest) as {
+		readonly id?: string;
+		readonly name?: string;
+		readonly description?: string;
+	};
 	return {
 		manifest,
+		// The manifest's own id — what an install writes, and what the Settings
+		// list compares against to say "Installed". Empty when the manifest has
+		// none, which the UI reads as "cannot tell" rather than installed.
+		pluginId: typeof parsed.id === "string" ? parsed.id : "",
 		name: parsed.name ?? id,
 		description: parsed.description ?? "",
 	};

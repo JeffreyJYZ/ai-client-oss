@@ -16,6 +16,13 @@
 export interface PluginExample {
 	/** The directory name under `web/plugins/` — the chunk path, not the manifest `id` (which the manifest text carries). */
 	readonly id: string;
+	/**
+	 * The manifest's own `id`, read from the manifest at build time. This is the
+	 * id an install writes (the loader stores a plugin under its manifest id), so
+	 * it is the key an "already installed" check must compare against — the
+	 * directory name above is a build path and would never match.
+	 */
+	readonly pluginId: string;
 	/** The manifest `name`, for the row. */
 	readonly name: string;
 	/** The manifest `description`, already one sentence. */
@@ -49,3 +56,16 @@ export const examplesIndex = (
 		.sort((left, right) => left.id.localeCompare(right.id))
 		.map((row) => ({ ...row, entry: exampleEntry(row.id) })),
 });
+
+/**
+ * Whether an example is already installed, so its row says so instead of
+ * offering a second install. The installed set is the plugin store's ids, which
+ * are the manifests' own ids — compare against {@link PluginExample.pluginId},
+ * never the directory name. An empty id (an index written before it carried
+ * one) is treated as unknown, so the row keeps its Install button rather than
+ * claiming an install it cannot verify.
+ */
+export const exampleInstalled = (
+	example: PluginExample,
+	installedIds: ReadonlySet<string>,
+): boolean => example.pluginId !== "" && installedIds.has(example.pluginId);

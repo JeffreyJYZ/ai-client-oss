@@ -1,8 +1,13 @@
-import type { ExamplesIndex, PluginExample } from "@lib/build/examplesIndex";
+import {
+	type ExamplesIndex,
+	exampleInstalled,
+	type PluginExample,
+} from "@lib/build/examplesIndex";
 import {
 	PLUGIN_TRUST_POINTS,
 	PLUGIN_TRUST_SUMMARY,
 } from "@lib/plugins/consent";
+import { toast } from "@lib/plugins/notify";
 import { pastedFiles } from "@lib/plugins/pasted";
 import { Effect } from "effect";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
@@ -10,6 +15,7 @@ import {
 	installFromText,
 	installFromUrl,
 	PLUGIN_SOURCE_MAX_CHARS,
+	type PluginsNotice,
 	reloadAll,
 	setPluginsEnabled,
 	usePlugins,
@@ -73,19 +79,27 @@ const readFiles = (
 /**
  * The index a release ships, filtered to well-formed rows. It is a static file
  * beside the chunks, so a malformed one must degrade to "no examples" rather
- * than render a broken Install button.
+ * than render a broken Install button. `pluginId` is defaulted rather than
+ * required: an index written before the field existed cannot say whether a
+ * plugin is installed, and `""` reads as unknown (see `exampleInstalled`) —
+ * dropping every row would be a worse answer than an Install button.
  */
 const examplesOf = (json: unknown): readonly PluginExample[] => {
 	const index = json as ExamplesIndex | undefined;
 	if (!Array.isArray(index?.examples)) return [];
-	return index.examples.filter(
-		(example): example is PluginExample =>
-			typeof example?.id === "string" &&
-			typeof example.name === "string" &&
-			typeof example.description === "string" &&
-			typeof example.entry === "string" &&
-			typeof example.manifest === "string",
-	);
+	return index.examples
+		.filter(
+			(example): example is PluginExample =>
+				typeof example?.id === "string" &&
+				typeof example.name === "string" &&
+				typeof example.description === "string" &&
+				typeof example.entry === "string" &&
+				typeof example.manifest === "string",
+		)
+		.map((example) => ({
+			...example,
+			pluginId: typeof example.pluginId === "string" ? example.pluginId : "",
+		}));
 };
 
 export function PluginsSection() {
@@ -97,7 +111,29 @@ export function PluginsSection() {
 	const [pickError, setPickError] = useState<string | null>(null);
 	const [examples, setExamples] = useState<readonly PluginExample[]>([]);
 	const [exampleError, setExampleError] = useState<string | null>(null);
+	/**
+	 * The example whose chunk is being fetched. The store's install is keyed by
+	 * the manifest id, so a second click while the first fetch is in flight is
+	 * not a second plugin — but it is a second download, and it reports twice.
+	 */
+	const [installing, setInstalling] = useState<string | null>(null);
 	const fileInputRef = useRef<HTMLInputElement>(null);
+	const toastedNotice = useRef<PluginsNotice | null>(null);
+
+	/**
+	 * An install's outcome is a **transient popup**, not a line that stays in
+	 * the section: the store keeps the last outcome (`plugins.notice`), and this
+	 * hands each new one to the app's toast overlay, where it expires on its
+	 * own. The ref makes it once per outcome — a re-render must not re-toast.
+	 */
+	useEffect(() => {
+		const notice = plugins.notice;
+		if (notice === null || notice === toastedNotice.current) return;
+		toastedNotice.current = notice;
+		Effect.runFork(
+			toast({ text: notice.text, tone: notice.ok ? "success" : "error" }),
+		);
+	}, [plugins.notice]);
 
 	/**
 	 * The examples a release ships. The index is written by
@@ -122,6 +158,7 @@ export function PluginsSection() {
 	/** Install one shipped example: its manifest plus the chunk fetched now. */
 	const installExample = (example: PluginExample): void => {
 		setExampleError(null);
+		setInstalling(example.id);
 		Effect.runFork(
 			Effect.tryPromise({
 				try: () =>
@@ -148,6 +185,7 @@ export function PluginsSection() {
 						setExampleError(detail);
 					}),
 				),
+				Effect.ensuring(Effect.sync(() => setInstalling(null))),
 			),
 		);
 	};
@@ -186,6 +224,15 @@ export function PluginsSection() {
 		);
 	};
 
+	/**
+	 * The plugins already installed, keyed by their manifest id. A row is
+	 * "Installed" when its example's manifest id is in here — the id an install
+	 * writes, which is never the example's directory name.
+	 */
+	const installedIds = new Set(
+		plugins.plugins.map((plugin) => plugin.state.id),
+	);
+
 	return (
 		<Section
 			className={SECTION}
@@ -213,16 +260,6 @@ export function PluginsSection() {
 					))}
 				</ul>
 			</div>
-
-			{plugins.notice === null ? null : (
-				<p
-					className={`whitespace-pre-wrap break-words text-sm ${
-						plugins.notice.ok ? "text-green-400" : "text-red-400"
-					}`}
-				>
-					{plugins.notice.text}
-				</p>
-			)}
 
 			{plugins.enabled ? null : (
 				<p className="text-xs text-neutral-500">
@@ -370,34 +407,46 @@ export function PluginsSection() {
 			<SubSection heading={<p className={SUBHEADING}>Examples</p>}>
 				<p className="text-xs text-neutral-500">
 					Shipped with this build. Installing one copies its manifest and code
-					into your plugins — it is full-trust code like any other, so the
-					switch above must be on.
+					into your plugins.
 				</p>
 				{examples.length === 0 ? (
 					<p className="text-xs text-neutral-500">
 						This build ships no examples.
 					</p>
 				) : (
-					<ul className="flex flex-col gap-2">
-						{examples.map((example) => (
-							<li
-								key={example.id}
-								className="flex items-start justify-between gap-3"
-							>
-								<div>
-									<p className="text-sm text-neutral-200">{example.name}</p>
-									<p className="text-xs text-neutral-500">
-										{example.description}
-									</p>
-								</div>
-								<Button
-									onClick={() => installExample(example)}
-									disabled={!plugins.enabled}
+					<ul className="flex flex-col gap-1.5">
+						{examples.map((example) => {
+							const installed = exampleInstalled(example, installedIds);
+							const busy = installing === example.id;
+							return (
+								<li
+									key={example.id}
+									className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-1"
 								>
-									Install
-								</Button>
-							</li>
-						))}
+									<span className="whitespace-nowrap text-sm text-neutral-200">
+										{example.name}
+									</span>
+									<span
+										className="line-clamp-2 text-xs text-neutral-500"
+										title={example.description}
+									>
+										{example.description}
+									</span>
+									{installed ? (
+										<span className="text-xs text-emerald-400/80">
+											Installed
+										</span>
+									) : (
+										<Button
+											onClick={() => installExample(example)}
+											disabled={!plugins.enabled || busy}
+										>
+											{busy ? "Installing…" : "Install"}
+										</Button>
+									)}
+								</li>
+							);
+						})}
 					</ul>
 				)}
 				{exampleError === null ? null : (
