@@ -1,4 +1,5 @@
 import type { Host } from "@lib/plugins/host";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import { ConversationList, NewChatButton } from "@/ui/ConversationList";
 import {
 	BackupSection,
@@ -52,7 +53,7 @@ export const registerSettingsBuiltins = (host: Host): void => {
 		order: 10,
 	});
 	host.ui.register({
-		id: "settings.section.providers",
+		id: SETTINGS_SECTIONS.providers.id,
 		slot: "settings.sections",
 		component: ProviderSection,
 		order: 20,
@@ -64,7 +65,7 @@ export const registerSettingsBuiltins = (host: Host): void => {
 		order: 30,
 	});
 	host.ui.register({
-		id: "settings.section.profiles",
+		id: SETTINGS_SECTIONS.profiles.id,
 		slot: "settings.sections",
 		component: ProfilesSection,
 		order: 40,
@@ -76,25 +77,25 @@ export const registerSettingsBuiltins = (host: Host): void => {
 		order: 50,
 	});
 	host.ui.register({
-		id: "settings.section.web-search",
+		id: SETTINGS_SECTIONS.webSearch.id,
 		slot: "settings.sections",
 		component: WebSearchSection,
 		order: 60,
 	});
 	host.ui.register({
-		id: "settings.section.variants",
+		id: SETTINGS_SECTIONS.variants.id,
 		slot: "settings.sections",
 		component: VariantsSection,
 		order: 65,
 	});
 	host.ui.register({
-		id: "settings.section.backup",
+		id: SETTINGS_SECTIONS.backup.id,
 		slot: "settings.sections",
 		component: BackupSection,
 		order: 80,
 	});
 	host.ui.register({
-		id: "settings.section.updates",
+		id: SETTINGS_SECTIONS.updates.id,
 		slot: "settings.sections",
 		component: UpdatesSection,
 		order: 90,

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import {
 	addVariant,
 	removeVariant,
@@ -101,7 +102,12 @@ export function VariantsSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className={SECTION_HEADING}>Variants</h3>
+					<h3
+						id={SETTINGS_SECTIONS.variants.anchorId}
+						className={SECTION_HEADING}
+					>
+						{SETTINGS_SECTIONS.variants.title}
+					</h3>
 					<button type="button" onClick={() => addVariant()} className={BUTTON}>
 						Add variant
 					</button>

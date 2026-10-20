@@ -11,6 +11,7 @@ import {
 import type { Disposable, Host } from "@lib/plugins/host";
 import { registerTool, type Tool, type ToolOutcome } from "@lib/plugins/tools";
 import { Effect } from "effect";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import {
 	getSettings,
 	setSettings,
@@ -420,7 +421,7 @@ export const registerMemoryTools = (host: Host): void => {
 export const registerMemoryBuiltins = (host: Host): void => {
 	registerMemoryTools(host);
 	host.ui.register({
-		id: "settings.section.memory",
+		id: SETTINGS_SECTIONS.memory.id,
 		slot: "settings.sections",
 		component: MemorySection,
 		order: 70,

@@ -15,6 +15,7 @@ import {
 	type BuiltinIdentity,
 } from "@lib/plugins/builtinIdentity";
 import type { Host } from "@lib/plugins/host";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import { PluginsSection } from "@/ui/plugins/PluginsSection";
 import { SettingsShell } from "@/ui/Settings";
 
@@ -101,7 +102,7 @@ const registerSubstrate = (host: Host): void => {
  */
 const registerManager = (host: Host): void => {
 	host.ui.register({
-		id: "settings.section.plugins",
+		id: SETTINGS_SECTIONS.plugins.id,
 		slot: "settings.sections",
 		component: PluginsSection,
 		order: 100,

@@ -11,6 +11,7 @@ import { toast } from "@lib/plugins/notify";
 import { pastedFiles } from "@lib/plugins/pasted";
 import { Effect } from "effect";
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import {
 	installFromText,
 	installFromUrl,
@@ -239,7 +240,9 @@ export function PluginsSection() {
 			summaryClassName={SECTION_SUMMARY_WRAP}
 			heading={
 				<>
-					<h3 className={HEADING}>Plugins</h3>
+					<h3 id={SETTINGS_SECTIONS.plugins.id} className={HEADING}>
+						{SETTINGS_SECTIONS.plugins.title}
+					</h3>
 					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
 						Enabled
 						<input
