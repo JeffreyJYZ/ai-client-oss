@@ -69,6 +69,13 @@ jobs:
     if: ${{ !cancelled() && !failure() }}
     strategy:
       fail-fast: false
+      # One platform at a time. `tauri-action` checks for the release, then
+      # creates it when missing — and with the matrix in parallel every job
+      # races that check (measured on desktop-v0.6.3: Linux created the
+      # release, Windows hit the gap and failed, and the still-queued macOS job
+      # was cancelled with the run, leaving a Linux-only release). Serialising
+      # costs minutes and makes each job see what the previous one created.
+      max-parallel: 1
       matrix:
         include:
           - platform: macos-latest
