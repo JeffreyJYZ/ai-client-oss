@@ -151,6 +151,15 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
+            **New in 0.6.3**
+
+            - **Settings has a navigation bar.** A sticky rail of every section — plugin-contributed ones included — that opens the fold and scrolls to it. Switching an area off removes its entry, so the rail never points at something that is not there.
+            - **Search reaches the whole app.** The command palette now finds conversations, providers, profiles, settings sections and plugins — installed ones and the shipped examples — alongside commands. All of it is local: searching fires no request.
+            - **Variants bundle request parameters.** A variant is a named set of temperature, top-p, a token cap and a reasoning effort, applied to outgoing requests and sent only for the fields you set, each in the shape its protocol expects (chat/completions, Responses, Anthropic). No active variant sends nothing and leaves the endpoint's defaults alone.
+            - **Release notes show themselves.** The first launch of a new version fetches that release's notes and shows them once, dismissible, and a Settings control reopens them at any time. A failed fetch shows nothing rather than an empty dialog, and the version keeps its notes for the next launch.
+            - **The Titler model picker is searchable.** Type to filter by model or provider instead of scrolling a list, with the keyboard driving the whole thing: arrows to move, Enter to pick, Escape to cancel.
+            - **The plugin examples list is compact and honest.** One line per example, and an example you already installed says **Installed** instead of offering a second install. The result of an install is a toast, not a line that lingers in the section.
+
             **New in 0.6.2**
 
             - **Every Settings section folds.** Each section heading carries a ▶/▼ disclosure chevron, so a long Settings page collapses down to the parts you are working in, and every header row inside a section folds on its own too.
