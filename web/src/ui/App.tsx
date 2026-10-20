@@ -1,5 +1,10 @@
 import "@/App.css";
+import { useOverlay } from "@lib/plugins/notify";
+import { useEffect } from "react";
+import { checkForReleaseNotes } from "@/state/releaseNotes";
+import { useSettingsHydrated } from "@/state/settings";
 import { MinimalHost } from "@/ui/MinimalHost";
+import ReleaseNotesDialog from "@/ui/ReleaseNotesDialog";
 import Slot from "@/ui/slots/Slot";
 
 /**
@@ -18,12 +23,28 @@ import Slot from "@/ui/slots/Slot";
  * rendered instead of assumed (spec "The locked core"). It renders nothing
  * while any layout contribution is visible, so with no plugins the DOM is the
  * slot's own and nothing else.
+ *
+ * The app's own release notes mount here too, at the container level, so they
+ * render on every platform and in every built-in configuration (shell off,
+ * overlays off) rather than riding a toggleable area. A queued plugin dialog
+ * takes the screen first; the notes appear once that queue is empty. The
+ * once-per-version check waits for the settings to hydrate, because the
+ * dismissed version is only then the stored one.
  */
 export default function App() {
+	const { modals } = useOverlay();
+	const hydrated = useSettingsHydrated();
+
+	useEffect(() => {
+		if (!hydrated) return;
+		checkForReleaseNotes();
+	}, [hydrated]);
+
 	return (
 		<>
 			<Slot id="ui.root.layout" />
 			<MinimalHost />
+			{modals.length === 0 ? <ReleaseNotesDialog /> : null}
 		</>
 	);
 }
