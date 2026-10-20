@@ -9,6 +9,7 @@ import type {
 	SendCtx,
 	ToolCallData,
 } from "@lib/providers/types";
+import { isTurnReplay, responsesVariant } from "@lib/providers/variant";
 import { ResponsesSend } from "@lib/types/protocols";
 import { responsesSendMinTemplate } from "@lib/util/templates";
 import type { Effect, Stream } from "effect";
@@ -30,6 +31,8 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 			? { type: "input_image" as const, file_url: part.dataUrl }
 			: { type: "input_file" as const, file_url: part.dataUrl },
 	);
+	// The active variant's parameters, mapped to this protocol's field names.
+	const variant = responsesVariant(ctx.variant);
 	return {
 		...send,
 		// Belt-and-braces: emit `stream` explicitly rather than relying on the
@@ -61,6 +64,26 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 		// overwrite any `tools` replayed from the previous turn's body, or a
 		// provider switch would resend the old endpoint's declaration.
 		tools: requestTools(ctx, "responses"),
+		// The active variant's parameters, mapped to this protocol's field names
+		// (the token cap is `max_output_tokens` here, and the effort is nested
+		// under `reasoning`). Written on the turn's fresh composition only:
+		// the tool loop replays the turn's own body, which already carries
+		// these parameters, so re-writing them there would clobber a
+		// `transformBody` stage's own value for the same field and break the
+		// replay's identity. On the fresh composition they are written
+		// explicitly, the unset ones as `undefined` (dropped at
+		// `JSON.stringify`): a value inherited from the previous turn's body
+		// — a removed variant's parameter — cannot survive into this turn, and
+		// a parameter the variant does not set is not sent at all, so the
+		// endpoint's own default stands.
+		...(isTurnReplay(ctx)
+			? {}
+			: {
+					temperature: variant.temperature,
+					top_p: variant.top_p,
+					max_output_tokens: variant.max_output_tokens,
+					reasoning: variant.reasoning,
+				}),
 	};
 };
 

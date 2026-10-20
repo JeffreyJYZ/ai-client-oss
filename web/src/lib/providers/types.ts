@@ -1,4 +1,5 @@
 import type { ToolDeclaration } from "@lib/plugins/tools";
+import type { VariantParams } from "@lib/providers/variant";
 import type { Effect, Stream } from "effect";
 import type { z } from "zod";
 
@@ -142,6 +143,13 @@ export interface SendCtx {
 	 * conversation, e.g. the Settings connection probe.
 	 */
 	readonly conversationId?: string;
+	/**
+	 * The active variant's parameters, when one is active: the generation
+	 * parameters this request carries (`lib/providers/variant.ts`). Absent
+	 * when no variant is active — then the request carries no parameter at
+	 * all and the endpoint's own defaults stand.
+	 */
+	readonly variant?: VariantParams;
 	/**
 	 * Set by the tool loop from its second round on: the request
 	 * replays the body round 1 sent, which already carries the

@@ -3,6 +3,7 @@ import type { MemoryEntry } from "@lib/memoryNotes";
 import { pluginStateSchema } from "@lib/plugins/manifest";
 import type { ProtocolName } from "@lib/providers";
 import type { AttachmentPart } from "@lib/providers/types";
+import { REASONING_EFFORTS, type VariantParams } from "@lib/providers/variant";
 import type { Effect, Option } from "effect";
 import { z } from "zod";
 
@@ -73,6 +74,61 @@ export const emptyProfile = (id: string): Profile =>
 	profileSchema.parse({ id });
 
 /**
+ * The stored fields a variant's *parameters* take, one per parameter of
+ * `lib/providers/variant.ts`.
+ *
+ * The `satisfies` check is the drift guard between the stored shape and the
+ * wire vocabulary: a parameter renamed, retyped or added on one side and not
+ * the other is a compile error here, not a parameter that silently stops
+ * being sent. The ranges are the stored contract (the endpoints' own limits),
+ * and they are enforced by the schema so the Settings editor never has to
+ * repeat them.
+ */
+export const variantParamSchemas = {
+	temperature: z
+		.number("Temperature must be a number.")
+		.min(0, "Temperature must be at least 0.")
+		.max(2, "Temperature must be at most 2.")
+		.optional(),
+	topP: z
+		.number("Top P must be a number.")
+		.min(0, "Top P must be at least 0.")
+		.max(1, "Top P must be at most 1.")
+		.optional(),
+	maxTokens: z
+		.number("Max tokens must be a number.")
+		.int("Max tokens must be a whole number.")
+		.positive("Max tokens must be above 0.")
+		.optional(),
+	reasoningEffort: z.enum(REASONING_EFFORTS).optional(),
+} satisfies {
+	[K in keyof VariantParams]-?: z.ZodType<VariantParams[K]>;
+};
+
+/**
+ * A named bundle of generation parameters applied to outgoing
+ * requests. Every field but `id`/`name` is optional: an unset
+ * parameter is never sent, so a variant only changes what it
+ * explicitly sets.
+ *
+ * The parameter fields come from `variantParamSchemas` below, which is
+ * pinned to the wire vocabulary in `lib/providers/variant.ts` — so a
+ * parameter renamed on one side and forgotten on the other is a build
+ * error, not a parameter that silently stops being sent.
+ */
+export const variantSchema = z.object({
+	id: z.string(),
+	name: z.string().default(""),
+	...variantParamSchemas,
+});
+
+export type Variant = z.infer<typeof variantSchema>;
+
+/** A fresh, empty variant: only `id` is required, the rest fall to defaults. */
+export const emptyVariant = (id: string): Variant =>
+	variantSchema.parse({ id });
+
+/**
  * One durable memory note: a fact the model wrote into its reply (stripped
  * from the displayed text before storage, see `lib/memory.ts`) or the user
  * added in Settings. `source` labels who wrote it.
@@ -140,6 +196,18 @@ export const Settings = z.object({
 	activeProviderId: z.string().default(DEFAULT_PROVIDER_ID),
 	/** Saved provider+model+system-prompt bundles; empty until the user adds one. */
 	profiles: z.array(profileSchema).default([]),
+	/**
+	 * Saved generation-parameter bundles; empty until the user adds one.
+	 * Additive and optional on disk — a blob without it reads as no variants —
+	 * so nothing is required to migrate on its own account.
+	 */
+	variants: z.array(variantSchema).default([]),
+	/**
+	 * The id of the variant applied to outgoing requests; "" when none is
+	 * active. A dangling id is tolerated (the pointer simply resolves to
+	 * nothing), so removing a variant never breaks the rest of the settings.
+	 */
+	activeVariantId: z.string().default(""),
 	/** Durable notes for the whole app, one list sent with every request. */
 	memories: z.array(memoryNoteSchema).default([]),
 	/**
@@ -218,6 +286,24 @@ export const Settings = z.object({
 export type Settings = z.infer<typeof Settings>;
 
 export const settingsDefaults = (): Settings => Settings.parse({});
+
+/**
+ * The variant the settings point at, or `undefined` when none is active or the
+ * id dangles (a variant removed elsewhere). Pure, so the request path reads the
+ * pointer without a store lookup.
+ */
+export const activeVariant = (settings: Settings): Variant | undefined =>
+	settings.variants.find((variant) => variant.id === settings.activeVariantId);
+
+/**
+ * A variant's parameters, without its identity: what the request path
+ * carries. The identity (`id`, `name`) is the Settings editor's business and
+ * never reaches a wire field.
+ */
+export const variantParamsOf = (variant: Variant): VariantParams => {
+	const { id: _id, name: _name, ...params } = variant;
+	return params;
+};
 
 /**
  * Reason `setSettings` fails with while a stored blob is unreadable. A schema

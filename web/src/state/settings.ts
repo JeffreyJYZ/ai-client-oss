@@ -2,10 +2,12 @@ import {
 	db,
 	emptyProfile,
 	emptyProviderConfig,
+	emptyVariant,
 	type Profile,
 	type ProviderConfig,
 	Settings,
 	settingsDefaults,
+	type Variant,
 } from "@lib/db";
 import { Effect } from "effect";
 import { useSyncExternalStore } from "react";
@@ -146,4 +148,63 @@ export const removeProfile = (id: string): void => {
 	setSettings({
 		profiles: current.profiles.filter((profile) => profile.id !== id),
 	});
+};
+
+const newVariantId = (): string => `variant-${crypto.randomUUID()}`;
+
+/**
+ * Append a fresh variant and return its id. A new variant starts empty — no
+ * parameter set — so it changes nothing until the user gives it one, and it
+ * does not become the active one: the active pointer is the user's choice, and
+ * a variant added while one is active leaves that one active.
+ */
+export const addVariant = (name = ""): string => {
+	const variant: Variant = { ...emptyVariant(newVariantId()), name };
+	setSettings({ variants: [...current.variants, variant] });
+	return variant.id;
+};
+
+/**
+ * Patch one variant's fields; `id` is immutable and an unknown id is a no-op.
+ *
+ * A parameter the patch unsets is *removed*, not stored as `undefined`: the
+ * stored shape carries only the parameters a variant sets, so an unset
+ * parameter is absent from the request body rather than sent as a guess.
+ */
+export const updateVariant = (
+	id: string,
+	patch: Partial<Omit<Variant, "id">>,
+): void => {
+	setSettings({
+		variants: current.variants.map((variant) => {
+			if (variant.id !== id) return variant;
+			const next: Record<string, unknown> = { ...variant, ...patch };
+			for (const key of Object.keys(next)) {
+				if (next[key] === undefined) delete next[key];
+			}
+			return next as Variant;
+		}),
+	});
+};
+
+/**
+ * Remove a variant; an unknown id is a no-op. Removing the active variant
+ * leaves the pointer where it is — it then dangles, which the request path
+ * reads as "no variant", the same as none being active.
+ */
+export const removeVariant = (id: string): void => {
+	setSettings({
+		variants: current.variants.filter((variant) => variant.id !== id),
+	});
+};
+
+/**
+ * Point the active pointer at `id`; an unknown id is a no-op. An empty id
+ * clears the pointer, which is how the editor turns the feature off.
+ */
+export const selectVariant = (id: string): void => {
+	if (id !== "" && !current.variants.some((variant) => variant.id === id)) {
+		return;
+	}
+	setSettings({ activeVariantId: id });
 };
