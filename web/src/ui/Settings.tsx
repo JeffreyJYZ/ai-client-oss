@@ -21,6 +21,7 @@ import {
 	searchKindFor,
 } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
+import { offerHeadline } from "@lib/updates";
 import { Effect, Option } from "effect";
 import {
 	type ChangeEvent,
@@ -1141,7 +1142,7 @@ export function UpdatesSection() {
 			updates.offer !== null ? (
 				<div className="flex flex-col gap-3">
 					<p className="text-sm text-neutral-500">
-						Version {updates.offer.version} is available.
+						{offerHeadline(updates.offer)}
 					</p>
 					{updates.offer.kind === "updater" ? (
 						<button

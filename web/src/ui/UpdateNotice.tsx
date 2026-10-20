@@ -1,4 +1,5 @@
 import { isDesktop } from "@lib/platform";
+import { offerClause } from "@lib/updates";
 import { useEffect } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import { setSettings, useSettings } from "@/state/settings";
@@ -60,7 +61,7 @@ export default function UpdateNotice() {
 				>
 					{offer.version}
 				</a>{" "}
-				is available.
+				{offerClause(offer)}
 				{phase === "failed" && message !== null
 					? ` Updating failed (${message}) — install it from the release page instead.`
 					: null}

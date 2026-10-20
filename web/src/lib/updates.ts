@@ -167,6 +167,24 @@ export const findUpdate = (): Effect.Effect<UpdateOffer | null, string> =>
 	});
 
 /**
+ * What the UI may claim about an offer.
+ *
+ * Only an **updater** offer is an update this app can install. A GitHub-only
+ * offer is a release that exists, and calling it "available" is a claim the
+ * user cannot act on — measured 2026-10-20: the releases API already named
+ * 0.6.3 while `latest.json` carried only Linux keys (macOS still building), so
+ * the app said an update was available and offered no update button.
+ */
+export const offerClause = (offer: UpdateOffer): string =>
+	offer.kind === "updater"
+		? "is available."
+		: "is published, but this build cannot install it in-app.";
+
+/** The whole sentence, for a surface that shows the version as plain text. */
+export const offerHeadline = (offer: UpdateOffer): string =>
+	`Version ${offer.version} ${offerClause(offer)}`;
+
+/**
  * Download and install `update`, reporting download progress to
  * `onProgress` as a 0-100 percentage, or `null` while the total size is
  * still unknown.
