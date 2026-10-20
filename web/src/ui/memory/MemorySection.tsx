@@ -8,6 +8,7 @@ import {
 	updateMemory,
 } from "@lib/memoryNotes";
 import { useState } from "react";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import { setSettings, useSettings } from "@/state/settings";
 import ConfirmButton from "@/ui/ConfirmButton";
 import {
@@ -133,7 +134,9 @@ export function MemorySection() {
 			open={false}
 			heading={
 				<>
-					<h3 className={SECTION_HEADING}>Memory</h3>
+					<h3 id={SETTINGS_SECTIONS.memory.id} className={SECTION_HEADING}>
+						{SETTINGS_SECTIONS.memory.title}
+					</h3>
 					<label className="flex items-center gap-2 text-xs uppercase tracking-widest text-neutral-500">
 						Enabled
 						<input

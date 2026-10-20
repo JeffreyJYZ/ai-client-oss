@@ -32,6 +32,7 @@ import {
 	useState,
 } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
+import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import {
 	addProfile,
 	addProvider,
@@ -55,6 +56,7 @@ import {
 	SECTION_SUMMARY_WRAP,
 	Section,
 } from "@/ui/kit";
+import { SettingsNav } from "@/ui/SettingsNav";
 import Slot from "@/ui/slots/Slot";
 
 /** Only tool the UI exposes; the request body sends it verbatim. */
@@ -121,6 +123,7 @@ export function SettingsShell() {
 					Settings
 				</h2>
 				<EditorProvider>
+					<SettingsNav />
 					<Slot id="settings.nav" />
 					<Slot id="settings.sections" />
 				</EditorProvider>
@@ -201,7 +204,9 @@ export function ProviderSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className={SECTION_HEADING}>Providers</h3>
+					<h3 id={SETTINGS_SECTIONS.providers.id} className={SECTION_HEADING}>
+						{SETTINGS_SECTIONS.providers.title}
+					</h3>
 					<button type="button" onClick={add} className={BUTTON}>
 						Add provider
 					</button>
@@ -505,7 +510,9 @@ export function ProfilesSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className={SECTION_HEADING}>Profiles</h3>
+					<h3 id={SETTINGS_SECTIONS.profiles.id} className={SECTION_HEADING}>
+						{SETTINGS_SECTIONS.profiles.title}
+					</h3>
 					<button type="button" onClick={addProfileEntry} className={BUTTON}>
 						Add profile
 					</button>
@@ -688,8 +695,11 @@ export function WebSearchSection() {
 			className={SECTION}
 			summaryClassName={SECTION_SUMMARY}
 			heading={
-				<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
-					Web search
+				<label
+					id={SETTINGS_SECTIONS.webSearch.id}
+					className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500"
+				>
+					{SETTINGS_SECTIONS.webSearch.title}
 					<input
 						type="checkbox"
 						checked={webSearch}
@@ -971,7 +981,9 @@ export function BackupSection() {
 			summaryClassName={SECTION_SUMMARY_WRAP}
 			heading={
 				<>
-					<h3 className={SECTION_HEADING}>Backup</h3>
+					<h3 id={SETTINGS_SECTIONS.backup.id} className={SECTION_HEADING}>
+						{SETTINGS_SECTIONS.backup.title}
+					</h3>
 					<div className="flex gap-2">
 						<button type="button" onClick={exportBackupFile} className={BUTTON}>
 							Export
@@ -1073,7 +1085,9 @@ export function UpdatesSection() {
 			summaryClassName={SECTION_SUMMARY}
 			heading={
 				<>
-					<h3 className={SECTION_HEADING}>Updates</h3>
+					<h3 id={SETTINGS_SECTIONS.updates.id} className={SECTION_HEADING}>
+						{SETTINGS_SECTIONS.updates.title}
+					</h3>
 					<button
 						type="button"
 						onClick={checkForUpdates}

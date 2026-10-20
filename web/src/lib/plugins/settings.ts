@@ -1,5 +1,9 @@
 import type { Disposable, HostUiView } from "@lib/plugins/host";
 import { type ComponentType, createElement } from "react";
+import {
+	registerPluginSettingsSection,
+	settingsPluginSectionAnchorId,
+} from "@/lib/settingsSections";
 import { Section } from "@/ui/kit";
 
 /**
@@ -55,12 +59,19 @@ const HEADING_CLASS = "text-xs uppercase tracking-widest text-neutral-500";
  * could drift.
  */
 const withChrome = (
+	id: string,
 	title: string,
 	Body: ComponentType<Record<string, unknown>>,
-): ComponentType<Record<string, unknown>> =>
-	function SettingsSectionChrome(props: Record<string, unknown>) {
+): ComponentType<Record<string, unknown>> => {
+	const anchorId = settingsPluginSectionAnchorId(id);
+	registerPluginSettingsSection({ id, title, anchorId, keywords: [] });
+	return function SettingsSectionChrome(props: Record<string, unknown>) {
 		return createElement(Section, {
-			heading: createElement("h3", { className: HEADING_CLASS }, title),
+			heading: createElement(
+				"h3",
+				{ className: HEADING_CLASS, id: anchorId },
+				title,
+			),
 			// React 19's `createElement` overload types the props argument as the
 			// component's full props, so a required `children` must be passed here
 			// rather than as a third argument. `Section` renders it identically.
@@ -68,6 +79,7 @@ const withChrome = (
 			children: createElement(Body, props),
 		});
 	};
+};
 
 /**
  * The settings registry over one host view (spec §5). Registration is a slot
@@ -81,6 +93,6 @@ export const makeSettingsRegistry = (host: HostUiView): SettingsRegistry => ({
 			slot: "settings.sections",
 			order: section.order,
 			hidden: section.hidden,
-			component: withChrome(section.title, section.component),
+			component: withChrome(section.id, section.title, section.component),
 		}),
 });
