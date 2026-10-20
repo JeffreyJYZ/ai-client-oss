@@ -32,6 +32,7 @@ import {
 	useState,
 } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
+import { openReleaseNotes } from "@/state/releaseNotes";
 import {
 	addProfile,
 	addProvider,
@@ -1053,7 +1054,14 @@ export function BackupSection() {
 	);
 }
 
-/** The desktop-only updater block (`settings.sections`). */
+/**
+ * The updates block (`settings.sections`).
+ *
+ * The updater is desktop-only — the website deploys continuously and has
+ * nothing to update — but the release notes are not: they describe the version
+ * the app runs, on every platform, so the control that reopens them is here on
+ * both.
+ */
 export function UpdatesSection() {
 	const updates = useUpdates();
 
@@ -1065,8 +1073,6 @@ export function UpdatesSection() {
 		checkForUpdates();
 	}, []);
 
-	if (!isDesktop) return null;
-
 	return (
 		<Section
 			className={SECTION}
@@ -1074,19 +1080,24 @@ export function UpdatesSection() {
 			heading={
 				<>
 					<h3 className={SECTION_HEADING}>Updates</h3>
-					<button
-						type="button"
-						onClick={checkForUpdates}
-						disabled={
-							updates.phase === "checking" || updates.phase === "downloading"
-						}
-						className={BUTTON}
-					>
-						Check for updates
-					</button>
+					{isDesktop ? (
+						<button
+							type="button"
+							onClick={checkForUpdates}
+							disabled={
+								updates.phase === "checking" || updates.phase === "downloading"
+							}
+							className={BUTTON}
+						>
+							Check for updates
+						</button>
+					) : null}
 				</>
 			}
 		>
+			<button type="button" onClick={openReleaseNotes} className={BUTTON}>
+				View release notes
+			</button>
 			{updates.running !== null ? (
 				<p className="text-xs text-neutral-500">
 					Running version {updates.running}

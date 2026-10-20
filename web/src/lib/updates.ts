@@ -1,4 +1,9 @@
 import { isDesktop } from "@lib/platform";
+import {
+	extractReleaseBody,
+	RELEASE_TAG_PREFIX,
+	releaseNotesUrl,
+} from "@lib/releaseNotes";
 import { getVersion } from "@tauri-apps/api/app";
 import { relaunch } from "@tauri-apps/plugin-process";
 import {
@@ -8,9 +13,6 @@ import {
 } from "@tauri-apps/plugin-updater";
 import { Effect } from "effect";
 import { GITHUB_REPOSITORY } from "@/constants/links";
-
-/** Release tags carry this prefix; the version is the tag minus it. */
-const TAG_PREFIX = "desktop-v";
 
 /**
  * Version of the newest desktop release, read from the GitHub API.
@@ -43,7 +45,43 @@ export const latestVersion = (): Effect.Effect<string, string> =>
 		if (typeof tag !== "string" || tag === "") {
 			return yield* Effect.fail("release has no tag");
 		}
-		return tag.startsWith(TAG_PREFIX) ? tag.slice(TAG_PREFIX.length) : tag;
+		return tag.startsWith(RELEASE_TAG_PREFIX)
+			? tag.slice(RELEASE_TAG_PREFIX.length)
+			: tag;
+	});
+
+/**
+ * The release notes of one release: the body of the GitHub release whose tag
+ * carries the version.
+ *
+ * The same endpoint the version check reads, one release by tag. Every failure
+ * lands in the error channel — the transport refused the request, the API
+ * answered with a non-2xx status (no such release, rate limited), the body
+ * was not JSON — and a release that carries no body answers `null`, so the
+ * caller shows nothing in every one of those cases.
+ */
+export const releaseNotesFor = (
+	version: string,
+): Effect.Effect<string | null, string> =>
+	Effect.gen(function* () {
+		const response = yield* Effect.tryPromise({
+			try: (signal) =>
+				fetch(releaseNotesUrl(version), {
+					headers: { accept: "application/vnd.github+json" },
+					signal,
+				}),
+			catch: () => "release notes request failed",
+		});
+		if (!response.ok) {
+			return yield* Effect.fail(
+				`release notes request failed (${response.status})`,
+			);
+		}
+		const payload = yield* Effect.tryPromise({
+			try: () => response.json() as Promise<unknown>,
+			catch: () => "release notes payload unreadable",
+		});
+		return extractReleaseBody(payload);
 	});
 
 /**

@@ -170,6 +170,8 @@ export const Settings = z.object({
 	dismissedInstallNote: z.boolean().default(false),
 	/** Newest release whose update notice the user has dismissed. */
 	dismissedUpdateVersion: z.string().default(""),
+	/** Newest release whose notes the user has dismissed. */
+	dismissedReleaseNotesVersion: z.string().default(""),
 	/**
 	 * Master switch for the plugin subsystem, default off. With it off
 	 * nothing loads and the app behaves exactly as it did before the

@@ -22,6 +22,7 @@ import { Button } from "@/ui/kit";
 export default function Modal() {
 	const { modals } = useOverlay();
 	const head = modals[0];
+
 	if (head === undefined) return null;
 
 	return (

@@ -23,6 +23,35 @@ const notify = (): void => {
 	for (const cb of listeners) cb();
 };
 
+/**
+ * Whether the stored settings have been read.
+ *
+ * The store seeds itself with the defaults so the app can render before the
+ * read lands, which means a consumer that must not mistake "not loaded yet"
+ * for "not set" — the release-notes check compares the dismissed version, and
+ * the default is the empty string — waits for this instead of reading the
+ * defaults as an answer.
+ */
+let hydrated = false;
+
+const hydrationListeners = new Set<() => void>();
+
+const notifyHydrated = (): void => {
+	for (const cb of hydrationListeners) cb();
+};
+
+export const getSettingsHydrated = (): boolean => hydrated;
+
+export const subscribeHydrated = (cb: () => void): (() => void) => {
+	hydrationListeners.add(cb);
+	return () => {
+		hydrationListeners.delete(cb);
+	};
+};
+
+export const useSettingsHydrated = (): boolean =>
+	useSyncExternalStore(subscribeHydrated, getSettingsHydrated);
+
 export const getSettings = (): Settings => current;
 
 export const subscribe = (cb: () => void): (() => void) => {
@@ -55,12 +84,21 @@ export const setSettings = (patch: Partial<Settings>): void => {
 };
 
 // Hydrate from `db` on module load; until it resolves `current` stays defaults.
+// The hydration flag flips either way — a failed read leaves the defaults in
+// place, and a consumer waiting on it must not wait forever.
 Effect.runFork(
 	Effect.flatMap(db.getSettings(), (settings) =>
 		Effect.sync(() => {
 			current = settings;
 			notify();
 		}),
+	).pipe(
+		Effect.ensuring(
+			Effect.sync(() => {
+				hydrated = true;
+				notifyHydrated();
+			}),
+		),
 	),
 );
 
