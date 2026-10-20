@@ -151,6 +151,12 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
+            **New in 0.6.2**
+
+            - **Every Settings section folds.** Each section heading carries a ▶/▼ disclosure chevron, so a long Settings page collapses down to the parts you are working in, and every header row inside a section folds on its own too.
+            - **Child sections read as children.** A nested section sits on a rail and indents under its parent instead of looking like a second top-level heading, and a closed child inside an open parent keeps its own chevron rather than inheriting the parent's.
+            - **A heading's own controls still work.** A checkbox or button in a section heading toggles itself without folding the section.
+
             **New in 0.6.1**
 
             - **The app ships working plugin examples.** Settings → Plugins → **Examples** lists eight, and one click installs the manifest and code into your own plugins. They are full-trust code like any other, and stay off until you enable the master switch.
