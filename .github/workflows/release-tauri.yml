@@ -158,11 +158,9 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **New in 0.6.4**
+            **New in 0.6.5**
 
-            - **OrcaRouter is a built-in preset.** Pick it in Settings → Providers → Add provider and the base URL, protocol and shape are filled in for you — a gateway that fronts OpenAI, Anthropic, Google, DeepSeek and others from one OpenAI-compatible endpoint.
-            - **Plugins can add provider presets.** A plugin registers one through `host.presets`, and it appears in the same dropdown as the shipped ones, applies the same way, and disappears when the plugin is disabled or uninstalled. A preset may not shadow a built-in: the collision is refused and logged, never silently replacing a shipped endpoint.
-            - **A refused connection says so in its own words.** A browser that cannot reach an endpoint used to report `the protocol "chatcompletions" faulted: …`, which reads like a broken plugin; it now reports the actual reason — cross-origin preflight refusal, use the desktop app.
+            - **The header fits the window.** At the default window size its controls ran past the right edge — the Settings button was cut to `Set…`. The row now wraps instead of clipping, a picker shrinks before it pushes the row over, and the decorative wordmark steps aside on a narrow window since the title bar already carries the name.
 
             **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
 
