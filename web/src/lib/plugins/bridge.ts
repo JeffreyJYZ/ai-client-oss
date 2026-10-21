@@ -1,4 +1,5 @@
 import { type Contribution, HostServices } from "@lib/plugins/host";
+import { installPresetBridge } from "@lib/plugins/presets";
 import { runtime } from "@lib/plugins/runtime";
 import { Effect, Stream } from "effect";
 
@@ -56,8 +57,17 @@ export const installRegistryBridge = (
  * runs for the runtime's lifetime; there is no second runtime and no way to run
  * a fresh layer, so every registry consumer shares this one stream. Called by
  * `main.tsx` (Task 6).
+ *
+ * The provider-preset bridge starts here too: it is the same kind of projection
+ * (one module snapshot, `useSyncExternalStore`, a fork over a registry's
+ * `changes`), and it must run **after** the boot's `runtime.runPromise` — its
+ * initial read is a synchronous registry bridge, which throws
+ * `AsyncFiberError` if it runs before the version IPC has resolved. Leaving it
+ * uninstalled made `presets` a registry nothing ever rendered: a plugin could
+ * register a preset and no dropdown would offer it.
  */
 export const bootRegistryBridge = (): void => {
+	installPresetBridge();
 	runtime.runFork(
 		Effect.gen(function* () {
 			const services = yield* HostServices;
