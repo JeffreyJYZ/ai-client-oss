@@ -1,5 +1,5 @@
 import { type Contribution, HostServices } from "@lib/plugins/host";
-import { installPresetBridge } from "@lib/plugins/presets";
+import { installPresetBridge } from "@lib/plugins/presetsBridge";
 import { runtime } from "@lib/plugins/runtime";
 import { Effect, Stream } from "effect";
 

@@ -16,7 +16,7 @@ import {
 	getProviderPresetsSnapshot,
 	installPresetBridge,
 	subscribeProviderPresets,
-} from "@lib/plugins/presets";
+} from "@lib/plugins/presetsBridge";
 import { protocolNames } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
 import { listModels, probeConnection } from "@lib/providers/models";

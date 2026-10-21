@@ -1,14 +1,9 @@
 import { PluginFault } from "@lib/plugins/errors";
 import { type Host, type HostRegistry, HostServices } from "@lib/plugins/host";
 import type { Disposable, RegistryEntry } from "@lib/plugins/registry";
-import { runtime } from "@lib/plugins/runtime";
-import {
-	mergeProviderPresets,
-	PROVIDER_PRESETS,
-	type ProviderPreset,
-} from "@lib/providers/presets";
+import { PROVIDER_PRESETS } from "@lib/providers/presets";
 import type { ToolSpec } from "@lib/providers/types";
-import { Effect, Stream } from "effect";
+import { Effect, type Stream } from "effect";
 import { z } from "zod";
 
 /** The wire shape a plugin registers: what `ProviderPreset` carries. */
@@ -50,14 +45,6 @@ const refuse = (detail: string, pluginId?: string): void => {
 
 const asPresetEntry = (entry: RegistryEntry): PresetEntry =>
 	entry as PresetEntry;
-
-const toPreset = (entry: PresetEntry): ProviderPreset => ({
-	id: entry.id,
-	label: entry.label,
-	baseUrl: entry.baseUrl,
-	protocol: entry.protocol,
-	tools: entry.tools,
-});
 
 const addPreset = (
 	registry: HostRegistry<PresetEntry>,
@@ -138,48 +125,3 @@ export const listPresets = (): Effect.Effect<
 			entries.map(asPresetEntry),
 		),
 	);
-
-/* ---------------------------------------------------------------- React bridge */
-
-let snapshot: readonly ProviderPreset[] = mergeProviderPresets(
-	PROVIDER_PRESETS,
-	[],
-);
-const snapshotListeners = new Set<() => void>();
-
-export const getProviderPresetsSnapshot = (): readonly ProviderPreset[] =>
-	snapshot;
-
-export const subscribeProviderPresets = (
-	listener: () => void,
-): (() => void) => {
-	snapshotListeners.add(listener);
-	return () => {
-		snapshotListeners.delete(listener);
-	};
-};
-
-let bridgeInstalled = false;
-
-export const installPresetBridge = (): void => {
-	if (bridgeInstalled) return;
-	bridgeInstalled = true;
-	snapshot = mergeProviderPresets(
-		PROVIDER_PRESETS,
-		runtime.runSync(listPresets()).map(toPreset),
-	);
-	runtime.runFork(
-		Effect.gen(function* () {
-			const services = yield* HostServices;
-			yield* Stream.runForEach(services.presets.changes, (entries) =>
-				Effect.sync(() => {
-					snapshot = mergeProviderPresets(
-						PROVIDER_PRESETS,
-						entries.map(asPresetEntry).map(toPreset),
-					);
-					for (const listener of snapshotListeners) listener();
-				}),
-			);
-		}),
-	);
-};

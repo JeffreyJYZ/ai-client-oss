@@ -780,27 +780,6 @@ export const reference: DocReference = {
 					"members": []
 				},
 				{
-					"name": "getProviderPresetsSnapshot",
-					"kind": "const",
-					"signature": "export const getProviderPresetsSnapshot = (): readonly ProviderPreset[] => …",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "subscribeProviderPresets",
-					"kind": "const",
-					"signature": "export const subscribeProviderPresets = (listener: () => void): (() => void) => …",
-					"description": "",
-					"members": []
-				},
-				{
-					"name": "installPresetBridge",
-					"kind": "const",
-					"signature": "export const installPresetBridge = (): void => …",
-					"description": "",
-					"members": []
-				},
-				{
 					"name": "AnyProvider",
 					"kind": "type",
 					"signature": "export type AnyProvider = Provider<any>;",
