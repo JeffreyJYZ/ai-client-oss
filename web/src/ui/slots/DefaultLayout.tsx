@@ -30,9 +30,9 @@ export default function DefaultLayout() {
 		<div className="flex h-full w-full text-left">
 			<Slot id="app.sidebar" />
 			<main className="flex min-w-0 flex-1 flex-col bg-neutral-950">
-				<header className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-800 px-4 py-3">
+				<header className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b border-neutral-800 px-4 py-3">
 					<Slot id="app.header.title" />
-					<div className="flex items-center gap-2">
+					<div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
 						<Slot id="app.header.actions" />
 					</div>
 				</header>
@@ -58,7 +58,7 @@ export default function DefaultLayout() {
 /** The header title, registered at `app.header.title`. */
 export function HeaderTitle() {
 	return (
-		<h1 className="min-w-0 truncate text-xs font-medium uppercase tracking-widest text-neutral-300">
+		<h1 className="hidden min-w-0 truncate text-xs font-medium uppercase tracking-widest text-neutral-300 lg:block">
 			<span className="hidden sm:inline">Open Source AI Client</span>
 			<span className="sm:hidden">OSS AI Client</span>
 		</h1>

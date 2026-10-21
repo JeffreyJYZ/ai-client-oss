@@ -1,9 +1,7 @@
 import { useState } from "react";
 import { applyProfile } from "@/state/profiles";
 import { useSettings } from "@/state/settings";
-
-const CONTROL =
-	"max-w-[12rem] truncate rounded-md border border-neutral-700 bg-neutral-900 px-2 py-1 text-xs text-neutral-200 focus:border-neutral-500 focus:outline-none";
+import { CONTROL } from "@/ui/kit";
 
 const NONE = "";
 
