@@ -170,7 +170,7 @@ export const reference: DocReference = {
 				{
 					"name": "Host",
 					"kind": "interface",
-					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; /** * The slot registry, plus the component kit (spec §4). `ui.kit` is the app's * own primitives — buttons, a panel, the foldable `<details>` section, a * field row, the markdown renderer and the shared class strings — so plugin * UI matches a built-in's without copying Tailwind classes. */ readonly ui: HostRegistry<Contribution> & { readonly kit: PluginKit }; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; /** * The theme service (spec §4/§5): register a theme and, unlike a bare * registry, **apply** one. Every plugin's `host.themes` and the app's own * are facades over one core, so a plugin's apply is the built-in's apply — * the same stylesheet and the same `data-theme` marker. */ readonly themes: ThemeService; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, narrowed to this plugin; `Option.none()` on web (spec §7). */ readonly native: Option.Option<NativeHandle>…",
+					"signature": "export interface Host { /** The app and plugin-API versions a plugin is checked against (spec §10). */ readonly version: { readonly app: string; readonly api: string }; /** * The slot registry, plus the component kit (spec §4). `ui.kit` is the app's * own primitives — buttons, a panel, the foldable `<details>` section, a * field row, the markdown renderer and the shared class strings — so plugin * UI matches a built-in's without copying Tailwind classes. */ readonly ui: HostRegistry<Contribution> & { readonly kit: PluginKit }; readonly commands: HostRegistry<RegistryEntry>; readonly settings: SettingsRegistry; readonly tools: ToolRegistry; readonly providers: HostRegistry<RegistryEntry>; readonly presets: PresetRegistry; readonly pipeline: HostRegistry<RegistryEntry>; readonly renderers: RendererRegistry; /** * The theme service (spec §4/§5): register a theme and, unlike a bare * registry, **apply** one. Every plugin's `host.themes` and the app's own * are facades over one core, so a plugin's apply is the built-in's apply — * the same stylesheet and the same `data-theme` marker. */ readonly themes: ThemeService; /** The chat store, read and driven (spec §5). */ readonly chat: ChatService; /** The app's own settings/conversation adapter (spec §5). */ readonly db: Db; /** This plugin's key/value store, persisted into its `data` (spec §5). */ readonly storage: ScopedStorage; /** Toasts, banners, confirms and modals rendered by the host (spec §5). */ readonly notify: NotifyService; /** The desktop bridge, narrowed to this plugin; `Option.none()` on web (spec §7). */ readonly n…",
 					"description": "The surface a plugin is compiled against (spec §2). Every method that adds something returns a `Disposable`, whose removal is attached to that plugin's `Scope` — closing the scope is unload, so a disabled plugin leaves no trace. Two kinds of member live here, deliberately split by signature. The **synchronous registries** (`ui`, `commands`, `settings`, `tools`, `providers`, `pipeline`, `renderers`) register now and read as Effects/Streams; `themes` is the one typed service that both registers and applies. The **services** a plugin calls for behaviour (`chat`, `db`, `storage`, `notify`, `native`, `log`, `on`) are `services.ts`'s surface, populated here per plugin: `chat`/`storage` are bound to this plugin, `db` is the app's own adapter, and `notify`'s queue and `on`'s subscriptions die with the plugin's `Scope`.",
 					"members": [
 						"version",
@@ -179,6 +179,7 @@ export const reference: DocReference = {
 						"settings",
 						"tools",
 						"providers",
+						"presets",
 						"pipeline",
 						"renderers",
 						"themes",
@@ -195,13 +196,14 @@ export const reference: DocReference = {
 				{
 					"name": "HostServicesShape",
 					"kind": "interface",
-					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; /** The app's one theme core; `makeHost` binds it to each plugin. */ readonly themesService: ReturnType<typeof makeThemeService>; }",
+					"signature": "export interface HostServicesShape { readonly version: { readonly app: string; readonly api: string }; readonly ui: Registry<Contribution>; readonly tools: Registry<RegistryEntry>; readonly providers: Registry<RegistryEntry>; readonly presets: Registry<RegistryEntry>; readonly pipeline: Registry<RegistryEntry>; readonly commands: Registry<RegistryEntry>; readonly settings: Registry<RegistryEntry>; readonly themes: Registry<RegistryEntry>; /** The app's one theme core; `makeHost` binds it to each plugin. */ readonly themesService: ReturnType<typeof makeThemeService>; }",
 					"description": "What `HostServices` provides: the versions the host reports, one registry per kind, and the one theme service (spec §3). Registries are created once in `HostLayer`'s construction, so the whole app shares one collection per kind; `themesService` is created there too, for the same reason — one `<style>` element and one `data-theme` marker for the whole app, with `makeHost` handing each plugin a facade over it rather than a service of its own. The service members that carry no per-plugin state (`chat`, `db`, `storage`, `on`, `log`, `native`) are not held here — they live in `services.ts` and are bound per plugin in `makeHost`. Neither `keybindings` nor `renderers` is a registry: a command carries its own keybinding (`commands.ts` is the source of truth), and a renderer is a `ui` contribution resolved through `useComponent`. The app version is host data, not a registry — it is resolved once at boot (`runtime.ts` builds this layer), which is the only place with the async Tauri read in hand, and carried here so `makeHost` can report it without a parameter no later task could fill.",
 					"members": [
 						"version",
 						"ui",
 						"tools",
 						"providers",
+						"presets",
 						"pipeline",
 						"commands",
 						"settings",
@@ -715,6 +717,87 @@ export const reference: DocReference = {
 					"kind": "const",
 					"signature": "export const resolveToolCall = (call: ToolCallData, decision: ToolCallDecision): ResolvedToolCall => …",
 					"description": "Project an `onToolCall` decision onto the call the loop acts on (spec §5). A declined call is still returned — never dropped — so the loop always appends a matching result and the replayed body carries no `tool_call` without one. A rewrite keeps the original `id`/`key` for that correlation.",
+					"members": []
+				},
+				{
+					"name": "presetSchema",
+					"kind": "const",
+					"signature": "export const presetSchema = z.object({ … });",
+					"description": "The wire shape a plugin registers: what `ProviderPreset` carries.",
+					"members": []
+				},
+				{
+					"name": "PresetDefinition",
+					"kind": "type",
+					"signature": "export type PresetDefinition = z.infer<typeof presetSchema>;",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "PresetEntry",
+					"kind": "interface",
+					"signature": "export interface PresetEntry extends RegistryEntry { readonly id: string; readonly label: string; readonly baseUrl: string; readonly protocol: string; readonly tools?: readonly ToolSpec[]; }",
+					"description": "A stored preset: the definition plus the plugin that owns it. `owner` is stamped by the host, never by the registrar's caller.",
+					"members": [
+						"id",
+						"label",
+						"baseUrl",
+						"protocol",
+						"tools"
+					]
+				},
+				{
+					"name": "PresetRegistry",
+					"kind": "interface",
+					"signature": "export interface PresetRegistry { register(preset: PresetDefinition, pluginId?: string): Disposable; readonly entries: () => Effect.Effect<readonly PresetEntry[]>; readonly ownedBy: (owner: string) => Effect.Effect<readonly PresetEntry[]>; readonly changes: Stream.Stream<readonly PresetEntry[]>; }",
+					"description": "",
+					"members": [
+						"register",
+						"entries",
+						"ownedBy",
+						"changes"
+					]
+				},
+				{
+					"name": "makePresetRegistry",
+					"kind": "const",
+					"signature": "export const makePresetRegistry = (registry: HostRegistry<RegistryEntry>, pluginId: string): PresetRegistry => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "registerPreset",
+					"kind": "const",
+					"signature": "export const registerPreset = (host: Host, preset: PresetDefinition, pluginId?: string): Disposable => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "listPresets",
+					"kind": "const",
+					"signature": "export const listPresets = (): Effect.Effect< readonly PresetEntry[], never, HostServices > => …",
+					"description": "Every registered preset, in resolution order.",
+					"members": []
+				},
+				{
+					"name": "getProviderPresetsSnapshot",
+					"kind": "const",
+					"signature": "export const getProviderPresetsSnapshot = (): readonly ProviderPreset[] => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "subscribeProviderPresets",
+					"kind": "const",
+					"signature": "export const subscribeProviderPresets = (listener: () => void): (() => void) => …",
+					"description": "",
+					"members": []
+				},
+				{
+					"name": "installPresetBridge",
+					"kind": "const",
+					"signature": "export const installPresetBridge = (): void => …",
+					"description": "",
 					"members": []
 				},
 				{

@@ -22,6 +22,7 @@ export interface RecordingHostRecords {
 		readonly component: unknown;
 	}>;
 	readonly providers: RegistryEntry[];
+	readonly presets: RegistryEntry[];
 	readonly settingsSections: SettingsSection[];
 	readonly themes: ThemeDefinition[];
 }
@@ -44,6 +45,7 @@ export const createRecordingHost = (): RecordingHost => {
 	const pipeline: RegistryEntry[] = [];
 	const renderers: Array<{ kind: RendererKind; component: unknown }> = [];
 	const providers: RegistryEntry[] = [];
+	const presets: RegistryEntry[] = [];
 	const settingsSections: SettingsSection[] = [];
 	const themes: ThemeDefinition[] = [];
 
@@ -71,6 +73,7 @@ export const createRecordingHost = (): RecordingHost => {
 
 	const commandsRegistry = genericRegistry<RegistryEntry>(commands);
 	const providersRegistry = genericRegistry<RegistryEntry>(providers);
+	const presetsRegistry = genericRegistry<RegistryEntry>(presets);
 	const pipelineRegistry = genericRegistry<RegistryEntry>(pipeline);
 
 	const toolsRegistry = {
@@ -116,6 +119,7 @@ export const createRecordingHost = (): RecordingHost => {
 		settings: settingsRegistry,
 		tools: toolsRegistry as unknown as Host["tools"],
 		providers: providersRegistry,
+		presets: presetsRegistry as unknown as Host["presets"],
 		pipeline: pipelineRegistry,
 		renderers: renderersRegistry as unknown as Host["renderers"],
 		themes: themeService as unknown as Host["themes"],
@@ -152,6 +156,9 @@ export const createRecordingHost = (): RecordingHost => {
 		},
 		get providers() {
 			return providers;
+		},
+		get presets() {
+			return presets;
 		},
 		get settingsSections() {
 			return settingsSections;

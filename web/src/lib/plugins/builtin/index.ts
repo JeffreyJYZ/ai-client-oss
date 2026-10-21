@@ -165,6 +165,17 @@ const gateHost = (host: Host, enabled: ContributionFilter): Host => ({
 	},
 	commands: gateRegistry(host.commands, enabled),
 	providers: gateRegistry(host.providers, enabled),
+	presets: {
+		...host.presets,
+		register: (preset, label) =>
+			enabled(
+				typeof preset === "object" && preset !== null
+					? String((preset as { readonly id?: unknown }).id)
+					: "",
+			)
+				? host.presets.register(preset, label)
+				: skipped,
+	},
 	pipeline: gateRegistry(host.pipeline, enabled),
 	tools: {
 		...host.tools,

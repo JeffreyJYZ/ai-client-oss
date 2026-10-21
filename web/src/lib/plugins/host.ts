@@ -5,6 +5,7 @@ import { type HostEvent, type SlotId, slotIdSchema } from "@lib/plugins/ids";
 import { type PluginKit, pluginKit } from "@lib/plugins/kit";
 import { reportingLogger } from "@lib/plugins/log";
 import { makeNotifyService, type NotifyService } from "@lib/plugins/notify";
+import { makePresetRegistry, type PresetRegistry } from "@lib/plugins/presets";
 import {
 	type Disposable,
 	makeRegistry,
@@ -133,6 +134,7 @@ export interface Host {
 	readonly settings: SettingsRegistry;
 	readonly tools: ToolRegistry;
 	readonly providers: HostRegistry<RegistryEntry>;
+	readonly presets: PresetRegistry;
 	readonly pipeline: HostRegistry<RegistryEntry>;
 	readonly renderers: RendererRegistry;
 	/**
@@ -201,6 +203,7 @@ export interface HostServicesShape {
 	readonly ui: Registry<Contribution>;
 	readonly tools: Registry<RegistryEntry>;
 	readonly providers: Registry<RegistryEntry>;
+	readonly presets: Registry<RegistryEntry>;
 	readonly pipeline: Registry<RegistryEntry>;
 	readonly commands: Registry<RegistryEntry>;
 	readonly settings: Registry<RegistryEntry>;
@@ -350,6 +353,10 @@ export const makeHost = (
 			pluginId,
 		),
 		providers: makeHostRegistry(services.providers, pluginId, scope),
+		presets: makePresetRegistry(
+			makeHostRegistry(services.presets, pluginId, scope),
+			pluginId,
+		),
 		pipeline: makeHostRegistry(services.pipeline, pluginId, scope),
 		renderers: makeRendererRegistry(uiView),
 		// The shared theme core, with `register` bound to this plugin's registry
@@ -416,6 +423,7 @@ export const HostLayer: Layer.Layer<HostServices> = Layer.effect(
 			ui: yield* makeRegistry<Contribution>("ui"),
 			tools: yield* makeRegistry<RegistryEntry>("tools"),
 			providers: yield* makeRegistry<RegistryEntry>("providers"),
+			presets: yield* makeRegistry<RegistryEntry>("presets"),
 			pipeline: yield* makeRegistry<RegistryEntry>("pipeline"),
 			commands: yield* makeRegistry<RegistryEntry>("commands"),
 			settings: yield* makeRegistry<RegistryEntry>("settings"),

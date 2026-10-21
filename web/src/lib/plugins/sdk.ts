@@ -18,6 +18,7 @@ export * from "./kit";
 export * from "./manifest";
 export * from "./notify";
 export * from "./pipeline";
+export * from "./presets";
 export * from "./providers";
 export * from "./renderers";
 export * from "./services";

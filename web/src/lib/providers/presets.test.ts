@@ -3,6 +3,7 @@ import { anthropic } from "@lib/providers/anthropicMessages";
 import { chatcompletions } from "@lib/providers/chatCompletions";
 import {
 	FETCH_URL_NAME,
+	mergeProviderPresets,
 	PROVIDER_PRESETS,
 	requestTools,
 } from "@lib/providers/presets";
@@ -226,5 +227,48 @@ describe("the OpenCode Go preset points at the documented Go endpoint", () => {
 		// the page's GPT/Grok entries are Responses and its Claude/Qwen ones
 		// Messages, which the Protocol dropdown selects over this same base.
 		expect(preset?.protocol).toBe("chatcompletions");
+	});
+});
+
+describe("mergeProviderPresets", () => {
+	const live = [
+		{
+			id: "plugin-preset",
+			label: "Plugin Preset",
+			baseUrl: "https://plugin.example/v1",
+			protocol: "chatcompletions",
+			tools: [],
+		},
+		{
+			id: "openai-chat",
+			label: "Shadow",
+			baseUrl: "https://shadow.example/v1",
+			protocol: "chatcompletions",
+			tools: [],
+		},
+	];
+
+	test("built-ins come first", () => {
+		const merged = mergeProviderPresets(PROVIDER_PRESETS, live);
+		expect(merged[0]?.id).toBe(PROVIDER_PRESETS[0]?.id);
+	});
+
+	test("appends live entries that do not collide", () => {
+		const merged = mergeProviderPresets(PROVIDER_PRESETS, live);
+		expect(merged.map((p) => p.id)).toContain("plugin-preset");
+	});
+
+	test("a built-in wins a collision", () => {
+		const merged = mergeProviderPresets(PROVIDER_PRESETS, live);
+		const found = merged.find((p) => p.id === "openai-chat");
+		expect(found?.baseUrl).toBe(
+			PROVIDER_PRESETS.find((p) => p.id === "openai-chat")?.baseUrl,
+		);
+	});
+
+	test("dedupes by id", () => {
+		const merged = mergeProviderPresets(PROVIDER_PRESETS, live);
+		const count = merged.filter((p) => p.id === "plugin-preset").length;
+		expect(count).toBe(1);
 	});
 });

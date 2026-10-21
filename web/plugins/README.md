@@ -81,6 +81,7 @@ A pasted/installed plugin's source is imported from a `Blob`, which is the **pro
 | `pipeline.register` | a stage: `beforeSend`, `transformBody`, `onChunk`, `afterReply`, `onToolCall`, `onHistory` | `custom-tool/main.ts` (`onToolCall`); `history-pipeline/main.ts` (`beforeSend`, `afterReply`, `onHistory`) |
 | `themes.register` / `apply` / `clear` / `active` | a theme (variables + optional `css`), and apply or clear it through the app's one theme service — the same `<style>` element and `data-theme` marker the built-in uses | `theme-solarized/main.ts` |
 | `providers.register` | a wire protocol (`send`/`buildRequest`/…) | host implementation (`lib/providers/chatCompletions.ts`); no plugin example |
+| `presets.register` | a provider preset (id, label, baseUrl, protocol, optional tools) merged onto the built-in list | no plugin example |
 | `renderers.register` | override `message`/`markdown`/`marker`/`reasoning` | `markdown-callouts/main.tsx` (the `markdown` kind, delegating every other document to `ui.kit.Markdown`) |
 | `chat.snapshot()` | the active conversation (synchronous) | `export-conversation/main.ts`, `zen-view/main.tsx` |
 | `storage.get/set/delete/keys` | your own KV, persisted in `Settings.plugins[].data` | `theme-solarized/main.ts`, `sidebar-notes/main.tsx` |

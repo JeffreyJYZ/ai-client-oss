@@ -191,6 +191,7 @@ describe("makeHost", () => {
 		).toEqual([
 			"commands",
 			"pipeline",
+			"presets",
 			"providers",
 			"settings",
 			"themes",

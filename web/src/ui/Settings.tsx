@@ -12,14 +12,15 @@ import {
 	type ProviderConfig,
 } from "@lib/db";
 import { isDesktop } from "@lib/platform";
+import {
+	getProviderPresetsSnapshot,
+	installPresetBridge,
+	subscribeProviderPresets,
+} from "@lib/plugins/presets";
 import { protocolNames } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
 import { listModels, probeConnection } from "@lib/providers/models";
-import {
-	isLocalEndpoint,
-	PROVIDER_PRESETS,
-	searchKindFor,
-} from "@lib/providers/presets";
+import { isLocalEndpoint, searchKindFor } from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { offerHeadline } from "@lib/updates";
 import { Effect, Option } from "effect";
@@ -31,6 +32,7 @@ import {
 	useEffect,
 	useRef,
 	useState,
+	useSyncExternalStore,
 } from "react";
 import { LATEST_RELEASE_URL } from "@/constants/links";
 import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
@@ -293,6 +295,14 @@ export function ProviderEditor() {
 	const [modelsPending, setModelsPending] = useState(false);
 	const [testPending, setTestPending] = useState(false);
 
+	useEffect(() => {
+		installPresetBridge();
+	}, []);
+	const presets = useSyncExternalStore(
+		subscribeProviderPresets,
+		getProviderPresetsSnapshot,
+	);
+
 	const message = editor?.message ?? null;
 
 	const patchActive = (patch: Partial<Omit<ProviderConfig, "id">>): void => {
@@ -305,7 +315,7 @@ export function ProviderEditor() {
 	const activePreset =
 		active === undefined
 			? CUSTOM_PRESET
-			: (PROVIDER_PRESETS.find(
+			: (presets.find(
 					(preset) =>
 						preset.baseUrl === active.baseUrl &&
 						preset.protocol === active.protocol,
@@ -313,7 +323,7 @@ export function ProviderEditor() {
 
 	const selectPreset = (id: string): void => {
 		if (id === CUSTOM_PRESET || active === undefined) return;
-		const preset = PROVIDER_PRESETS.find((candidate) => candidate.id === id);
+		const preset = presets.find((candidate) => candidate.id === id);
 		if (preset === undefined) return;
 		patchActive({
 			baseUrl: preset.baseUrl,
@@ -401,7 +411,7 @@ export function ProviderEditor() {
 					onChange={(event) => selectPreset(event.target.value)}
 					className={INPUT}
 				>
-					{PROVIDER_PRESETS.map((preset) => (
+					{presets.map((preset) => (
 						<option key={preset.id} value={preset.id}>
 							{preset.label}
 						</option>

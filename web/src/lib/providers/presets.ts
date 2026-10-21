@@ -419,4 +419,30 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 		protocol: "chatcompletions",
 		tools: [],
 	},
+	{
+		id: "orcarouter",
+		label: "OrcaRouter",
+		baseUrl: "https://api.orcarouter.ai/v1",
+		protocol: "chatcompletions",
+		tools: [],
+	},
 ] as const;
+
+/**
+ * Merge plugin-registered presets onto the built-in list: built-ins first, then
+ * live entries, deduped by id (a built-in always wins a collision). Pure: the
+ * input order of `live` is preserved for the entries that survive.
+ */
+export const mergeProviderPresets = (
+	builtins: readonly ProviderPreset[],
+	live: readonly ProviderPreset[],
+): readonly ProviderPreset[] => {
+	const seen = new Set(builtins.map((preset) => preset.id));
+	const out: ProviderPreset[] = [...builtins];
+	for (const preset of live) {
+		if (seen.has(preset.id)) continue;
+		seen.add(preset.id);
+		out.push(preset);
+	}
+	return out;
+};

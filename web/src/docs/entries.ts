@@ -97,6 +97,12 @@ export const surfaceModules: readonly SurfaceModule[] = [
 			"Replacements for the message, markdown, marker and reasoning renderers.",
 	},
 	{
+		path: "src/lib/plugins/presets.ts",
+		label: "Presets",
+		summary:
+			"Provider presets a plugin contributes, merged onto the built-in list.",
+	},
+	{
 		path: "src/lib/plugins/settings.ts",
 		label: "Settings sections",
 		summary: "Plugin-contributed sections on the Settings page.",
