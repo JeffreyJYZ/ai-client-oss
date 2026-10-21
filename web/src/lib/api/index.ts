@@ -1,6 +1,7 @@
 import { PluginFault } from "@lib/plugins/errors";
 import type { HostServices } from "@lib/plugins/host";
 import { type AnyProvider, requireProvider } from "@lib/plugins/providers";
+import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import type { Chunk, SendCtx } from "@lib/providers/types";
 import { Cause, Effect, Stream } from "effect";
 
@@ -31,9 +32,24 @@ import { Cause, Effect, Stream } from "effect";
  * and pipeline seams already carry.
  */
 
-/** The one sentence a faulted protocol is reported with. */
-const faultSentence = (protocol: string, cause: Cause.Cause<unknown>): string =>
-	`the protocol "${protocol}" faulted: ${Cause.pretty(cause)}`;
+/**
+ * The one sentence a faulted protocol is reported with.
+ *
+ * A cause that already carries a user-facing sentence is reported as **that
+ * sentence**, never wrapped: a browser's cross-origin refusal reaches this seam
+ * as a defect, and `the protocol "chatcompletions" faulted:` in front of it
+ * reads as a plugin bug in a protocol nobody wrote (user-reported 2026-10-21).
+ * The plugin attribution stays in the logged `PluginFault`.
+ */
+const faultSentence = (
+	protocol: string,
+	cause: Cause.Cause<unknown>,
+): string => {
+	const pretty = Cause.pretty(cause);
+	return pretty.includes(PREFLIGHT_REFUSAL)
+		? PREFLIGHT_REFUSAL
+		: `the protocol "${protocol}" faulted: ${pretty}`;
+};
 
 /** Log a `PluginFault` naming the protocol and its plugin, then fail with the sentence. */
 const faultAndFail = (
