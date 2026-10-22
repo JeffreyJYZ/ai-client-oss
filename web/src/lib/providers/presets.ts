@@ -6,6 +6,7 @@ import type {
 	SendCtx,
 	ToolSpec,
 } from "@lib/providers/types";
+import { SITE_URL } from "@/constants/links";
 
 export interface ProviderPreset {
 	readonly id: string;
@@ -115,6 +116,41 @@ export const sessionHeadersFor = (
 	conversationId: string,
 ): Record<string, string> =>
 	isOpencodeHost(baseUrl) ? { "x-opencode-session": conversationId } : {};
+
+/**
+ * True for an OpenRouter host. One read, so the attribution rule and the search
+ * rule cannot disagree about which endpoint they are talking about.
+ */
+export const isOpenRouterHost = (baseUrl: string): boolean =>
+	baseUrl.toLowerCase().includes("openrouter.ai");
+
+/** The app's display name in OpenRouter's rankings. */
+export const OPENROUTER_APP_TITLE = "Open Source AI Client";
+
+/** Up to two recognized marketplace categories (`general-chat`, `programming-app`). */
+export const OPENROUTER_APP_CATEGORIES = "general-chat,programming-app";
+
+/**
+ * OpenRouter's app-attribution headers, and only for an OpenRouter endpoint.
+ *
+ * `HTTP-Referer` is the identifier that creates the app page and puts its usage
+ * in the public rankings; a title alone creates nothing. The other two are the
+ * display name and up to two categories, unrecognized ones being dropped
+ * without an error (https://openrouter.ai/docs/app-attribution).
+ *
+ * The public site is the referer rather than the page's own origin: a desktop
+ * webview's origin is `tauri://localhost`, which names no app.
+ */
+export const attributionHeadersFor = (
+	baseUrl: string,
+): Record<string, string> =>
+	isOpenRouterHost(baseUrl)
+		? {
+				"HTTP-Referer": SITE_URL,
+				"X-OpenRouter-Title": OPENROUTER_APP_TITLE,
+				"X-OpenRouter-Categories": OPENROUTER_APP_CATEGORIES,
+			}
+		: {};
 
 /**
  * True for a host whose chat endpoint refuses a browser's CORS preflight: its

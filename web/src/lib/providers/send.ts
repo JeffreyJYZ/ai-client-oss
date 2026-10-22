@@ -1,4 +1,7 @@
-import { sessionHeadersFor } from "@lib/providers/presets";
+import {
+	attributionHeadersFor,
+	sessionHeadersFor,
+} from "@lib/providers/presets";
 import { chatTransport } from "@lib/providers/transport";
 import type { Chunk } from "@lib/providers/types";
 import { Effect, Stream } from "effect";
@@ -464,20 +467,22 @@ export const bearerHeaders = (
 };
 
 /**
- * The assembled request headers: the endpoint's own set plus, for an OpenCode
- * host, that endpoint's session header (see `sessionHeadersFor`) — keyed on the
- * request URL, so it reaches exactly the hosts that need it and never another
- * endpoint. One place, so the desktop and web transports are sent identical
- * headers.
+ * The assembled request headers: the endpoint's own set plus, keyed on the
+ * request URL so it reaches exactly the hosts that need it, that endpoint's
+ * session header (see `sessionHeadersFor`) and OpenRouter's app-attribution
+ * headers (see `attributionHeadersFor`). One place, so the desktop and web
+ * transports are sent identical headers.
  */
 export const chatHeaders = (
 	url: string,
 	headers: Record<string, string>,
 	conversationId: string | undefined,
-): Record<string, string> =>
-	conversationId === undefined
-		? headers
-		: { ...headers, ...sessionHeadersFor(url, conversationId) };
+): Record<string, string> => {
+	const attributed = { ...headers, ...attributionHeadersFor(url) };
+	return conversationId === undefined
+		? attributed
+		: { ...attributed, ...sessionHeadersFor(url, conversationId) };
+};
 
 /**
  * Send one turn's request and return its stream of chunks.

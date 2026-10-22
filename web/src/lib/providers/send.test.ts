@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import { chatHeaders, sendStream } from "@lib/providers/send";
 import { Cause, Effect, Exit, Option, Stream } from "effect";
+import { SITE_URL } from "@/constants/links";
 
 /**
  * The outgoing request's headers and the parsing of what comes back. The claim
@@ -68,7 +69,6 @@ describe("the OpenCode session header", () => {
 
 	test("is never sent to another host", () => {
 		for (const baseUrl of [
-			"https://openrouter.ai/api/v1",
 			"https://api.openai.com/v1",
 			"https://api.anthropic.com/v1",
 			"https://api.commandcode.ai/provider/v1",
@@ -112,6 +112,51 @@ describe("the OpenCode session header", () => {
 		// The Settings connection probe builds its own request and has no
 		// conversation; nothing may be invented for it.
 		expect(chatHeaders(OPENCODE_URL, {}, undefined)).toEqual({});
+	});
+});
+
+describe("OpenRouter app attribution", () => {
+	const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+
+	test("names the app on an openrouter.ai request, with or without a conversation", () => {
+		const expected = {
+			"HTTP-Referer": SITE_URL,
+			"X-OpenRouter-Title": "Open Source AI Client",
+			"X-OpenRouter-Categories": "general-chat,programming-app",
+		};
+		expect(chatHeaders(OPENROUTER_URL, {}, undefined)).toEqual(expected);
+		expect(chatHeaders(OPENROUTER_URL, {}, "conv-abc-1")).toEqual(expected);
+	});
+
+	test("is never sent to another host", () => {
+		for (const baseUrl of [
+			"https://api.openai.com/v1",
+			"https://api.anthropic.com/v1",
+			"https://opencode.ai/inference/go/v1",
+			"http://localhost:11434/v1",
+		]) {
+			const sent = chatHeaders(`${baseUrl}/chat/completions`, {}, undefined);
+			expect(Object.keys(sent), baseUrl).toEqual([]);
+		}
+	});
+
+	test("reaches the wire on a send, through the assembled headers", async () => {
+		stubFetch(
+			() =>
+				new Response(
+					'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n',
+					{ status: 200, headers: { "content-type": "text/event-stream" } },
+				),
+		);
+
+		const stream = await Effect.runPromise(
+			sendStream(OPENROUTER_URL, { model: "openai/gpt-5.2" }, {}, "conv-abc-1"),
+		);
+		await Effect.runPromise(Stream.runCollect(stream));
+
+		const sent = headersOf(calls[0]);
+		expect(sent["HTTP-Referer"]).toBe(SITE_URL);
+		expect(sent["X-OpenRouter-Title"]).toBe("Open Source AI Client");
 	});
 });
 

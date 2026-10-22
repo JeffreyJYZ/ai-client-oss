@@ -1,5 +1,6 @@
 import type { HostServices } from "@lib/plugins/host";
 import { requireProvider } from "@lib/plugins/providers";
+import { attributionHeadersFor } from "@lib/providers/presets";
 import { chatHeaders } from "@lib/providers/send";
 import { type ChatTransport, chatTransport } from "@lib/providers/transport";
 import type { SendCtx } from "@lib/providers/types";
@@ -128,6 +129,7 @@ export const listModels = (
 			"build its request headers",
 			(): Record<string, string> => ({
 				accept: "application/json",
+				...attributionHeadersFor(baseUrl),
 				...provider.headers(apiKey),
 			}),
 		);

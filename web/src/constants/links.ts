@@ -1,3 +1,6 @@
+/** The project's public site — the web build, and the app's public identity. */
+export const SITE_URL = "https://aiclient.jyz.land";
+
 /** GitHub repository that publishes the desktop builds. */
 export const GITHUB_REPOSITORY = "JeffreyJYZ/ai-client-oss";
 /** All releases. */
