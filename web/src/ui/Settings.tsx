@@ -50,6 +50,7 @@ import {
 } from "@/state/settings";
 import { checkForUpdates, installNow, useUpdates } from "@/state/updates";
 import ConfirmButton from "@/ui/ConfirmButton";
+import ExternalLink from "@/ui/ExternalLink";
 import {
 	BUTTON,
 	INPUT,
@@ -798,14 +799,12 @@ export function WebSearchSection() {
 				within a daily allowance. The client-side web_search tool is declared
 				where the endpoint has no search of its own, and fetch_url reads through
 				TinyFish first. Get a key at{" "}
-				<a
+				<ExternalLink
 					href={TINYFISH_API_KEYS_URL}
-					target="_blank"
-					rel="noreferrer noopener"
 					className="text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
 				>
 					agent.tinyfish.ai/api-keys
-				</a>
+				</ExternalLink>
 				.
 			</p>
 		</Section>
@@ -1164,14 +1163,12 @@ export function UpdatesSection() {
 							Update now
 						</button>
 					) : (
-						<a
+						<ExternalLink
 							href={LATEST_RELEASE_URL}
-							target="_blank"
-							rel="noreferrer noopener"
 							className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
 						>
 							Open the release page
-						</a>
+						</ExternalLink>
 					)}
 					{updates.phase === "downloading" ? (
 						<p className="text-xs text-neutral-500">
@@ -1188,14 +1185,12 @@ export function UpdatesSection() {
 						{updates.message ?? "Update check failed."}
 					</span>
 					<div className="flex items-center gap-3">
-						<a
+						<ExternalLink
 							href={LATEST_RELEASE_URL}
-							target="_blank"
-							rel="noreferrer noopener"
 							className="text-xs text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
 						>
 							Open the release page
-						</a>
+						</ExternalLink>
 						<button type="button" onClick={checkForUpdates} className={BUTTON}>
 							Retry
 						</button>

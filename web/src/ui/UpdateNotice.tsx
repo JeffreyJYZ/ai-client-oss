@@ -9,6 +9,7 @@ import {
 	releaseOffer,
 	useUpdates,
 } from "@/state/updates";
+import ExternalLink from "@/ui/ExternalLink";
 
 /**
  * Dismissible "new release available" strip. Desktop only — the
@@ -53,14 +54,12 @@ export default function UpdateNotice() {
 		<div className="flex shrink-0 items-start gap-3 border-b border-neutral-800 bg-neutral-900/60 px-4 py-1.5 text-[11px] break-words text-neutral-400">
 			<p className="min-w-0 flex-1">
 				Version{" "}
-				<a
+				<ExternalLink
 					href={LATEST_RELEASE_URL}
-					target="_blank"
-					rel="noreferrer noopener"
 					className="text-neutral-300 underline underline-offset-2 hover:text-neutral-100"
 				>
 					{offer.version}
-				</a>{" "}
+				</ExternalLink>{" "}
 				{offerClause(offer)}
 				{phase === "failed" && message !== null
 					? ` Updating failed (${message}) — install it from the release page instead.`
