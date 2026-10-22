@@ -6,6 +6,10 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime};
 use tauri::{Emitter, Manager};
 
+/// The loopback surface the website shares settings and chat with. See
+/// `companion.rs` for its guards.
+mod companion;
+
 /// Settings live at the root of the app data dir; one file per conversation.
 const SETTINGS_FILE: &str = "settings.json";
 const CONVERSATIONS_DIR: &str = "conversations";
@@ -1646,6 +1650,8 @@ pub fn run() {
             plugin_fs_write,
             plugin_fs_list,
             plugin_fs_delete,
+            companion::companion_info,
+            companion::companion_rotate,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
@@ -1659,6 +1665,10 @@ pub fn run() {
             // living in the shell. Managed, so dropping the app drops it and the
             // polling thread stops at its next tick.
             app.manage(PluginWatcher::start(app.handle().clone()));
+            // The website's loopback surface. Started here so the token exists
+            // before any page can ask; a bind failure only logs, because the
+            // site must still work browser-local.
+            companion::start(app.handle().clone());
             Ok(())
         })
         .run(tauri::generate_context!())

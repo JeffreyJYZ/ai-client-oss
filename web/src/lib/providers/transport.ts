@@ -1,3 +1,8 @@
+import {
+	COMPANION_ORIGIN,
+	COMPANION_UNAUTHORIZED,
+	readStoredToken,
+} from "@lib/companion";
 import { isDesktop } from "@lib/platform";
 import { fetchDescribed } from "@lib/providers/models";
 import {
@@ -111,18 +116,20 @@ export type ChatTransport = (
  * described detail is replaced with a sentence a user can act on; every other
  * endpoint keeps the description it always had.
  */
-export const webTransport: ChatTransport = (url, headers, body) =>
+/**
+ * Turn one upstream `Response` into the two things the caller needs of it: the
+ * status, and the body. `text` is the whole body (the non-2xx detail);
+ * `chunks` is the body as it arrives (the SSE lines). Only one of the two is
+ * ever consumed — a non-2xx has no stream to parse — so one request feeds one
+ * body reader.
+ *
+ * Shared by the web and the companion paths: the companion relays the upstream
+ * bytes verbatim, so the page must shape them the same way it always has.
+ */
+const shapeChatResponse = (
+	response: Response,
+): Effect.Effect<ChatResponse, string> =>
 	Effect.gen(function* () {
-		const response = yield* fetchDescribed(() =>
-			fetch(url, { method: "POST", headers, body }),
-		).pipe(
-			// A host known to refuse the preflight gets a sentence a user can act
-			// on; every other endpoint keeps the description it always had.
-			Effect.mapError((detail) =>
-				refusesBrowserPreflight(url) ? PREFLIGHT_REFUSAL : detail,
-			),
-		);
-
 		const raw = response.body;
 		// The previous code refused an ok response with no body outright, rather
 		// than handing the parser an empty stream.
@@ -148,6 +155,60 @@ export const webTransport: ChatTransport = (url, headers, body) =>
 			cancel: Effect.void,
 		};
 	});
+
+export const webTransport: ChatTransport = (url, headers, body) =>
+	Effect.gen(function* () {
+		const response = yield* fetchDescribed(() =>
+			fetch(url, { method: "POST", headers, body }),
+		).pipe(
+			// A host known to refuse the preflight gets a sentence a user can act
+			// on; every other endpoint keeps the description it always had.
+			Effect.mapError((detail) =>
+				refusesBrowserPreflight(url) ? PREFLIGHT_REFUSAL : detail,
+			),
+		);
+
+		return yield* shapeChatResponse(response);
+	});
+
+/**
+ * The companion path: the request rides the desktop app's shell, which forwards
+ * it to the provider host. The page sends the envelope (URL, headers, body) and
+ * the companion streams the upstream reply back, which the page shapes the same
+ * way it always has.
+ *
+ * A `401` from the companion's own token check (an empty body) gets a readable
+ * sentence; a `401` that carries a provider's body keeps that body as the
+ * detail.
+ */
+export const companionTransport =
+	(origin: string, token: string): ChatTransport =>
+	(url, headers, body) =>
+		Effect.gen(function* () {
+			const response = yield* fetchDescribed(() =>
+				fetch(`${origin}/v1/chat`, {
+					method: "POST",
+					headers: {
+						"content-type": "application/json",
+						authorization: `Bearer ${token}`,
+					},
+					body: JSON.stringify({ url, headers, body }),
+				}),
+			);
+
+			if (response.status === 401) {
+				const detail = yield* Effect.tryPromise({
+					try: () => response.text(),
+					catch: () => "",
+				});
+				if (detail.trim() === "") {
+					return yield* Effect.fail(COMPANION_UNAUTHORIZED);
+				}
+				return yield* Effect.fail(`HTTP 401: ${detail}`);
+			}
+
+			return yield* shapeChatResponse(response);
+		});
 
 /**
  * Abort the shell's request. A failed abort is not the caller's problem — the
@@ -245,13 +306,30 @@ export const nativeTransportWith =
 /** The desktop transport, over the real shell commands. */
 export const nativeTransport: ChatTransport = nativeTransportWith(tauriChatIpc);
 
-/** The transport a build uses, from the platform it runs on. */
-export const chooseTransport = (desktop: boolean): ChatTransport =>
-	desktop ? nativeTransport : webTransport;
+/**
+ * Pick the transport for one call. The choice is made per call: on the desktop
+ * the shell is always used; in a browser a stored pairing token routes through
+ * the companion, and an unpaired page keeps the app's own fetch (byte-identical
+ * to before). `chooseTransport` is kept as the pure rule the test asserts.
+ */
+export const chooseTransport = (
+	desktop: boolean,
+	token: string | null = null,
+): ChatTransport =>
+	desktop
+		? nativeTransport
+		: token === null || token === ""
+			? webTransport
+			: companionTransport(COMPANION_ORIGIN, token);
 
 /**
  * The transport this build uses. `isDesktop` is a module-level read of
- * `__TAURI_INTERNALS__`, so the choice is fixed for the session; this is
- * {@link chooseTransport} applied to it, so a test asserts the same rule.
+ * `__TAURI_INTERNALS__`, so the desktop choice is fixed for the session; the
+ * pairing token is read on every call, so pairing takes effect without a
+ * reload.
  */
-export const chatTransport: ChatTransport = chooseTransport(isDesktop);
+export const chatTransport: ChatTransport = (url, headers, body) =>
+	Effect.gen(function* () {
+		const token = isDesktop ? null : yield* readStoredToken();
+		return yield* chooseTransport(isDesktop, token)(url, headers, body);
+	});

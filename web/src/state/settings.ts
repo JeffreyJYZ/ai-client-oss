@@ -107,6 +107,23 @@ Effect.runFork(
 export const useSettings = (): Settings =>
 	useSyncExternalStore(subscribe, getSettings);
 
+/**
+ * Re-read the settings from the store. Used when the source of truth changes
+ * (for example, after pairing with the local companion): the in-memory snapshot
+ * is replaced with whatever the store now returns, so the UI picks up the
+ * daemon's settings without a full reload.
+ */
+export const hydrate = (): void => {
+	Effect.runFork(
+		Effect.flatMap(db.getSettings(), (settings) =>
+			Effect.sync(() => {
+				current = settings;
+				notify();
+			}),
+		),
+	);
+};
+
 /** The provider the active pointer resolves to, or `undefined` if it dangles. */
 export const getActiveProvider = (): ProviderConfig | undefined =>
 	current.providers.find(

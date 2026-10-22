@@ -1233,6 +1233,7 @@ describe("the manager rides the locked core", () => {
 			"settings.section.variants",
 			"settings.section.memory",
 			"settings.section.titler",
+			"settings.section.companion",
 			"settings.section.backup",
 			"settings.section.updates",
 			"settings.section.plugins",

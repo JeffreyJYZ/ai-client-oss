@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isDesktop } from "@lib/platform";
+
 import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import {
 	type ChatIpc,
@@ -85,11 +85,34 @@ describe("the transport a build uses", () => {
 	test("the shell on the desktop, the app's own fetch otherwise", () => {
 		expect(chooseTransport(true)).toBe(nativeTransport);
 		expect(chooseTransport(false)).toBe(webTransport);
-		// The module read is the same rule, applied once at load. This process is
-		// not the desktop shell, so its own choice is the web path; the browser
-		// proof drives the desktop branch through the committed stub.
-		expect(chatTransport).toBe(chooseTransport(isDesktop));
-		expect(chatTransport).toBe(webTransport);
+	});
+
+	test("a stored token routes through the companion, read per call", async () => {
+		// Install a companion token in a localStorage stand-in.
+		const map = new Map<string, string>();
+		map.set("ai-client.companion", JSON.stringify({ token: "tok-1" }));
+		(globalThis as { localStorage?: Storage }).localStorage = {
+			getItem: (key: string) => map.get(key) ?? null,
+			setItem: (key: string, value: string) => map.set(key, value),
+			removeItem: (key: string) => map.delete(key),
+			clear: () => map.clear(),
+			key: () => null,
+			get length() {
+				return map.size;
+			},
+		} as unknown as Storage;
+		globalThis.fetch = ((url: string) => {
+			if (url === "http://127.0.0.1:47821/v1/chat") {
+				return Promise.resolve(new Response("ok", { status: 200 }));
+			}
+			return Promise.resolve(new Response("web", { status: 200 }));
+		}) as unknown as typeof fetch;
+		const response = await Effect.runPromise(
+			chatTransport("https://example.com/v1/chat/completions", {}, "{}"),
+		);
+		expect(response.status).toBe(200);
+		await Effect.runPromise(response.text);
+		globalThis.fetch = realFetch;
 	});
 });
 

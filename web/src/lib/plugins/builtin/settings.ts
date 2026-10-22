@@ -1,5 +1,6 @@
 import type { Host } from "@lib/plugins/host";
 import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
+import { CompanionSection } from "@/ui/CompanionSection";
 import { ConversationList, NewChatButton } from "@/ui/ConversationList";
 import {
 	BackupSection,
@@ -25,9 +26,9 @@ import { VariantsSection } from "@/ui/variants/VariantsSection";
  * a plugin) must be able to slot itself between two built-ins, not only after
  * all of them. `settings.nav` carries no built-in — it is a seam for plugins.
  *
- * The nine `settings.sections` entries, in render order: the page's warning
+ * The built-in `settings.sections` entries, in render order: the page's warning
  * banners, Providers, the provider editor, Profiles, the profile editor, Web
- * search, Variants, Backup, Updates. Two sections that render into that same
+ * search, Variants, Local companion, Backup, Updates. Two sections that render into that same
  * list do **not** live here, and neither does the surface itself — all three by
  * design rather than oversight:
  *
@@ -89,10 +90,16 @@ export const registerSettingsBuiltins = (host: Host): void => {
 		order: 65,
 	});
 	host.ui.register({
+		id: SETTINGS_SECTIONS.companion.id,
+		slot: "settings.sections",
+		component: CompanionSection,
+		order: 80,
+	});
+	host.ui.register({
 		id: SETTINGS_SECTIONS.backup.id,
 		slot: "settings.sections",
 		component: BackupSection,
-		order: 80,
+		order: 82,
 	});
 	host.ui.register({
 		id: SETTINGS_SECTIONS.updates.id,

@@ -108,6 +108,7 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 		"settings.section.profile-editor",
 		"settings.section.web-search",
 		"settings.section.variants",
+		"settings.section.companion",
 		"settings.section.backup",
 		"settings.section.updates",
 		"app.sidebar.chats",

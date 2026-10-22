@@ -1,3 +1,4 @@
+import { companionDb } from "@lib/db/companion";
 import { setPreMigrationCapture } from "@lib/db/read";
 import { tauri } from "@lib/db/tauri";
 import type { Db } from "@lib/db/types";
@@ -9,7 +10,7 @@ export { tauri } from "@lib/db/tauri";
 export * from "@lib/db/types";
 export { SETTINGS_KEY, web } from "@lib/db/web";
 
-export const db: Db = isDesktop ? tauri : web;
+export const db: Db = isDesktop ? tauri : companionDb(web);
 
 /**
  * Raw text of the last pre-migration settings blob, or `null` when no

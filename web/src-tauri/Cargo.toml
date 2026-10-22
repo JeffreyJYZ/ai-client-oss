@@ -35,3 +35,17 @@ reqwest = { version = "0.13", default-features = false, features = ["rustls-no-p
 # Process-wide crypto provider for that no-provider reqwest build; the
 # ring crates are already in the tree via tauri-plugin-updater.
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
+# The local companion's loopback HTTP surface (`companion.rs`): the website
+# shares settings and chat through it. axum is the router; tokio's runtime is
+# already inside Tauri, so only `net`/`rt` are asked for.
+axum = "0.8"
+tokio = { version = "1", features = ["net", "rt"] }
+# Relays an upstream body chunk-by-chunk as an axum `Body`.
+futures-util = "0.3"
+# The companion token's randomness. Same version rustls already locks, declared
+# directly because `use ring::…` needs a direct dependency.
+ring = "0.17"
+
+[dev-dependencies]
+# `#[tokio::test]` for the companion's router round-trip.
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

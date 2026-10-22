@@ -70,6 +70,12 @@ export const SETTINGS_SECTIONS = {
 			"free model",
 		],
 	},
+	companion: {
+		id: "settings.section.companion",
+		title: "Local companion",
+		anchorId: "settings-section-companion",
+		keywords: ["companion", "pair", "token", "local", "loopback", "desktop"],
+	},
 	backup: {
 		id: "settings.section.backup",
 		title: "Backup",
