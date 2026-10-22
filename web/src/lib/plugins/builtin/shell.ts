@@ -3,6 +3,7 @@ import ProfilePicker from "@/ui/ProfilePicker";
 import ProviderPicker from "@/ui/ProviderPicker";
 import SystemPrompt from "@/ui/SystemPrompt";
 import DefaultLayout, {
+	DocsLink,
 	DownloadLink,
 	HeaderTitle,
 	InstallNote,
@@ -20,7 +21,7 @@ import UpdateNotice from "@/ui/UpdateNotice";
  * order and a later task (or a plugin) must be able to slot itself in between
  * two built-ins rather than only after all of them.
  *
- * App.tsx's header row becomes `app.header.actions` with its five children
+ * App.tsx's header row becomes `app.header.actions` with its six children
  * registered here one by one, so a plugin can reorder, hide, or replace any
  * single control; the row's own container stays in the layout, which is why
  * the built-ins do not carry it.
@@ -66,6 +67,12 @@ export const registerShellBuiltins = (host: Host): void => {
 		slot: "app.header.actions",
 		component: DownloadLink,
 		order: 40,
+	});
+	host.ui.register({
+		id: "shell.header.docs",
+		slot: "app.header.actions",
+		component: DocsLink,
+		order: 45,
 	});
 	host.ui.register({
 		id: "shell.header.settings-toggle",

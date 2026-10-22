@@ -58,6 +58,7 @@ export const BUILTIN_CONTRIBUTIONS: Readonly<
 		"shell.header.profile-picker",
 		"shell.header.provider-picker",
 		"shell.header.download",
+		"shell.header.docs",
 		"shell.header.settings-toggle",
 		"shell.notices.install-note",
 		"shell.notices.update",

@@ -61,6 +61,7 @@
 	// overrides the scripted SSE body.
 	window.__t25ChatStreams = [];
 	window.__t25Cancels = [];
+	window.__openExternal = [];
 	window.__TAURI_INTERNALS__ = {
 		invoke: (cmd, args) => {
 			if (cmd === "plugin:app|version") return Promise.resolve("0.2.3");
@@ -149,6 +150,12 @@
 			}
 			if (cmd === "chat_stream_cancel") {
 				window.__t25Cancels.push(args.requestId);
+				return Promise.resolve(null);
+			}
+			// The shell's browser opener: recorded, because launching a real
+			// browser would leave the proof with nothing to assert.
+			if (cmd === "open_external") {
+				window.__openExternal.push(args.url);
 				return Promise.resolve(null);
 			}
 			return Promise.reject(

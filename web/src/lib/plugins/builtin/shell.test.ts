@@ -57,6 +57,7 @@ describe("registerShellBuiltins", () => {
 			"shell.header.profile-picker",
 			"shell.header.provider-picker",
 			"shell.header.download",
+			"shell.header.docs",
 			"shell.header.settings-toggle",
 		]);
 		expect(idsFor(services, "app.notices")).toEqual([
@@ -83,7 +84,7 @@ describe("registerShellBuiltins", () => {
 		const services = registries();
 		const scope = Effect.runSync(Scope.make());
 		registerShellBuiltins(makeHost(services, "app.builtin", scope));
-		expect(idsFor(services, "app.header.actions")).toHaveLength(5);
+		expect(idsFor(services, "app.header.actions")).toHaveLength(6);
 
 		Effect.runSync(Scope.close(scope, Exit.void));
 		expect(Effect.runSync(services.ui.entries())).toEqual([]);

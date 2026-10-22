@@ -673,6 +673,33 @@ async fn fetch_url(url: String) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&body).into_owned())
 }
 
+/// Open one http(s) URL in the user's default browser.
+///
+/// A webview cannot do this itself: Tauri v2 does not hand an external
+/// `target="_blank"` navigation to the OS, so without this the app's own
+/// in-window links (the docs site, the release page) do nothing on the desktop.
+/// The URL is one argv entry and never goes through a shell, so no part of it
+/// can be read as a command, and its scheme goes through the same guard the
+/// fetch commands use.
+#[tauri::command]
+fn open_external(url: String) -> Result<(), String> {
+    http_url("open_external", &url)?;
+    let (program, args): (&str, &[&str]) = if cfg!(target_os = "macos") {
+        ("open", &[url.as_str()])
+    } else if cfg!(target_os = "windows") {
+        // `rundll32` takes the URL as its own argument, so there is no shell
+        // and none of its quoting rules.
+        ("rundll32", &["url.dll,FileProtocolHandler", url.as_str()])
+    } else {
+        ("xdg-open", &[url.as_str()])
+    };
+    std::process::Command::new(program)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("open_external: failed to launch {program}: {e}"))
+}
+
 /// Forward one HTTP request to a third-party API, bypassing the
 /// browser's CORS limit the way [`fetch_url`] bypasses it for pages.
 /// The caller's headers ride along verbatim — the API authenticates
@@ -1607,6 +1634,7 @@ pub fn run() {
             db_delete_conversation,
             fetch_url,
             http_request,
+            open_external,
             chat_stream,
             chat_stream_cancel,
             plugin_list,

@@ -1,5 +1,6 @@
+import { openExternal } from "@lib/external";
 import { isDesktop, isMacOS } from "@lib/platform";
-import { LATEST_RELEASE_URL } from "@/constants/links";
+import { DOCS_URL, LATEST_RELEASE_URL } from "@/constants/links";
 import { setSettings, useSettings } from "@/state/settings";
 import { setView, useUIState } from "@/state/ui";
 import Slot from "@/ui/slots/Slot";
@@ -78,6 +79,27 @@ export function DownloadLink() {
 		>
 			<span className="hidden sm:inline">Download desktop app</span>
 			<span className="sm:hidden">Download</span>
+		</a>
+	);
+}
+
+/** The documentation site's link, registered at `app.header.actions`. */
+export function DocsLink() {
+	return (
+		<a
+			href={DOCS_URL}
+			target="_blank"
+			rel="noreferrer noopener"
+			title="Plugin author guide and reference"
+			onClick={(event) => {
+				// Both builds go through the helper: a webview cannot hand an
+				// external link to the OS, and the browser build is already one.
+				event.preventDefault();
+				openExternal(DOCS_URL);
+			}}
+			className="shrink-0 rounded-md border border-neutral-700 px-3 py-1 text-xs text-neutral-300 hover:bg-neutral-800"
+		>
+			Docs
 		</a>
 	);
 }
