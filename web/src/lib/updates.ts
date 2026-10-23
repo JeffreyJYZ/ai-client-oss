@@ -19,8 +19,13 @@ import { GITHUB_REPOSITORY } from "@/constants/links";
  * Transport failures, rate limits, non-2xx responses and payloads
  * without a `tag_name` all land in the typed error channel, so
  * callers can treat the check as optional.
+ *
+ * A `403` here is the API's unauthenticated budget (60/hour per IP), not a
+ * missing release — measured 2026-10-23, where the app reported
+ * `release check failed (403)` while the release was live. The API is the
+ * richer source, so it stays first; the CDN manifest is the fallback.
  */
-export const latestVersion = (): Effect.Effect<string, string> =>
+const apiVersion = (): Effect.Effect<string, string> =>
 	Effect.gen(function* () {
 		// `fetch` rejects only on transport failure; `tryPromise` maps
 		// the rejection into the error channel.
@@ -49,6 +54,40 @@ export const latestVersion = (): Effect.Effect<string, string> =>
 			? tag.slice(RELEASE_TAG_PREFIX.length)
 			: tag;
 	});
+
+/**
+ * The same version read from the release manifest — the file the in-app
+ * updater already consumes, served by the CDN with no API call and no rate
+ * limit. Its `version` is the release's own, so it is the natural fallback
+ * when the API refuses the read.
+ */
+const manifestVersion = (): Effect.Effect<string, string> =>
+	Effect.gen(function* () {
+		const response = yield* Effect.tryPromise({
+			try: (signal) =>
+				fetch(
+					`https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/latest.json`,
+					{ headers: { accept: "application/json" }, signal },
+				),
+			catch: () => "release check failed",
+		});
+		if (!response.ok) {
+			return yield* Effect.fail(`release check failed (${response.status})`);
+		}
+		const payload = yield* Effect.tryPromise({
+			try: () => response.json() as Promise<{ version?: string }>,
+			catch: () => "release payload unreadable",
+		});
+		const version = payload.version;
+		if (typeof version !== "string" || version.trim() === "") {
+			return yield* Effect.fail("release manifest has no version");
+		}
+		return version.trim();
+	});
+
+/** The newest release's version: the API first, the CDN manifest if it refuses. */
+export const latestVersion = (): Effect.Effect<string, string> =>
+	apiVersion().pipe(Effect.catch(() => manifestVersion()));
 
 /**
  * The release notes of one release: the body of the GitHub release whose tag

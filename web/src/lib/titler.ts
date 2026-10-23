@@ -1,6 +1,6 @@
 import type { ProviderConfig, Settings } from "@lib/db/types";
 import type { ProviderEntry } from "@lib/plugins/providers";
-import { isOpencodeHost } from "@lib/providers/presets";
+import { isLocalEndpoint, isOpencodeHost } from "@lib/providers/presets";
 import { Effect, Stream } from "effect";
 
 /**
@@ -64,22 +64,29 @@ const freeModelFor = (provider: ProviderConfig): string | undefined =>
 /**
  * Which provider and model the titler should use, or `undefined` for "stay
  * off". Pure, so the rule is testable without a runtime, and total: every case
- * ends in a free id or in nothing.
+ * ends in a model or in nothing.
  *
- * Order (the spec's, exactly): an explicit `Settings.titler` override wins;
- * then an **OpenCode** provider that has a key **and is on a platform that can
- * call it** — its chat endpoint refuses a browser's CORS preflight, so on web
- * this lane is unreachable and skipping it is what keeps the titler honest
- * instead of surfacing `TypeError: Load failed`; then an **OpenRouter**
- * provider with a key; else off. Each lane's free id is read from **that
- * provider's own cached list** ({@link freeModelFor}), so a lane whose list is
- * empty or has no free entry degrades to the next lane rather than to a paid
- * call.
+ * Order (the spec's, plus the last-resort lane): an explicit `Settings.titler`
+ * override wins; then an **OpenCode** provider that has a key **and is on a
+ * platform that can call it** — its chat endpoint refuses a browser's CORS
+ * preflight, so on web this lane is unreachable and skipping it is what keeps
+ * the titler honest instead of surfacing `TypeError: Load failed`; then an
+ * **OpenRouter** provider with a key; then the **active provider's own model**,
+ * which is the lane that makes automatic titling work at all on a provider with
+ * no free id to offer (ARK, Command Code, a local server). Each of the first two
+ * lanes reads its free id from **that provider's own cached list**
+ * ({@link freeModelFor}), so a lane whose list is empty or has no free entry
+ * degrades to the next lane rather than to a paid call; the last lane is
+ * deliberately the user's own chat model, since by then they have already
+ * chosen to pay for it.
  *
- * A provider with no key counts as unresolved, not as a request that fails.
+ * A provider with no key counts as unresolved, not as a request that fails —
+ * except a local endpoint, which needs none.
  */
 export const resolveTitlerModel = (
-	settings: Pick<Settings, "providers" | "titler">,
+	settings: Pick<Settings, "providers" | "titler"> & {
+		readonly activeProviderId?: string;
+	},
 	isDesktop: boolean,
 ): { providerId: string; model: string } | undefined => {
 	const override = settings.titler;
@@ -107,7 +114,17 @@ export const resolveTitlerModel = (
 		if (model !== undefined) return { providerId: openrouter.id, model };
 	}
 
-	return undefined;
+	// Last resort: the model the user is already chatting with. Without this
+	// lane, automatic titling silently did nothing on every provider that has
+	// no free id in a fetched list — ARK, Command Code, a local server — which
+	// reads as "titling is broken" rather than "no free model here".
+	const active = settings.providers.find(
+		(provider) => provider.id === settings.activeProviderId,
+	);
+	if (active === undefined) return undefined;
+	if (!hasKey(active) && !isLocalEndpoint(active.baseUrl)) return undefined;
+	const model = active.model.trim();
+	return model === "" ? undefined : { providerId: active.id, model };
 };
 
 /** Quote pairs a small model wraps its answer in, ASCII and typographic. */

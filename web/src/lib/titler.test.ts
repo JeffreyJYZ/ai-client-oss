@@ -193,6 +193,96 @@ describe("resolveTitlerModel", () => {
 	});
 });
 
+/**
+ * The last-resort lane: the model the user is already chatting with. Without
+ * it, automatic titling silently did nothing on any provider with no free id to
+ * offer (ARK, Command Code, a local server), which reads as "titling is broken".
+ */
+describe("resolveTitlerModel's active-provider lane", () => {
+	const ARK_URL = "https://ark.cn-beijing.volces.com/api/plan/v3";
+
+	test("a provider with no free id titles with its own chat model", () => {
+		const settings = {
+			activeProviderId: "ark",
+			providers: [
+				provider("ark", {
+					baseUrl: ARK_URL,
+					apiKey: "key",
+					model: "deepseek-v4-1-flash-261017",
+					models: [],
+				}),
+			],
+		};
+		expect(resolveTitlerModel(settings, true)).toEqual({
+			providerId: "ark",
+			model: "deepseek-v4-1-flash-261017",
+		});
+	});
+
+	test("a free lane still wins over the chat model", () => {
+		const settings = {
+			activeProviderId: "ark",
+			providers: [
+				provider("ark", {
+					baseUrl: ARK_URL,
+					apiKey: "key",
+					model: "deepseek-v4-1-flash-261017",
+				}),
+				provider("or", {
+					baseUrl: OPENROUTER_URL,
+					apiKey: "key",
+					models: [OPENROUTER_FREE_ID],
+				}),
+			],
+		};
+		expect(resolveTitlerModel(settings, true)).toEqual({
+			providerId: "or",
+			model: OPENROUTER_FREE_ID,
+		});
+	});
+
+	test("an active provider with no key and no local server resolves to nothing", () => {
+		const settings = {
+			activeProviderId: "ark",
+			providers: [
+				provider("ark", {
+					baseUrl: ARK_URL,
+					apiKey: "   ",
+					model: "deepseek-v4-1-flash-261017",
+				}),
+			],
+		};
+		expect(resolveTitlerModel(settings, true)).toBeUndefined();
+	});
+
+	test("a local endpoint needs no key", () => {
+		const settings = {
+			activeProviderId: "local",
+			providers: [
+				provider("local", {
+					baseUrl: "http://localhost:11434/v1",
+					apiKey: "",
+					model: "llama3",
+				}),
+			],
+		};
+		expect(resolveTitlerModel(settings, true)).toEqual({
+			providerId: "local",
+			model: "llama3",
+		});
+	});
+
+	test("an active provider with no model resolves to nothing", () => {
+		const settings = {
+			activeProviderId: "ark",
+			providers: [
+				provider("ark", { baseUrl: ARK_URL, apiKey: "key", model: "" }),
+			],
+		};
+		expect(resolveTitlerModel(settings, true)).toBeUndefined();
+	});
+});
+
 describe("cleanTitle", () => {
 	test("strips a Title: prefix, wrapping quotes, markdown and a trailing newline", () => {
 		expect(cleanTitle('Title: "**A Small Model Picks a Subject**"\n')).toBe(

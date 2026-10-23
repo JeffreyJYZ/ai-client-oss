@@ -152,8 +152,8 @@ const failedHint = (
 
 /** State 2: nothing resolves, so no request is made and the row says why not. */
 const unresolvedHint = (): string =>
-	"No model titles new chats yet. Choose one below, or press Fetch models on a provider in Providers — " +
-	`an empty cached model list carries no free model to fall back to. ${RENAME_CLAUSE}`;
+	"No model titles new chats yet. Choose one below, give the active provider a key and a model, " +
+	`or press Fetch models on a provider in Providers — automatic titling needs a model to call. ${RENAME_CLAUSE}`;
 
 /**
  * The section's whole view-model. `resolved` is the caller's `resolveTitlerModel`

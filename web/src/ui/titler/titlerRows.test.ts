@@ -99,8 +99,8 @@ describe("the hint's three states", () => {
 
 	test("nothing resolving names Fetch models as the remedy", () => {
 		// The state a provider with no key, no provider at all, or an **empty
-		// cached list** lands in — the empty list is why "Fetch models" is the
-		// remedy rather than a guessed id.
+		// cached list** lands in — the empty list is why "Fetch models" is one
+		// remedy, and the active provider's own key + model is the other.
 		const rows = rowsFor({
 			resolved: undefined,
 			providers: [provider("or", { label: "OpenRouter", models: [] })],
@@ -108,7 +108,7 @@ describe("the hint's three states", () => {
 
 		expect(rows.state).toBe("unresolved");
 		expect(rows.hint).toContain("Fetch models");
-		expect(rows.hint).toContain("empty cached model list");
+		expect(rows.hint).toContain("key and a model");
 		expect(rows.hint).toContain("A rename is never overwritten.");
 	});
 
