@@ -238,3 +238,91 @@ describe("the web request path", () => {
 		expect(other).toContain("Load failed");
 	});
 });
+
+/**
+ * A tool call is the turn's real content when the model decides to act, so it
+ * must survive the wire shape the endpoint chose. Volcengine ARK sends every
+ * tool-call delta with `"content": ""` (measured 2026-10-23: 26 of 26 deltas),
+ * and reading that empty string as the answer ended the turn with nothing —
+ * the model asked for `web_search`, the app dropped the call, and the reply
+ * looked cut off.
+ */
+describe("a tool call carried beside empty content", () => {
+	// Built with JSON.stringify, not hand-escaped text: a fixture that is
+	// itself invalid JSON would fail in the parser and prove nothing.
+	const events = [
+		{
+			choices: [{ delta: { content: "", reasoning_content: "let me search" } }],
+		},
+		{
+			choices: [
+				{
+					delta: {
+						content: "",
+						reasoning_content: null,
+						tool_calls: [
+							{
+								function: { arguments: "", name: "web_search" },
+								id: "call_1",
+								index: 0,
+								type: "function",
+							},
+						],
+					},
+				},
+			],
+		},
+		{
+			choices: [
+				{
+					delta: {
+						content: "",
+						tool_calls: [
+							// `index` sits on the call entry, not inside `function` —
+							// that is where the endpoint puts it, and a fixture with it
+							// nested a level too deep would key the fragment to nothing.
+							{ function: { arguments: '{"query":"news"}' }, index: 0 },
+						],
+					},
+				},
+			],
+		},
+		{
+			choices: [
+				{
+					delta: { content: "", role: "assistant" },
+					finish_reason: "tool_calls",
+				},
+			],
+		},
+	];
+	const sse = `${events.map((event) => `data: ${JSON.stringify(event)}`).join("\n")}\ndata: [DONE]\n\n`;
+
+	test("the call reaches the stream, assembled, instead of an empty reply", async () => {
+		stubFetch(
+			() =>
+				new Response(sse, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				}),
+		);
+
+		const stream = await Effect.runPromise(
+			sendStream("https://ark.example/api/v3/chat/completions", {}, {}),
+		);
+		const chunks = [...(await Effect.runPromise(Stream.runCollect(stream)))];
+
+		expect(chunks.some((chunk) => chunk.kind === "reasoning")).toBe(true);
+		expect(
+			chunks.some(
+				(chunk) => chunk.kind === "tool" && chunk.text === "web_search",
+			),
+		).toBe(true);
+		const call = chunks.find((chunk) => chunk.kind === "tool_call");
+		expect(call?.call?.name).toBe("web_search");
+		expect(call?.call?.args).toBe('{"query":"news"}');
+		expect(
+			chunks.filter((chunk) => chunk.kind === "text" && chunk.text !== ""),
+		).toEqual([]);
+	});
+});

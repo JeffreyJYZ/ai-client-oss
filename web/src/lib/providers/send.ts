@@ -310,7 +310,15 @@ export const parseLine = (line: string): Chunk | null => {
 	if (reasoning !== null && reasoning !== "") {
 		return { kind: "reasoning", text: reasoning };
 	}
-	if (content !== null) return { kind: "text", text: content };
+	// An **empty** `content` is not the answer: OpenAI-compatible servers send
+	// `"content": ""` on a delta that carries only a tool call (measured on
+	// Volcengine ARK 2026-10-23, where every one of 26 tool-call deltas did).
+	// Returning text for it swallowed the call, so the model asked for
+	// `web_search` and the app ended the turn with an empty reply — the
+	// "keeps getting cut off" symptom. Only non-empty content is text.
+	if (content !== null && content !== "") {
+		return { kind: "text", text: content };
+	}
 	const entry = delta === undefined ? null : toolCallEntry(delta);
 	if (entry !== null) {
 		// The opening entry names the call: the display marker
@@ -338,7 +346,9 @@ export const parseLine = (line: string): Chunk | null => {
 	if (reasoning !== null) return { kind: "reasoning", text: reasoning };
 
 	const text = asString(choice.text);
-	return text === null ? null : { kind: "text", text };
+	// An empty answer is no chunk at all: `""` would append nothing and only
+	// add noise to a turn whose real content was the tool call above.
+	return text === null || text === "" ? null : { kind: "text", text };
 };
 
 const parseLineSafe = (line: string): Effect.Effect<Chunk | null> =>
