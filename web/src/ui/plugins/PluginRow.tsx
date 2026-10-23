@@ -130,7 +130,7 @@ export function PluginRow({
 				</div>
 			)}
 
-			<details className="flex flex-col gap-2">
+			<details className="space-y-2">
 				{/* No onClick on the summary: a control in a heading row owns its own
 				    click, and preventing the default would cancel it (see the kit's
 				    `Section`). */}

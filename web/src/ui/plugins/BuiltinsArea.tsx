@@ -244,7 +244,7 @@ function AreaRow({ row }: { readonly row: BuiltinRow }) {
 			    least one id, and a mismatch between that catalog and what the
 			    real registries hold fails `BuiltinsArea.test.ts`'s catalog
 			    check. */}
-			<details className="flex flex-col gap-2">
+			<details className="space-y-2">
 				{/* No onClick on the summary: nothing here needs one, and a
 				    preventDefault would cancel a control's own activation. */}
 				<summary className="flex cursor-pointer select-none items-center gap-2">

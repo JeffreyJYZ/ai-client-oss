@@ -32,6 +32,8 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 - **A fold's chevron is CSS keyed on *direct children*, never `group-open:`** — `details[open] summary svg` (and Tailwind's `group-open:`) also matches an open **ancestor**, so a closed section nested inside an open one showed a down chevron (measured in the production bundle; a named `group/section` does not fix it — the compiled selector is still a descendant match). `.fold-chevron` in `App.css` uses `details[open] > summary > .fold-chevron`; `Section` renders it and `SubSection` is the nested, rail-indented variant, so hierarchy is a rail + indent, not a second font size. `SECTION_HEADING`/`SUBHEADING` in `ui/kit/classes.ts` are the only heading strings.
 
+- **Space a `<details>`' children with `space-y-*`, never `gap`** — Chromium wraps the content in `::details-content`, so `flex flex-col gap-3` spaces that wrapper and leaves every child flush against the one above (measured 2026-10-23: labels sat on paragraphs in Settings). `SECTION`/`SUBSECTION` and the plugin rows are margin-based for this reason.
+
 ## Linting
 
 - **Effect checking = two layers, both wired.** Biome GritQL is syntactic (no types); the Effect language service is type-aware.

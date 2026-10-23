@@ -38,7 +38,7 @@ export function SettingsNav() {
 	return (
 		<nav
 			aria-label="Settings sections"
-			className="sticky top-0 z-10 -mx-1 flex flex-wrap gap-1 bg-neutral-950 px-1 py-2"
+			className="sticky top-0 z-10 -mx-4 flex flex-wrap gap-1 border-b border-neutral-800 bg-neutral-950/95 px-4 py-2 backdrop-blur md:static md:mx-0 md:flex-col md:flex-nowrap md:gap-1 md:border-b-0 md:border-r md:border-neutral-800 md:bg-transparent md:px-0 md:py-0 md:pr-3 md:backdrop-blur-none"
 		>
 			{entries.map((entry) => (
 				<button
@@ -51,7 +51,7 @@ export function SettingsNav() {
 						if (fold instanceof HTMLDetailsElement) fold.open = true;
 						target.scrollIntoView({ behavior: "smooth", block: "center" });
 					}}
-					className="rounded px-2 py-1 text-xs uppercase tracking-widest text-neutral-500 transition-colors hover:bg-neutral-900 hover:text-neutral-200"
+					className="rounded border border-neutral-800 bg-neutral-900/60 px-2 py-1 text-xs uppercase tracking-widest text-neutral-400 transition-colors hover:border-neutral-700 hover:bg-neutral-900 hover:text-neutral-100 md:w-full md:px-2.5 md:text-left"
 				>
 					{entry.title}
 				</button>

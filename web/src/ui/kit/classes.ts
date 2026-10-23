@@ -41,7 +41,14 @@ export const CONTROL =
  * section on a page skips the divider and passes a `className` of its own.
  * `Section` defaults to this, so a plugin's section needs no class string.
  */
-export const SECTION = "flex flex-col gap-3 border-t border-neutral-800 pt-5";
+/**
+ * A section's own box: a hairline above it and breathing room between its
+ * children. Spacing is margin-based (`space-y`), never `gap`: Chromium wraps a
+ * `<details>`' content in `::details-content`, so a flex/gap on the element
+ * spaces the wrapper and leaves the children flush against each other
+ * (measured 2026-10-23 — every label sat on the paragraph above it).
+ */
+export const SECTION = "space-y-3 border-t border-neutral-800 pt-5";
 
 /** A section's summary row: the heading on the left, its controls on the right. */
 export const SECTION_SUMMARY =
@@ -75,8 +82,7 @@ export const DISCLOSURE = "fold-chevron size-3 shrink-0 text-neutral-600";
  * a sub-heading is visibly *owned* by the heading above it. `SubSection` uses
  * this, and the rail is the whole hierarchy signal — no second font size.
  */
-export const SUBSECTION =
-	"ml-1 flex flex-col gap-2 border-l border-neutral-800 pl-3";
+export const SUBSECTION = "ml-1 space-y-2 border-l border-neutral-800 pl-3";
 
 /** A nested section's heading: one step smaller than its parent's. */
 export const SUBHEADING =

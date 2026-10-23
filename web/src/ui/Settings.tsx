@@ -127,14 +127,18 @@ function EditorProvider({ children }: { readonly children: ReactNode }) {
 export function SettingsShell() {
 	return (
 		<div className="flex-1 overflow-y-auto bg-neutral-950 px-4 py-6">
-			<div className="mx-auto flex w-full max-w-2xl flex-col gap-5">
-				<h2 className="text-xs uppercase tracking-widest text-neutral-500">
+			<div className="mx-auto grid w-full max-w-4xl grid-cols-1 gap-5 md:grid-cols-[11rem_minmax(0,1fr)] md:items-start md:gap-8">
+				<h2 className="text-xs uppercase tracking-widest text-neutral-500 md:col-span-2">
 					Settings
 				</h2>
 				<EditorProvider>
-					<SettingsNav />
-					<Slot id="settings.nav" />
-					<Slot id="settings.sections" />
+					<div className="flex min-w-0 flex-col gap-2">
+						<SettingsNav />
+						<Slot id="settings.nav" />
+					</div>
+					<div className="flex min-w-0 flex-col gap-5">
+						<Slot id="settings.sections" />
+					</div>
 				</EditorProvider>
 			</div>
 		</div>
