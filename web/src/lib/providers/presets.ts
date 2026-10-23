@@ -79,6 +79,25 @@ export const searchTools = (
 };
 
 /**
+ * True for an endpoint whose model list a webview cannot reach at all. Measured
+ * 2026-10-23 on Volcengine ARK: `OPTIONS /api/v3/chat/completions` answers 200
+ * with the caller's origin and `authorization` allowed, while `OPTIONS
+ * /api/v3/models` is a 404 with no CORS header — so the `Authorization` header
+ * forces a preflight the host refuses, and the fetch rejects with a bare
+ * `TypeError: Load failed` while chat keeps working. Scoped to the host, not the
+ * provider preset, so a custom base URL on the same service is covered.
+ */
+export const refusesModelsPreflight = (baseUrl: string): boolean =>
+	baseUrl.toLowerCase().includes(".volces.com/");
+
+/**
+ * What to show when that refusal is the cause: the id the user must type
+ * instead, since no list will ever arrive here.
+ */
+export const MODELS_LIST_REFUSAL =
+	"This endpoint does not answer the preflight on its model list (Volcengine ARK returns 404 for OPTIONS /api/v3/models), so the list cannot be fetched here even though chat works. Type the model instead — for ARK that is the endpoint id (ep-…) or the model name from the console.";
+
+/**
  * How an endpoint serves web search, read from its base URL. `null`
  * means the endpoint has no server-side search of its own: the per-provider toggle
  * then serves TinyFish's client-side search instead, when a key is set.

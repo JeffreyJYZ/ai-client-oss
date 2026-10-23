@@ -1,6 +1,10 @@
 import type { HostServices } from "@lib/plugins/host";
 import { requireProvider } from "@lib/plugins/providers";
-import { attributionHeadersFor } from "@lib/providers/presets";
+import {
+	attributionHeadersFor,
+	MODELS_LIST_REFUSAL,
+	refusesModelsPreflight,
+} from "@lib/providers/presets";
 import { chatHeaders } from "@lib/providers/send";
 import { type ChatTransport, chatTransport } from "@lib/providers/transport";
 import type { SendCtx } from "@lib/providers/types";
@@ -116,6 +120,11 @@ export const fetchDescribed = (
  * `Content-Type, Authorization`), unlike its chat endpoint, which refuses it.
  * The session header is not added here for the same reason: it is not on that
  * allowed-headers list, so sending it would make the webview's preflight fail.
+ *
+ * A host that refuses the preflight on *this* path (ARK, see
+ * `refusesModelsPreflight`) surfaces as a bare `TypeError: Load failed`, which
+ * says nothing a user can act on — so that host gets the guidance in
+ * `MODELS_LIST_REFUSAL` instead of the raw rejection.
  */
 export const listModels = (
 	protocol: string,
@@ -137,6 +146,12 @@ export const listModels = (
 
 		const response = yield* fetchDescribed(() =>
 			fetch(`${baseUrl}/models`, { headers }),
+		).pipe(
+			Effect.catch((detail) =>
+				Effect.fail(
+					refusesModelsPreflight(baseUrl) ? MODELS_LIST_REFUSAL : detail,
+				),
+			),
 		);
 
 		if (!response.ok) {

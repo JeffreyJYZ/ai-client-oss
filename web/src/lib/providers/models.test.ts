@@ -7,10 +7,12 @@ import {
 } from "@lib/plugins/host";
 import { registerProvider } from "@lib/plugins/providers";
 import {
+	listModels,
 	PROBE_SESSION_ID,
 	probeConnection,
 	testModel,
 } from "@lib/providers/models";
+import { MODELS_LIST_REFUSAL } from "@lib/providers/presets";
 import {
 	type ChatIpc,
 	type ChatRequest,
@@ -419,5 +421,60 @@ describe("the probe rides the chat transport", () => {
 
 		expect(message.startsWith("✓")).toBe(false);
 		expect(message).toContain("failed to send POST");
+	});
+});
+
+/**
+ * A host that refuses the preflight on `/models` cannot answer a list request
+ * from a webview at all, and a bare `TypeError: Load failed` tells a user
+ * nothing (measured on Volcengine ARK: `OPTIONS /api/v3/models` is a 404 while
+ * the chat endpoint's preflight is a 200).
+ */
+describe("the model list explains a refused preflight", () => {
+	const stubFetch = (fn: () => Promise<Response>): (() => void) => {
+		const original = globalThis.fetch;
+		globalThis.fetch = (() => fn()) as unknown as typeof fetch;
+		return () => {
+			globalThis.fetch = original;
+		};
+	};
+
+	const failureOf = async (baseUrl: string): Promise<string> => {
+		const s = services();
+		register(s, "test.models", probePlugin());
+		const exit = await run(
+			Effect.exit(listModels("test.models", baseUrl, "k")),
+			s,
+		);
+		const cause = Exit.isFailure(exit)
+			? Option.getOrThrow(Cause.findErrorOption(exit.cause))
+			: "";
+		return cause;
+	};
+
+	test("an ARK host names the reason and what to type instead", async () => {
+		const restore = stubFetch(() =>
+			Promise.reject(new TypeError("Load failed")),
+		);
+		try {
+			const message = await failureOf(
+				"https://ark.cn-beijing.volces.com/api/v3",
+			);
+			expect(message).toBe(MODELS_LIST_REFUSAL);
+		} finally {
+			restore();
+		}
+	});
+
+	test("any other host keeps the rejection it actually saw", async () => {
+		const restore = stubFetch(() =>
+			Promise.reject(new TypeError("Load failed")),
+		);
+		try {
+			const message = await failureOf("https://api.openai.com/v1");
+			expect(message).toBe("TypeError: Load failed");
+		} finally {
+			restore();
+		}
 	});
 });
