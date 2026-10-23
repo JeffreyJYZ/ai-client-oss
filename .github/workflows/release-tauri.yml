@@ -158,11 +158,10 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **New in 0.6.6**
+            **New in 0.6.7**
 
-            - **A way into the docs.** The header now has a `Docs` link to the published documentation — the plugin author guide, the registry reference and the capability table.
-            - **Links open again on the desktop.** Every in-app outbound link — the release page, the update notice's version, the TinyFish key page — was a plain `target="_blank"` anchor, which the desktop shell silently drops. They now go through the shell's opener and open in your browser.
-            - **OpenRouter app attribution.** Requests to OpenRouter identify the app, so its usage appears on OpenRouter's app page and rankings.
+            - **Volcengine ARK is a ready-made provider.** Pick it and paste your ARK key; the model field takes an endpoint id (`ep-…`) or a model name as the console lists it. ARK's chat API has no server-side search, so the web-search toggle falls back to TinyFish.
+            - **OpenRouter identification can be switched off.** The three app-attribution headers are now a per-provider toggle, on by default and shown only for an OpenRouter endpoint. Off sends none of them; your credentials and the request itself are unchanged.
 
             **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
 
