@@ -470,15 +470,20 @@ export const bearerHeaders = (
  * The assembled request headers: the endpoint's own set plus, keyed on the
  * request URL so it reaches exactly the hosts that need it, that endpoint's
  * session header (see `sessionHeadersFor`) and OpenRouter's app-attribution
- * headers (see `attributionHeadersFor`). One place, so the desktop and web
- * transports are sent identical headers.
+ * headers (see `attributionHeadersFor`, dropped when the provider's
+ * `attribution` flag is off). One place, so the desktop and web transports are
+ * sent identical headers.
  */
 export const chatHeaders = (
 	url: string,
 	headers: Record<string, string>,
 	conversationId: string | undefined,
+	attribution = true,
 ): Record<string, string> => {
-	const attributed = { ...headers, ...attributionHeadersFor(url) };
+	const attributed = {
+		...headers,
+		...attributionHeadersFor(url, attribution),
+	};
 	return conversationId === undefined
 		? attributed
 		: { ...attributed, ...sessionHeadersFor(url, conversationId) };
@@ -499,11 +504,12 @@ export const sendStream = (
 	body: unknown,
 	headers: Record<string, string>,
 	conversationId?: string,
+	attribution = true,
 ): Effect.Effect<Stream.Stream<Chunk, string>, string> =>
 	Effect.gen(function* () {
 		const response = yield* chatTransport(
 			url,
-			chatHeaders(url, headers, conversationId),
+			chatHeaders(url, headers, conversationId, attribution),
 			JSON.stringify(body),
 		);
 

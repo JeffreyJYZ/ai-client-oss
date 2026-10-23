@@ -140,6 +140,41 @@ describe("OpenRouter app attribution", () => {
 		}
 	});
 
+	test("is dropped whole when the provider's toggle is off", () => {
+		// Off is every attribution header gone and nothing else changed: the
+		// provider's own headers and any session header still go.
+		expect(chatHeaders(OPENROUTER_URL, {}, undefined, false)).toEqual({});
+		expect(chatHeaders(OPENROUTER_URL, {}, "conv-abc-1", false)).toEqual({});
+		expect(
+			chatHeaders(OPENROUTER_URL, { "x-api-key": "k" }, undefined, false),
+		).toEqual({ "x-api-key": "k" });
+	});
+
+	test("is off on the wire too, not just in the assembled headers", async () => {
+		stubFetch(
+			() =>
+				new Response(
+					'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n',
+					{ status: 200, headers: { "content-type": "text/event-stream" } },
+				),
+		);
+
+		const stream = await Effect.runPromise(
+			sendStream(
+				OPENROUTER_URL,
+				{ model: "openai/gpt-5.2" },
+				{},
+				undefined,
+				false,
+			),
+		);
+		await Effect.runPromise(Stream.runCollect(stream));
+
+		const sent = headersOf(calls[0]);
+		expect(sent["HTTP-Referer"]).toBeUndefined();
+		expect(sent["X-OpenRouter-Title"]).toBeUndefined();
+	});
+
 	test("reaches the wire on a send, through the assembled headers", async () => {
 		stubFetch(
 			() =>

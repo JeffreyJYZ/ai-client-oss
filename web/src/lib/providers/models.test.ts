@@ -329,7 +329,7 @@ describe("the probe rides the chat transport", () => {
 				"https://opencode.ai/inference/go/v1",
 				undefined,
 				"m1",
-				nativeTransportWith(shell.ipc),
+				{ transport: nativeTransportWith(shell.ipc) },
 			),
 			s,
 		);
@@ -365,7 +365,9 @@ describe("the probe rides the chat transport", () => {
 			const shell = fakeShell({ status: 200 });
 
 			await run(
-				testModel(id, host, undefined, "m1", nativeTransportWith(shell.ipc)),
+				testModel(id, host, undefined, "m1", {
+					transport: nativeTransportWith(shell.ipc),
+				}),
 				s,
 			);
 
@@ -389,7 +391,7 @@ describe("the probe rides the chat transport", () => {
 				"https://opencode.ai/inference/go/v1",
 				undefined,
 				"m1",
-				nativeTransportWith(shell.ipc),
+				{ transport: nativeTransportWith(shell.ipc) },
 			),
 			s,
 		);
@@ -410,7 +412,7 @@ describe("the probe rides the chat transport", () => {
 				"https://opencode.ai/inference/go/v1",
 				undefined,
 				"m1",
-				nativeTransportWith(shell.ipc),
+				{ transport: nativeTransportWith(shell.ipc) },
 			),
 			s,
 		);

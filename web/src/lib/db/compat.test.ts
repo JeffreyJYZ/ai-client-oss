@@ -59,6 +59,36 @@ const run = <A>(effect: Effect.Effect<A, string>): Promise<A> =>
 	Effect.runPromise(effect);
 
 /**
+ * `value` reduced to the shape `fixture` has: object keys taken from the
+ * fixture, and arrays compared element-wise under the same rule. Anything the
+ * fixture does not carry is dropped, anything it carries but `value` lost stays
+ * as `undefined` so the `toEqual` fails. Needed because a *provider* gained a
+ * key (`attribution`) after 0.2.3, and the fixture must stay a real 0.2.3 blob
+ * rather than be edited to mention it.
+ */
+const projectOnto = (fixture: unknown, value: unknown): unknown => {
+	if (Array.isArray(fixture)) {
+		if (!Array.isArray(value)) return value;
+		return value.map((entry, index) =>
+			projectOnto(fixture[index] ?? fixture[0], entry),
+		);
+	}
+	if (fixture !== null && typeof fixture === "object") {
+		if (value === null || typeof value !== "object") return value;
+		const source = value as Record<string, unknown>;
+		const projected: Record<string, unknown> = {};
+		for (const key of Object.keys(fixture)) {
+			projected[key] = projectOnto(
+				(fixture as Record<string, unknown>)[key],
+				source[key],
+			);
+		}
+		return projected;
+	}
+	return value;
+};
+
+/**
  * The frozen fixture's own keys taken from `settings`, so a later *additive*
  * `Settings` key cannot fail a test that is about *not losing* data — the key
  * set comes from the fixture, never from a hardcoded list of new keys.
@@ -66,9 +96,10 @@ const run = <A>(effect: Effect.Effect<A, string>): Promise<A> =>
 const prePluginsSubstance = (settings: Settings): Partial<Settings> => {
 	const substance: Partial<Settings> = {};
 	for (const key of Object.keys(settingsFixture)) {
-		(substance as Record<string, unknown>)[key] = (
-			settings as Record<string, unknown>
-		)[key];
+		(substance as Record<string, unknown>)[key] = projectOnto(
+			(settingsFixture as Record<string, unknown>)[key],
+			(settings as Record<string, unknown>)[key],
+		);
 	}
 	return substance;
 };

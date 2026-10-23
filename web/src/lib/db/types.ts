@@ -46,6 +46,15 @@ export const providerConfigSchema = z.object({
 			}),
 		)
 		.default([]),
+	/**
+	 * Send OpenRouter's app-attribution headers (`HTTP-Referer`, the app title
+	 * and categories) on this provider's requests. Default on — that is what
+	 * puts the app's usage on its public OpenRouter page — and off drops all
+	 * three while every other header and the request itself stay unchanged.
+	 * Only an OpenRouter endpoint ever carries them, so the flag is inert
+	 * elsewhere; absent on disk reads as on, so nothing migrates.
+	 */
+	attribution: z.boolean().default(true),
 });
 
 export type ProviderConfig = z.infer<typeof providerConfigSchema>;

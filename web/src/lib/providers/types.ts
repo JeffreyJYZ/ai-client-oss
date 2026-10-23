@@ -111,6 +111,12 @@ export interface SendCtx {
 	 */
 	readonly fetchTool?: boolean;
 	/**
+	 * Send this endpoint's app-attribution headers (OpenRouter's referer/title
+	 * pair, see `attributionHeadersFor`). Absent reads as on, so a request built
+	 * before the toggle existed is unchanged; `false` drops them.
+	 */
+	readonly attribution?: boolean;
+	/**
 	 * TinyFish API key, when the user has one set. Declares
 	 * the client-side `web_search` tool (where the endpoint
 	 * has no search of its own) and routes `fetch_url`

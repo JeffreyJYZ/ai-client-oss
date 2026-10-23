@@ -121,6 +121,7 @@ export const listModels = (
 	protocol: string,
 	baseUrl: string,
 	apiKey: string | undefined,
+	attribution = true,
 ): Effect.Effect<string[], string, HostServices> =>
 	Effect.gen(function* () {
 		const provider = yield* requireProvider(protocol);
@@ -129,7 +130,7 @@ export const listModels = (
 			"build its request headers",
 			(): Record<string, string> => ({
 				accept: "application/json",
-				...attributionHeadersFor(baseUrl),
+				...attributionHeadersFor(baseUrl, attribution),
 				...provider.headers(apiKey),
 			}),
 		);
@@ -167,6 +168,18 @@ export const listModels = (
 export const PROBE_SESSION_ID = "test-connection";
 
 /**
+ * The two seams a caller (or a test) can vary on a probe: which transport makes
+ * the request, and whether OpenRouter's app-attribution headers ride along
+ * (the provider's own `attribution` flag, on by default). An object rather than
+ * more positional arguments, so a caller wanting only the second does not have
+ * to name the first.
+ */
+export interface ProbeOptions {
+	readonly transport?: ChatTransport;
+	readonly attribution?: boolean;
+}
+
+/**
  * `POST ${baseUrl}${endpoint}` with a real generation that proves the selected
  * model answers. The probe body is **the protocol's own request shape**, built
  * by its own `buildRequest` from its template — never a hardcoded
@@ -186,16 +199,20 @@ export const PROBE_SESSION_ID = "test-connection";
  * member (`headers`, `buildRequest`) becomes the `string` error channel.
  *
  * `transport` is the seam a test drives `nativeTransportWith(ipc)` through; the
- * production path is the default, which is the rule itself.
+ * production path is the default, which is the rule itself. `attribution`
+ * mirrors the provider's own flag, so a probe is sent exactly the headers a
+ * chat send would carry.
  */
 export const testModel = (
 	protocol: string,
 	baseUrl: string,
 	apiKey: string | undefined,
 	model: string,
-	transport: ChatTransport = chatTransport,
+	options: ProbeOptions = {},
 ): Effect.Effect<void, string, HostServices> =>
 	Effect.gen(function* () {
+		const transport = options.transport ?? chatTransport;
+		const attribution = options.attribution ?? true;
 		const provider = yield* requireProvider(protocol);
 		// Both members the probe calls are plugin code; each throw is isolated
 		// into the `string` channel rather than escaping as a defect.
@@ -220,7 +237,7 @@ export const testModel = (
 		const response = yield* transportCall(
 			transport(
 				url,
-				chatHeaders(url, headers, PROBE_SESSION_ID),
+				chatHeaders(url, headers, PROBE_SESSION_ID, attribution),
 				JSON.stringify(probe),
 			),
 		);
@@ -268,9 +285,9 @@ export const probeConnection = (
 	baseUrl: string,
 	apiKey: string | undefined,
 	model: string,
-	transport: ChatTransport = chatTransport,
+	options: ProbeOptions = {},
 ): Effect.Effect<string, never, HostServices> =>
-	testModel(protocol, baseUrl, apiKey, model, transport).pipe(
+	testModel(protocol, baseUrl, apiKey, model, options).pipe(
 		Effect.as(probeSucceeded(model)),
 		Effect.catchCause((cause) => Effect.succeed(probeFailure(protocol, cause))),
 	);

@@ -6,6 +6,7 @@ import {
 	mergeProviderPresets,
 	PROVIDER_PRESETS,
 	requestTools,
+	searchKindFor,
 } from "@lib/providers/presets";
 import { responses } from "@lib/providers/responses";
 import type { SendCtx } from "@lib/providers/types";
@@ -227,6 +228,26 @@ describe("the OpenCode Go preset points at the documented Go endpoint", () => {
 		// the page's GPT/Grok entries are Responses and its Claude/Qwen ones
 		// Messages, which the Protocol dropdown selects over this same base.
 		expect(preset?.protocol).toBe("chatcompletions");
+	});
+});
+
+describe("the Volcengine ARK preset points at the documented endpoint", () => {
+	const preset = PROVIDER_PRESETS.find((entry) => entry.id === "ark");
+
+	test("its base URL carries the version, as every other preset does", () => {
+		expect(preset?.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/v3");
+	});
+
+	test("it is a Chat Completions endpoint", () => {
+		expect(preset?.protocol).toBe("chatcompletions");
+	});
+
+	test("it declares no server-side search, so TinyFish fills the gap", () => {
+		// ARK's chat API has no web-search tool of its own (豆包搜索 is a
+		// separate product), so the per-provider toggle must fall to the
+		// client-side search rather than claim a mechanism the endpoint lacks.
+		expect(preset?.tools).toEqual([]);
+		expect(searchKindFor(preset?.baseUrl ?? "")).toBeNull();
 	});
 });
 

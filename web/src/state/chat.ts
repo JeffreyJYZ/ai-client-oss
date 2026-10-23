@@ -674,6 +674,9 @@ export const send = (msg: string, parts: AttachmentPart[]): void => {
 		// can turn off; off sends no declaration, so the model
 		// cannot call it.
 		fetchTool: settings.fetchToolEnabled,
+		// OpenRouter's app-attribution headers, unless this provider's own
+		// toggle is off.
+		attribution: active.attribution,
 		// A TinyFish key declares the client-side `web_search`
 		// tool (where the endpoint has no search of its own)
 		// and routes `fetch_url` through TinyFish first.

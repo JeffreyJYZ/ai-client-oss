@@ -207,5 +207,7 @@ export const responses = {
 			// The conversation's session id, for an endpoint that needs one
 			// (`x-opencode-session`).
 			ctx.conversationId,
+			// App attribution on OpenRouter, when the provider's toggle is on.
+			ctx.attribution,
 		),
 } satisfies Provider<ResponsesSend>;

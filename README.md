@@ -38,7 +38,7 @@ On Windows, SmartScreen warns: pick **More info → Run anyway**.
 
 ## Features
 
-- Providers: OpenAI (Responses or Chat Completions), OpenRouter, OpenCode Zen, OpenCode Go, Command Code, Ollama, LM Studio, or any OpenAI-compatible base URL.
+- Providers: OpenAI (Responses or Chat Completions), OpenRouter, OpenCode Zen, OpenCode Go, Command Code, Volcengine ARK, Anthropic, Ollama, LM Studio, or any OpenAI-compatible base URL. OpenRouter's app-identification headers can be switched off per provider.
 - Streaming, and a collapsible block for reasoning models' thinking.
 - Web search: the endpoint's own tool where it has one (OpenAI, OpenRouter, Anthropic), or TinyFish with your own key where it has none. That is how a local model gets search at all.
 - Per-conversation system prompts, and profiles bundling provider, model and prompt.

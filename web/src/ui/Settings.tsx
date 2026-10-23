@@ -20,7 +20,11 @@ import {
 import { protocolNames } from "@lib/plugins/providers";
 import { runtime } from "@lib/plugins/runtime";
 import { listModels, probeConnection } from "@lib/providers/models";
-import { isLocalEndpoint, searchKindFor } from "@lib/providers/presets";
+import {
+	isLocalEndpoint,
+	isOpenRouterHost,
+	searchKindFor,
+} from "@lib/providers/presets";
 import { TINYFISH_API_KEYS_URL } from "@lib/tinyfish";
 import { offerHeadline } from "@lib/updates";
 import { Effect, Option } from "effect";
@@ -352,7 +356,12 @@ export function ProviderEditor() {
 		editor?.setMessage(null);
 		setModelsPending(true);
 		runtime.runFork(
-			listModels(active.protocol, active.baseUrl, active.apiKey).pipe(
+			listModels(
+				active.protocol,
+				active.baseUrl,
+				active.apiKey,
+				active.attribution,
+			).pipe(
 				Effect.tap((ids) =>
 					Effect.sync(() => updateProvider(id, { models: ids })),
 				),
@@ -375,12 +384,9 @@ export function ProviderEditor() {
 		editor?.setMessage(null);
 		setTestPending(true);
 		runtime.runFork(
-			probeConnection(
-				active.protocol,
-				active.baseUrl,
-				active.apiKey,
-				model,
-			).pipe(
+			probeConnection(active.protocol, active.baseUrl, active.apiKey, model, {
+				attribution: active.attribution,
+			}).pipe(
 				Effect.tap((message) => Effect.sync(() => editor?.setMessage(message))),
 				Effect.ensuring(Effect.sync(() => setTestPending(false))),
 			),
@@ -459,6 +465,26 @@ export function ProviderEditor() {
 					className={INPUT}
 				/>
 			</label>
+			{isOpenRouterHost(active.baseUrl) ? (
+				<>
+					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
+						OpenRouter identification
+						<input
+							type="checkbox"
+							checked={active.attribution}
+							onChange={(event) =>
+								patchActive({ attribution: event.target.checked })
+							}
+							className="h-4 w-4 accent-neutral-300"
+						/>
+					</label>
+					<p className="text-xs text-neutral-500">
+						On sends the three app-attribution headers that put this app on
+						OpenRouter's public rankings. Off sends none of them; the request
+						and your credentials are unchanged.
+					</p>
+				</>
+			) : null}
 			<label className={LABEL}>
 				Model
 				<input

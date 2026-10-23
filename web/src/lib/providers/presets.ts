@@ -140,11 +140,16 @@ export const OPENROUTER_APP_CATEGORIES = "general-chat,programming-app";
  *
  * The public site is the referer rather than the page's own origin: a desktop
  * webview's origin is `tauri://localhost`, which names no app.
+ *
+ * `enabled` is the provider's own `attribution` flag (on by default): off sends
+ * none of the three, so a user who does not want their usage on OpenRouter's
+ * public app page keeps every other header and the request itself.
  */
 export const attributionHeadersFor = (
 	baseUrl: string,
+	enabled = true,
 ): Record<string, string> =>
-	isOpenRouterHost(baseUrl)
+	isOpenRouterHost(baseUrl) && enabled
 		? {
 				"HTTP-Referer": SITE_URL,
 				"X-OpenRouter-Title": OPENROUTER_APP_TITLE,
@@ -438,6 +443,23 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 		id: "commandcode",
 		label: "Command Code",
 		baseUrl: "https://api.commandcode.ai/provider/v1",
+		protocol: "chatcompletions",
+		tools: [],
+	},
+	{
+		/**
+		 * Volcengine's ARK (方舟) platform: OpenAI-compatible Chat Completions,
+		 * one base URL carrying the version, Bearer auth. Its `model` field is
+		 * an endpoint id (`ep-…`) or a model name (`deepseek-v3-250324`,
+		 * `doubao-seed-…`), exactly as the console lists it.
+		 *
+		 * No default tools: ARK's chat API has no server-side web search (the
+		 * 豆包搜索 capability is a separate product), so `searchKindFor` stays
+		 * `null` and TinyFish fills the gap when a key is set.
+		 */
+		id: "ark",
+		label: "Volcengine ARK",
+		baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
 		protocol: "chatcompletions",
 		tools: [],
 	},
