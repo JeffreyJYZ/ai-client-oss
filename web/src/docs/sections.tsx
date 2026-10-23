@@ -160,8 +160,8 @@ export const ProvidersSection = () => (
 			<Prose>
 				<p>
 					OpenAI (Responses or Chat Completions), OpenRouter, OpenCode Zen,
-					OpenCode Go, Command Code, Volcengine ARK, Anthropic, Ollama, LM
-					Studio — or any OpenAI-compatible base URL.
+					OpenCode Go, Command Code, Volcengine ARK (platform or Agent Plan),
+					Anthropic, Ollama, LM Studio — or any OpenAI-compatible base URL.
 				</p>
 			</Prose>
 		</SubSection>

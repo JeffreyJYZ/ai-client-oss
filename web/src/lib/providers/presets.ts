@@ -470,15 +470,35 @@ export const PROVIDER_PRESETS: readonly ProviderPreset[] = [
 		 * Volcengine's ARK (方舟) platform: OpenAI-compatible Chat Completions,
 		 * one base URL carrying the version, Bearer auth. Its `model` field is
 		 * an endpoint id (`ep-…`) or a model name (`deepseek-v3-250324`,
-		 * `doubao-seed-…`), exactly as the console lists it.
+		 * `doubao-seed-…`), exactly as the console lists it — and it needs a
+		 * **platform** API key, the pay-as-you-go one.
 		 *
 		 * No default tools: ARK's chat API has no server-side web search (the
 		 * 豆包搜索 capability is a separate product), so `searchKindFor` stays
 		 * `null` and TinyFish fills the gap when a key is set.
 		 */
 		id: "ark",
-		label: "Volcengine ARK",
+		label: "Volcengine ARK (platform)",
 		baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
+		protocol: "chatcompletions",
+		tools: [],
+	},
+	{
+		/**
+		 * The same service's **Agent Plan** data plane, which takes a plan key
+		 * rather than a platform key — the split that produces
+		 * `ModelNotOpen` when a plan key is pointed at `/api/v3`. Same
+		 * OpenAI-compatible Chat Completions shape and the same model ids
+		 * (`deepseek-v4-1-flash-261017` and friends, from `arkcli plans
+		 * model-list`), measured 2026-10-23: 200 with the plan key.
+		 *
+		 * Its preflight allows only `Origin, Content-Length, Content-Type`, so
+		 * a **web** page cannot send the key at all — the desktop transport is
+		 * the working route, exactly like OpenCode Go.
+		 */
+		id: "ark-plan",
+		label: "Volcengine ARK (Agent Plan)",
+		baseUrl: "https://ark.cn-beijing.volces.com/api/plan/v3",
 		protocol: "chatcompletions",
 		tools: [],
 	},

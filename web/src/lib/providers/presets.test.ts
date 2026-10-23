@@ -231,23 +231,34 @@ describe("the OpenCode Go preset points at the documented Go endpoint", () => {
 	});
 });
 
-describe("the Volcengine ARK preset points at the documented endpoint", () => {
+describe("the Volcengine ARK presets point at the documented endpoints", () => {
 	const preset = PROVIDER_PRESETS.find((entry) => entry.id === "ark");
+	const plan = PROVIDER_PRESETS.find((entry) => entry.id === "ark-plan");
 
-	test("its base URL carries the version, as every other preset does", () => {
+	test("the platform base URL carries the version, as every other preset does", () => {
 		expect(preset?.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/v3");
 	});
 
-	test("it is a Chat Completions endpoint", () => {
-		expect(preset?.protocol).toBe("chatcompletions");
+	test("the plan base URL is the Agent Plan data plane, not the platform one", () => {
+		// A plan key against /api/v3 answers ModelNotOpen; measured 2026-10-23,
+		// /api/plan/v3 answers 200 for the same key and model id.
+		expect(plan?.baseUrl).toBe("https://ark.cn-beijing.volces.com/api/plan/v3");
+		expect(plan?.baseUrl).not.toBe(preset?.baseUrl);
 	});
 
-	test("it declares no server-side search, so TinyFish fills the gap", () => {
+	test("both are Chat Completions endpoints", () => {
+		expect(preset?.protocol).toBe("chatcompletions");
+		expect(plan?.protocol).toBe("chatcompletions");
+	});
+
+	test("neither declares a server-side search, so TinyFish fills the gap", () => {
 		// ARK's chat API has no web-search tool of its own (豆包搜索 is a
 		// separate product), so the per-provider toggle must fall to the
 		// client-side search rather than claim a mechanism the endpoint lacks.
 		expect(preset?.tools).toEqual([]);
+		expect(plan?.tools).toEqual([]);
 		expect(searchKindFor(preset?.baseUrl ?? "")).toBeNull();
+		expect(searchKindFor(plan?.baseUrl ?? "")).toBeNull();
 	});
 });
 
