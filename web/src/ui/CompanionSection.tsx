@@ -13,10 +13,10 @@ import { SETTINGS_SECTIONS } from "@/lib/settingsSections";
 import { hydrate } from "@/state/settings";
 import {
 	BUTTON,
-	INPUT,
 	LABEL,
 	SECTION_HEADING,
 	SECTION_SUMMARY,
+	SecretInput,
 	Section,
 } from "@/ui/kit";
 
@@ -142,43 +142,45 @@ export function CompanionSection() {
 
 	return (
 		<Section
-			className="flex flex-col gap-3"
+			className="space-y-3"
 			summaryClassName={SECTION_SUMMARY}
 			heading={
-				<>
-					<h3
-						id={SETTINGS_SECTIONS.companion.anchorId}
-						className={SECTION_HEADING}
-					>
-						{SETTINGS_SECTIONS.companion.title}
-					</h3>
-				</>
+				<h3
+					id={SETTINGS_SECTIONS.companion.anchorId}
+					className={SECTION_HEADING}
+				>
+					{SETTINGS_SECTIONS.companion.title}
+				</h3>
 			}
 		>
 			<p className="text-sm text-neutral-300">{statusLine}</p>
 			<p className="text-xs text-neutral-500">
-				Port: {COMPANION_PORT}
+				Port {COMPANION_PORT}
 				{isDesktop && desktop !== null
-					? ` · running: ${String(desktop.running)}`
+					? ` · listening: ${desktop.running ? "yes" : "no"}`
 					: ""}
 			</p>
 			{isDesktop && desktop !== null ? (
-				<label className={LABEL}>
-					This app's token
-					<input type="text" value={desktop.token} readOnly className={INPUT} />
-				</label>
+				<div className={LABEL}>
+					<label htmlFor="companion-app-token">This app's token</label>
+					<SecretInput
+						id="companion-app-token"
+						value={desktop.token}
+						readOnly
+						shownByDefault
+						placeholder="no token yet"
+					/>
+				</div>
 			) : null}
-			<label className={LABEL}>
-				Token
-				<input
-					type="password"
-					autoComplete="off"
+			<div className={LABEL}>
+				<label htmlFor="companion-token">Token</label>
+				<SecretInput
+					id="companion-token"
 					value={token}
 					onChange={(event) => setToken(event.target.value)}
 					placeholder="paste the companion's token"
-					className={INPUT}
 				/>
-			</label>
+			</div>
 			<div className="flex flex-wrap items-center gap-2">
 				{isDesktop ? (
 					<button

@@ -1,8 +1,10 @@
-import type { ComponentProps, ReactNode } from "react";
+import type { ChangeEvent, ComponentProps, ReactNode } from "react";
+import { useState } from "react";
 import {
 	BUTTON,
 	cls,
 	DISCLOSURE,
+	INPUT,
 	LABEL,
 	SECTION,
 	SECTION_SUMMARY,
@@ -47,6 +49,59 @@ export function Panel({ className, children, ...rest }: ComponentProps<"div">) {
 	return (
 		<div className={cls(PANEL, className)} {...rest}>
 			{children}
+		</div>
+	);
+}
+
+interface SecretInputProps {
+	/** The input id, so the field text can be a real `<label for>`. */
+	readonly id?: string;
+	readonly value: string;
+	readonly onChange?: (event: ChangeEvent<HTMLInputElement>) => void;
+	readonly placeholder?: string;
+	readonly readOnly?: boolean;
+	/** Start revealed — for a token the user is meant to copy out. */
+	readonly shownByDefault?: boolean;
+}
+
+/**
+ * A masked field with a Show/Hide control, for an API key or a pairing token.
+ * The toggle lives in the field's own row rather than under it, so revealing a
+ * key never reflows the form; `type` switches between `password` and `text`,
+ * which keeps password managers and `autocomplete="off"` working in both
+ * states. The control is a real button with `aria-pressed`, so the state is
+ * announced, not just drawn.
+ */
+export function SecretInput({
+	id,
+	value,
+	onChange,
+	placeholder,
+	readOnly = false,
+	shownByDefault = false,
+}: SecretInputProps) {
+	const [shown, setShown] = useState(shownByDefault);
+	return (
+		<div className="flex items-stretch gap-2">
+			<input
+				id={id}
+				type={shown ? "text" : "password"}
+				autoComplete="off"
+				value={value}
+				onChange={onChange}
+				placeholder={placeholder}
+				readOnly={readOnly}
+				className={cls(INPUT, "min-w-0 flex-1")}
+			/>
+			<button
+				type="button"
+				onClick={() => setShown((current) => !current)}
+				aria-pressed={shown}
+				aria-label={shown ? "Hide value" : "Show value"}
+				className={cls(BUTTON, "shrink-0")}
+			>
+				{shown ? "Hide" : "Show"}
+			</button>
 		</div>
 	);
 }

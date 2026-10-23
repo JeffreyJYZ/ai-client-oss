@@ -63,6 +63,7 @@ import {
 	SECTION_HEADING,
 	SECTION_SUMMARY,
 	SECTION_SUMMARY_WRAP,
+	SecretInput,
 	Section,
 } from "@/ui/kit";
 import { SettingsNav } from "@/ui/SettingsNav";
@@ -458,17 +459,15 @@ export function ProviderEditor() {
 					className={INPUT}
 				/>
 			</label>
-			<label className={LABEL}>
-				API key
-				<input
-					type="password"
-					autoComplete="off"
+			<div className={LABEL}>
+				<label htmlFor="provider-api-key">API key</label>
+				<SecretInput
+					id="provider-api-key"
 					value={active.apiKey}
 					onChange={(event) => patchActive({ apiKey: event.target.value })}
 					placeholder="sk-…"
-					className={INPUT}
 				/>
-			</label>
+			</div>
 			{isOpenRouterHost(active.baseUrl) ? (
 				<>
 					<label className="flex items-center justify-between gap-3 text-xs uppercase tracking-widest text-neutral-500">
@@ -811,19 +810,17 @@ export function WebSearchSection() {
 				model can read a page you link. The desktop app fetches it directly; the
 				browser build is bound by cross-origin rules.
 			</p>
-			<label className={LABEL}>
-				TinyFish API key
-				<input
-					type="password"
-					autoComplete="off"
+			<div className={LABEL}>
+				<label htmlFor="tinyfish-api-key">TinyFish API key</label>
+				<SecretInput
+					id="tinyfish-api-key"
 					value={settings.tinyfishApiKey}
 					onChange={(event) =>
 						setSettings({ tinyfishApiKey: event.target.value })
 					}
 					placeholder="TinyFish key"
-					className={INPUT}
 				/>
-			</label>
+			</div>
 			<p className="text-xs text-neutral-500">
 				Search and page fetch run through TinyFish while a key is set — free
 				within a daily allowance. The client-side web_search tool is declared
