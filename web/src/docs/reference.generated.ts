@@ -7,7 +7,7 @@
 import type { DocReference } from "@/docs/types";
 export const reference: DocReference = {
 	"apiVersion": "0.1",
-	"appVersion": "0.6.7",
+	"appVersion": "0.6.8",
 	"modules": [
 		{
 			"path": "src/lib/plugins/sdk.ts",

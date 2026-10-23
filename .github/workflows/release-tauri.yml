@@ -158,10 +158,10 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **New in 0.6.7**
+            **New in 0.6.8**
 
-            - **Volcengine ARK is a ready-made provider.** Pick it and paste your ARK key; the model field takes an endpoint id (`ep-…`) or a model name as the console lists it. ARK's chat API has no server-side search, so the web-search toggle falls back to TinyFish.
-            - **OpenRouter identification can be switched off.** The three app-attribution headers are now a per-provider toggle, on by default and shown only for an OpenRouter endpoint. Off sends none of them; your credentials and the request itself are unchanged.
+            - **Settings reads properly.** The section selector is a bordered rail beside the sections instead of an unbordered strip floating over them, and sections finally have space between their rows — a Chromium `::details-content` quirk had collapsed the gaps, so labels sat on the paragraph above them.
+            - **A refused model list says why.** Volcengine ARK answers the CORS preflight on its chat endpoint but not on `/api/v3/models`, so "Fetch models" failed with a bare `TypeError: Load failed`. It now explains the refusal and says what to type instead — the endpoint id (`ep-…`) or the model name from the ARK console.
 
             **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
 
