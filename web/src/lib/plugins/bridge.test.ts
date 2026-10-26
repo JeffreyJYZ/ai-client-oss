@@ -175,7 +175,7 @@ describe("registry bridge", () => {
 				yield* services.ui.add({
 					id: "test.boot",
 					owner: "test-plugin",
-					slot: "app.header",
+					slot: "app.header.actions",
 					component: component(),
 				});
 				yield* settle(() => ids(getRegistrySnapshot()).includes("test.boot"));

@@ -949,6 +949,14 @@ export const stop = (): void => {
 	runSeq += 1;
 	activeFiber = undefined;
 	streamConversationId = undefined;
+	// The interrupted turn never reaches `finalize`, so the replay body it
+	// started from is still what a later send would replay. Drop it for this
+	// conversation, the same way a failed turn does (`finalize`'s error
+	// branch): the next turn then rebuilds from the transcript, which carries
+	// both the user message the user just interrupted and the partial reply.
+	for (const protocol of protocolNames()) {
+		prevByConversationProtocol.delete(prevKey(conversationId, protocol));
+	}
 	if (fiber !== undefined) {
 		Effect.runFork(Fiber.interrupt(fiber));
 	}

@@ -26,7 +26,7 @@ const scope = (): Scope.Closeable => Effect.runSync(Scope.make());
 
 const component = (): ComponentType<Record<string, unknown>> => () => null;
 
-const contribution = (id: string, slot: SlotId = "app.header") => ({
+const contribution = (id: string, slot: SlotId = "app.header.actions") => ({
 	id,
 	slot,
 	component: component(),

@@ -12,7 +12,6 @@ export const slotIds = [
 	"ui.root.layout",
 	"app.sidebar",
 	"app.sidebar.actions",
-	"app.header",
 	"app.header.title",
 	"app.header.actions",
 	"app.notices",

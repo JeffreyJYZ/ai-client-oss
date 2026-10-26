@@ -147,7 +147,7 @@ describe("loadPlugin", () => {
 						setup: (host) => {
 							host.ui.register({
 								id: "kept",
-								slot: "app.header",
+								slot: "app.header.actions",
 								component: component(),
 							});
 							throw new Error("boom");
@@ -172,7 +172,7 @@ describe("loadPlugin", () => {
 						setup: (host) => {
 							host.ui.register({
 								id: "after",
-								slot: "app.header",
+								slot: "app.header.actions",
 								component: component(),
 							});
 						},
@@ -254,7 +254,7 @@ describe("loadPlugin", () => {
 						setup: (host) => {
 							host.ui.register({
 								id: "owned",
-								slot: "app.header",
+								slot: "app.header.actions",
 								component: component(),
 							});
 						},
@@ -393,7 +393,7 @@ describe("unloadPlugin", () => {
 						setup: (host) => {
 							host.ui.register({
 								id: "u1",
-								slot: "app.header",
+								slot: "app.header.actions",
 								component: component(),
 							});
 							host.ui.register({
@@ -444,7 +444,7 @@ describe("unloadPlugin", () => {
 						setup: (host) => {
 							host.ui.register({
 								id: "u",
-								slot: "app.header",
+								slot: "app.header.actions",
 								component: component(),
 							});
 							return {

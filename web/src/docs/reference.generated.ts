@@ -244,7 +244,7 @@ export const reference: DocReference = {
 				{
 					"name": "slotIds",
 					"kind": "const",
-					"signature": "export const slotIds = [ \"ui.root.layout\", \"app.sidebar\", \"app.sidebar.actions\", \"app.header\", \"app.header.title\", \"app.header.actions\", \"app.notices\", \"app.banne…;",
+					"signature": "export const slotIds = [ \"ui.root.layout\", \"app.sidebar\", \"app.sidebar.actions\", \"app.header.title\", \"app.header.actions\", \"app.notices\", \"app.banner\", \"chat.pane…;",
 					"description": "Every named UI region a contribution can render into — spec §4's slot map, derived from today's component tree. One `as const` tuple per registry so `z.enum` yields runtime validation and the union type from a single declaration: adding a slot id here is one line, and it is immediately valid wherever the schema is used (a manifest-adjacent schema, `host.ui.*`).",
 					"members": []
 				},
@@ -1236,10 +1236,6 @@ export const reference: DocReference = {
 		{
 			"id": "app.sidebar.actions",
 			"description": "Actions in the sidebar's header row."
-		},
-		{
-			"id": "app.header",
-			"description": "The top bar."
 		},
 		{
 			"id": "app.header.title",

@@ -193,11 +193,7 @@ fn resolve_within(root: &Path, rel_path: &str) -> Result<PathBuf, String> {
 /// `web/src/lib/plugins/manifest.ts`; keep the two in step** (that one fails a
 /// bad id with a readable decode error before it ever reaches here).
 fn safe_id(id: &str) -> Result<&str, String> {
-    let allowed = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-';
-    let ok = !id.is_empty()
-        && !id.starts_with('.')
-        && !id.ends_with('.')
-        && id.chars().all(allowed);
+    let ok = is_safe_component(id);
     if ok {
         Ok(id)
     } else {
@@ -205,6 +201,20 @@ fn safe_id(id: &str) -> Result<&str, String> {
             "invalid plugin id {id:?}: use only letters, digits, '.', '_' and '-', with no leading or trailing '.'"
         ))
     }
+}
+
+/// One path component: letters, digits, `.`, `_`, `-`, with no leading or
+/// trailing `.`. Everything that becomes a file name — a plugin id, a
+/// conversation id — is checked against this before it is joined onto a
+/// directory, because `PathBuf::join` discards the base for an absolute or
+/// parent-relative path.
+fn is_safe_component(id: &str) -> bool {
+    !id.is_empty()
+        && !id.starts_with('.')
+        && !id.ends_with('.')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-')
 }
 
 /// `<app data>/<base>/<id>` for a validated plugin id.
@@ -222,11 +232,29 @@ fn db_get_settings(app: tauri::AppHandle) -> Result<Option<String>, String> {
     }
 }
 
+/// Write one file so a crash cannot leave it half-written: the bytes go to a
+/// process-unique sibling name and the rename is the commit. `settings.json`
+/// holds the provider keys, so a truncated write loses them, and a truncated
+/// conversation loses the turn that was being saved.
+///
+/// The temp name comes from the companion's `tmp_sibling` — one home for that
+/// rule — so two writers (a page write racing a token rotation, two turns) can
+/// never share a name.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let tmp = companion::tmp_sibling(path);
+    fs::write(&tmp, bytes).map_err(|e| format!("cannot write {tmp:?}: {e}"))?;
+    fs::rename(&tmp, path).map_err(|e| {
+        let _ = fs::remove_file(&tmp);
+        format!("cannot commit {path:?}: {e}")
+    })
+}
+
 #[tauri::command]
 fn db_set_settings(app: tauri::AppHandle, json: String) -> Result<(), String> {
     let dir = app_data_dir(&app)?;
     fs::create_dir_all(&dir).map_err(|e| format!("failed to create app data dir: {e}"))?;
-    fs::write(dir.join(SETTINGS_FILE), json).map_err(|e| format!("failed to write settings: {e}"))
+    write_atomic(&dir.join(SETTINGS_FILE), json.as_bytes())
+        .map_err(|e| format!("failed to write settings: {e}"))
 }
 
 #[tauri::command]
@@ -249,9 +277,24 @@ fn db_list_conversations(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     Ok(conversations)
 }
 
+/// `<app data>/conversations/<id>.json`, for a validated id.
+///
+/// The id comes from the renderer — and therefore from any plugin running in
+/// it — so it is checked as one path component first: `join` discards the
+/// directory for `..` or an absolute path, and an id of `../../settings`
+/// would read, overwrite or delete the file holding the provider keys.
+fn conversation_path(app: &tauri::AppHandle, id: &str) -> Result<PathBuf, String> {
+    if !is_safe_component(id) {
+        return Err(format!(
+            "invalid conversation id {id:?}: use only letters, digits, '.', '_' and '-', with no leading or trailing '.'"
+        ));
+    }
+    Ok(conversations_dir(app)?.join(format!("{id}.json")))
+}
+
 #[tauri::command]
 fn db_get_conversation(app: tauri::AppHandle, id: String) -> Result<Option<String>, String> {
-    let path = conversations_dir(&app)?.join(format!("{id}.json"));
+    let path = conversation_path(&app, &id)?;
     match fs::read_to_string(&path) {
         Ok(contents) => Ok(Some(contents)),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
@@ -265,13 +308,13 @@ fn db_upsert_conversation(
     id: String,
     json: String,
 ) -> Result<(), String> {
-    let path = conversations_dir(&app)?.join(format!("{id}.json"));
-    fs::write(&path, json).map_err(|e| format!("failed to write conversation: {e}"))
+    let path = conversation_path(&app, &id)?;
+    write_atomic(&path, json.as_bytes()).map_err(|e| format!("failed to write conversation: {e}"))
 }
 
 #[tauri::command]
 fn db_delete_conversation(app: tauri::AppHandle, id: String) -> Result<(), String> {
-    let path = conversations_dir(&app)?.join(format!("{id}.json"));
+    let path = conversation_path(&app, &id)?;
     match fs::remove_file(&path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -630,6 +673,13 @@ fn chat_client_from(read_timeout: Duration) -> Result<reqwest::Client, String> {
     client_builder()
         .connect_timeout(CHAT_CONNECT_TIMEOUT)
         .read_timeout(read_timeout)
+        // A chat request goes to the endpoint the app chose, and a `3xx` must
+        // surface as that endpoint's answer rather than be followed: the
+        // companion forwards only to a configured provider's origin, and a
+        // followed redirect would leave that origin without the bound ever
+        // seeing the new one. A provider that redirects its chat path is
+        // misconfigured; the user sees its status instead of a silent detour.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| format!("failed to build chat http client: {e}"))
 }
@@ -1673,4 +1723,55 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while building tauri application");
+}
+
+#[cfg(test)]
+mod component_tests {
+    use super::*;
+
+    /// A conversation id becomes a file name, so it obeys the one-component
+    /// rule: no separators, no parent steps, no leading dot.
+    #[test]
+    fn a_conversation_id_is_one_path_component() {
+        for ok in ["conv-1", "abc_2", "a.b", "ABC123"] {
+            assert!(is_safe_component(ok), "{ok}");
+        }
+        for bad in [
+            "",
+            ".",
+            "..",
+            "../settings",
+            "a/b",
+            "/etc/passwd",
+            ".hidden",
+            "trailing.",
+            "a\\b",
+            "C:",
+            "conv 1",
+        ] {
+            assert!(!is_safe_component(bad), "{bad}");
+        }
+    }
+
+    /// The write is committed by a rename, so no reader ever sees a half file.
+    #[test]
+    fn an_atomic_write_replaces_the_target_and_leaves_no_temp_behind() {
+        let dir = std::env::temp_dir().join(format!("ai-client-write-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let path = dir.join("settings.json");
+        write_atomic(&path, b"{\"first\":true}").expect("first write");
+        write_atomic(&path, b"{\"second\":true}").expect("second write");
+        assert_eq!(
+            std::fs::read_to_string(&path).expect("read back"),
+            "{\"second\":true}"
+        );
+        let leftovers: Vec<_> = std::fs::read_dir(&dir)
+            .expect("list")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.ends_with(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "temp files left: {leftovers:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

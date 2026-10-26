@@ -267,7 +267,7 @@ fn write_secret(path: &Path, value: &Value) -> Result<(), String> {
 /// A fixed `settings.json.tmp` was shared by every writer — two tabs, or a page
 /// write racing a token rotation — so one rename could commit the other's bytes
 /// or fail outright on Windows. The pid and a counter make each write its own.
-fn tmp_sibling(path: &Path) -> PathBuf {
+pub(crate) fn tmp_sibling(path: &Path) -> PathBuf {
     static COUNTER: AtomicU64 = AtomicU64::new(0);
     let unique = COUNTER.fetch_add(1, Ordering::Relaxed);
     let name = path
@@ -548,13 +548,12 @@ async fn chat(
     if !authorized(&state, &headers) {
         return unauthorized();
     }
-    if url_host(&request.url).is_none() {
+    let Some(origin) = url_origin(&request.url) else {
         return error(StatusCode::BAD_REQUEST, "only http:// and https:// URLs");
-    }
+    };
     // The SSRF bound: this is a forwarder for the user's configured providers,
     // not a proxy to whatever a page can name.
-    let host = url_host(&request.url).unwrap_or_default();
-    if !provider_hosts(&state).iter().any(|allowed| allowed == &host) {
+    if !provider_origins(&state).iter().any(|allowed| allowed == &origin) {
         return error(
             StatusCode::FORBIDDEN,
             "target host is not a configured provider",
@@ -615,10 +614,15 @@ async fn chat(
         .unwrap_or_else(|_| error(StatusCode::BAD_GATEWAY, "upstream response"))
 }
 
-/// Every host a configured provider points at. An unreadable or empty settings
-/// file yields no hosts, which refuses every chat — the page then falls back to
-/// its own transport and says why.
-fn provider_hosts(state: &CompanionState) -> Vec<String> {
+/// Every origin (scheme, host and effective port) a configured provider points
+/// at. An unreadable or empty settings file yields none, which refuses every
+/// chat — the page then falls back to its own transport and says why.
+///
+/// Origin, not host: matching the host alone let a page forward to any port on
+/// it, in either scheme, so a provider on `http://127.0.0.1:8787` also granted
+/// `https://127.0.0.1:22`. That is wider than "a host a configured provider
+/// names", and the point of the bound is to be a forwarder, not a proxy.
+fn provider_origins(state: &CompanionState) -> Vec<String> {
     let Ok(raw) = fs::read(&state.settings) else {
         return Vec::new();
     };
@@ -632,10 +636,44 @@ fn provider_hosts(state: &CompanionState) -> Vec<String> {
             providers
                 .iter()
                 .filter_map(|provider| provider.get("baseUrl").and_then(Value::as_str))
-                .filter_map(url_host)
+                .filter_map(url_origin)
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// The origin of an http(s) URL — `scheme://host:port`, with the scheme's
+/// default port filled in, host lowercased and any userinfo dropped. `None`
+/// for anything that is not http(s) or has no host.
+fn url_origin(url: &str) -> Option<String> {
+    let lower = url.to_ascii_lowercase();
+    let default_port = if lower.starts_with("https://") {
+        443
+    } else if lower.starts_with("http://") {
+        80
+    } else {
+        return None;
+    };
+    let host = url_host(url)?;
+    let port = url_port(url).unwrap_or(default_port);
+    let scheme = if default_port == 443 { "https" } else { "http" };
+    Some(format!("{scheme}://{host}:{port}"))
+}
+
+/// The explicit port in an http(s) URL's authority, when it carries one. IPv6
+/// literals keep their brackets, so the port is whatever follows `]:`.
+fn url_port(url: &str) -> Option<u16> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let host_port = authority.rsplit('@').next()?;
+    let port = if let Some(bracketed) = host_port.strip_prefix('[') {
+        bracketed.split_once(']')?.1.strip_prefix(':')?
+    } else {
+        host_port.split_once(':')?.1
+    };
+    port.parse().ok()
 }
 
 /// The host of an http(s) URL, lowercased, without userinfo or port. Hand-parsed
@@ -671,6 +709,40 @@ fn url_host(url: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bound is the origin, so the port and the scheme are part of it: a
+    /// provider on `http://127.0.0.1:8787` must not also grant
+    /// `https://127.0.0.1:22`.
+    #[test]
+    fn an_origin_carries_the_scheme_and_the_effective_port() {
+        let cases = [
+            ("https://api.example.com/v1", "https://api.example.com:443"),
+            ("http://api.example.com/v1", "http://api.example.com:80"),
+            ("http://127.0.0.1:8787/w/opencode", "http://127.0.0.1:8787"),
+            ("https://api.example.com:8443/v1", "https://api.example.com:8443"),
+            ("https://API.Example.com./v1", "https://api.example.com:443"),
+            ("https://user:pw@api.example.com/v1", "https://api.example.com:443"),
+            ("http://[::1]:8787/v1", "http://[::1]:8787"),
+            ("ftp://api.example.com", ""),
+            ("not a url", ""),
+        ];
+        for (url, expected) in cases {
+            assert_eq!(url_origin(url).unwrap_or_default(), expected, "{url}");
+        }
+    }
+
+    #[test]
+    fn the_same_host_on_another_port_or_scheme_is_not_the_same_origin() {
+        let allowed = url_origin("http://127.0.0.1:8787/w/opencode").expect("origin");
+        for url in [
+            "http://127.0.0.1:1/v1/chat",
+            "https://127.0.0.1:22/v1/chat",
+            "https://127.0.0.1:8787/v1/chat",
+            "http://127.0.0.2:8787/v1/chat",
+        ] {
+            assert_ne!(url_origin(url).unwrap_or_default(), allowed, "{url}");
+        }
+    }
 
     fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
         let mut map = HeaderMap::new();

@@ -13,7 +13,6 @@ export const slotNotes: Record<string, string> = {
 		"The root layout. The default shell is itself the default contribution, so replacing it takes over the whole app — and that means owning the way back to the Plugins manager: the host keeps it registered, but a layout that renders no `settings.root` shows it nowhere. The way back is guaranteed for built-in **area** toggles; a layout, or a per-contribution toggle that removes the route, owns that choice.",
 	"app.sidebar": "The conversation sidebar.",
 	"app.sidebar.actions": "Actions in the sidebar's header row.",
-	"app.header": "The top bar.",
 	"app.header.title": "The top bar's title region.",
 	"app.header.actions": "The top bar's action buttons.",
 	"app.notices":

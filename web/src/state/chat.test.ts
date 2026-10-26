@@ -32,6 +32,7 @@ import {
 	newConversation,
 	renameConversation,
 	send,
+	stop,
 	subscribeUserMessage,
 	titleIfDerived,
 } from "@/state/chat";
@@ -1052,4 +1053,85 @@ describe("a title's source, and the user-message signal", () => {
 	// no test can interleave a rename between them. A caller-side check only
 	// becomes lossy once that step is asynchronous, which is the shape a future
 	// change would have to introduce.
+});
+
+describe("a stopped turn", () => {
+	/** Let the forked turn reach its own `send`, which assigns the body. */
+	const settle = (): Promise<void> =>
+		new Promise((resolve) => setTimeout(resolve, 25));
+
+	test("does not leave a stale replay body, so the next turn sees the interrupted message", async () => {
+		const bodies: unknown[] = [];
+		// Turn 1 completes, so a replay body is stored. Turn 2 is the one the
+		// user stops — it hangs, so its finalizer never runs. Turn 3 must not
+		// replay turn 1's body, which predates the interrupted question.
+		let round = 0;
+		const provider = {
+			...chatcompletions,
+			send: (ctx: SendCtx) =>
+				Effect.sync(() => {
+					bodies.push(
+						chatcompletions.buildRequest(
+							(ctx.prev ?? chatcompletions.template) as never,
+							ctx,
+						),
+					);
+					round += 1;
+					return round === 2
+						? (Stream.never as Stream.Stream<Chunk, string>)
+						: (Stream.empty as Stream.Stream<Chunk, string>);
+				}),
+		};
+		const providerHandle = addProvider("chatcompletions", provider);
+		const before = getSettings();
+		setSettings({
+			providers: [
+				{
+					...emptyProviderConfig("stop-provider"),
+					protocol: "chatcompletions",
+					baseUrl: "https://example.com/v1",
+				},
+			],
+			activeProviderId: "stop-provider",
+		});
+		try {
+			// Turn 1: completes, and its body becomes the stored replay.
+			const firstTurn = subscribeTurnEnd();
+			try {
+				send("an answered question", []);
+				await firstTurn.done;
+			} finally {
+				firstTurn.dispose();
+			}
+			expect(bodies).toHaveLength(1);
+
+			// Turn 2: the user stops it, so `finalize` never stores or drops
+			// its body.
+			send("the interrupted question", []);
+			await settle();
+			expect(bodies).toHaveLength(2);
+			stop();
+
+			// Turn 3 must be rebuilt from the transcript, not from turn 1's
+			// stored body — which predates the interrupted question.
+			const thirdTurn = subscribeTurnEnd();
+			try {
+				send("the follow-up", []);
+				await thirdTurn.done;
+			} finally {
+				thirdTurn.dispose();
+			}
+
+			const third = JSON.stringify(bodies[2]);
+			expect(third).toContain("the interrupted question");
+			expect(third).toContain("the follow-up");
+		} finally {
+			providerHandle.dispose();
+			setSettings({
+				providers: before.providers,
+				activeProviderId: before.activeProviderId,
+				fetchToolEnabled: before.fetchToolEnabled,
+			});
+		}
+	});
 });
