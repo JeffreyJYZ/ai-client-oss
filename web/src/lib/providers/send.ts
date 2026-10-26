@@ -351,11 +351,58 @@ export const parseLine = (line: string): Chunk | null => {
 	return text === null || text === "" ? null : { kind: "text", text };
 };
 
-const parseLineSafe = (line: string): Effect.Effect<Chunk | null> =>
+/** What one SSE line means: a chunk, or a fault the turn must fail with. */
+type ParsedLine = { readonly fault: string } | { readonly chunk: Chunk | null };
+
+/**
+ * A streamed error, from whichever envelope the endpoint used.
+ *
+ * Every protocol can end a body with an error *inside* a 200: chat/completions
+ * sends `{"error":{"message":…}}`, the Responses API a `response.failed` event,
+ * Anthropic a `{"type":"error","error":{…}}`. Parsing those as "no visible
+ * text" dropped them, so the turn finished as an empty successful reply and the
+ * user saw nothing at all — the endpoint's own words are the only useful thing
+ * in that body.
+ */
+const faultOf = (event: unknown): string | null => {
+	if (!isRecord(event)) return null;
+	const direct =
+		typeof event.error === "string"
+			? event.error
+			: isRecord(event.error)
+				? asString(event.error.message)
+				: null;
+	if (direct !== null) return `the endpoint reported: ${direct}`;
+	if (event.type === "response.failed") {
+		const response = isRecord(event.response) ? event.response : undefined;
+		const error = isRecord(response?.error) ? response.error : undefined;
+		const message = error === undefined ? null : asString(error.message);
+		if (message !== null) return `the endpoint reported: ${message}`;
+	}
+	return null;
+};
+
+const parseEvent = (line: string): ParsedLine => {
+	const trimmed = line.trim();
+	if (!trimmed.startsWith("data:")) return { chunk: null };
+	const payload = trimmed.slice("data:".length).trim();
+	if (payload === "" || payload === "[DONE]") return { chunk: null };
+	const fault = faultOf(JSON.parse(payload));
+	return fault === null ? { chunk: parseLine(line) } : { fault };
+};
+
+const lineChunk = (line: string): Effect.Effect<Chunk | null, string> =>
 	Effect.try({
-		try: () => parseLine(line),
-		catch: () => null,
-	}).pipe(Effect.orElseSucceed((): Chunk | null => null));
+		try: () => parseEvent(line),
+		catch: () => ({ chunk: null }) as ParsedLine,
+	}).pipe(
+		Effect.orElseSucceed((): ParsedLine => ({ chunk: null })),
+		Effect.flatMap((parsed) =>
+			"fault" in parsed
+				? Effect.fail(parsed.fault)
+				: Effect.succeed(parsed.chunk),
+		),
+	);
 
 /** A call being assembled from its streamed fragments. */
 interface PendingCall {
@@ -530,7 +577,7 @@ export const sendStream = (
 
 		return response.chunks.pipe(
 			Stream.splitLines,
-			Stream.mapEffect(parseLineSafe),
+			Stream.mapEffect(lineChunk),
 			Stream.filter((chunk): chunk is Chunk => chunk !== null),
 			accumulateToolCalls,
 			// A caller that stops consuming the stream (a stopped turn) abandons

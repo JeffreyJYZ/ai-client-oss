@@ -326,3 +326,66 @@ describe("a tool call carried beside empty content", () => {
 		).toEqual([]);
 	});
 });
+
+describe("an error inside a 200 body", () => {
+	const stub = (body: string): void => {
+		stubFetch(
+			() =>
+				new Response(body, {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				}),
+		);
+	};
+
+	// The fault is raised while the body is consumed, not when the stream is
+	// built, so the whole turn runs inside one `exit`.
+	const failureText = async (url: string): Promise<string> => {
+		const turn = Effect.gen(function* () {
+			const stream = yield* sendStream(url, {}, {});
+			yield* Stream.runCollect(stream);
+		});
+		const exit = await Effect.runPromise(Effect.exit(turn));
+		return Exit.isFailure(exit)
+			? Option.getOrElse(
+					Cause.findErrorOption(exit.cause),
+					() => "(no message)",
+				)
+			: "";
+	};
+
+	test("a chat/completions error envelope fails the turn, carrying the endpoint's words", async () => {
+		stub(
+			'data: {"error":{"message":"upstream is very busy"}}\n\ndata: [DONE]\n\n',
+		);
+		const text = await failureText(
+			"https://openrouter.ai/api/v1/chat/completions",
+		);
+		expect(text).toContain("upstream is very busy");
+	});
+
+	test("a Responses response.failed event fails the turn", async () => {
+		stub(
+			'data: {"type":"response.failed","response":{"error":{"message":"quota exhausted"}}}\n\n',
+		);
+		const text = await failureText("https://api.openai.com/v1/responses");
+		expect(text).toContain("quota exhausted");
+	});
+
+	test("an Anthropic error event fails the turn", async () => {
+		stub(
+			'event: error\ndata: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n',
+		);
+		const text = await failureText("https://api.anthropic.com/v1/messages");
+		expect(text).toContain("Overloaded");
+	});
+
+	test("ordinary text still streams, and is not mistaken for a fault", async () => {
+		stub('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n');
+		const stream = await Effect.runPromise(
+			sendStream("https://openrouter.ai/api/v1/chat/completions", {}, {}),
+		);
+		const chunks = await Effect.runPromise(Stream.runCollect(stream));
+		expect([...chunks]).toEqual([{ kind: "text", text: "hi" }]);
+	});
+});
