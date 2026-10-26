@@ -128,6 +128,9 @@ export type ChatTransport = (
  */
 const shapeChatResponse = (
 	response: Response,
+	// The caller's own abort: the handle lives where the request was made, and
+	// a transport that cannot abort leaves a stopped turn's request running.
+	cancel: Effect.Effect<void> = Effect.void,
 ): Effect.Effect<ChatResponse, string> =>
 	Effect.gen(function* () {
 		const raw = response.body;
@@ -152,14 +155,23 @@ const shapeChatResponse = (
 							evaluate: () => raw,
 							onError: (cause) => String(cause),
 						}).pipe(Stream.decodeText()),
-			cancel: Effect.void,
+			cancel,
 		};
 	});
 
 export const webTransport: ChatTransport = (url, headers, body) =>
 	Effect.gen(function* () {
+		// The browser's own abort handle. Without it this transport's `cancel`
+		// is a no-op, so a stopped turn leaves the request — and the upstream
+		// generation it pays for — running after the app has walked away.
+		const controller = new AbortController();
 		const response = yield* fetchDescribed(() =>
-			fetch(url, { method: "POST", headers, body }),
+			fetch(url, {
+				method: "POST",
+				headers,
+				body,
+				signal: controller.signal,
+			}),
 		).pipe(
 			// A host known to refuse the preflight gets a sentence a user can act
 			// on; every other endpoint keeps the description it always had.
@@ -168,7 +180,10 @@ export const webTransport: ChatTransport = (url, headers, body) =>
 			),
 		);
 
-		return yield* shapeChatResponse(response);
+		return yield* shapeChatResponse(
+			response,
+			Effect.sync(() => controller.abort()),
+		);
 	});
 
 /**
@@ -185,6 +200,7 @@ export const companionTransport =
 	(origin: string, token: string): ChatTransport =>
 	(url, headers, body) =>
 		Effect.gen(function* () {
+			const controller = new AbortController();
 			const response = yield* fetchDescribed(() =>
 				fetch(`${origin}/v1/chat`, {
 					method: "POST",
@@ -193,6 +209,7 @@ export const companionTransport =
 						authorization: `Bearer ${token}`,
 					},
 					body: JSON.stringify({ url, headers, body }),
+					signal: controller.signal,
 				}),
 			);
 
@@ -207,7 +224,10 @@ export const companionTransport =
 				return yield* Effect.fail(`HTTP 401: ${detail}`);
 			}
 
-			return yield* shapeChatResponse(response);
+			return yield* shapeChatResponse(
+				response,
+				Effect.sync(() => controller.abort()),
+			);
 		});
 
 /**

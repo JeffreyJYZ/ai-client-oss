@@ -26,11 +26,7 @@ const buildRequest = (send: ResponsesSend, ctx: SendCtx) => {
 					},
 				]
 			: send.input;
-	const attachments = (ctx.parts ?? []).map((part) =>
-		part.kind === "image"
-			? { type: "input_image" as const, file_url: part.dataUrl }
-			: { type: "input_file" as const, file_url: part.dataUrl },
-	);
+	const attachments = partsBlocks(ctx.parts ?? []);
 	// The active variant's parameters, mapped to this protocol's field names.
 	const variant = responsesVariant(ctx.variant);
 	return {
@@ -110,15 +106,23 @@ const appendAssistant = (send: ResponsesSend, text: string) => {
 };
 
 /**
- * One attachment as the Responses input item
- * `buildRequest` writes: images and files share the
- * `file_url` shape, differing only in item type.
+ * One attachment as the Responses input item. The two kinds take different
+ * fields: an image carries `image_url`, a file carries `filename` and
+ * `file_data`. A `file_url` on either is refused by the API, so a turn with an
+ * attachment failed before it started.
+ *
+ * One home, used by `buildRequest` and by `seedHistory`, so the seed of a
+ * stored conversation equals the body its successful turns left behind.
  */
 const partsBlocks = (parts: readonly AttachmentPart[]) =>
 	parts.map((part) =>
 		part.kind === "image"
-			? { type: "input_image" as const, file_url: part.dataUrl }
-			: { type: "input_file" as const, file_url: part.dataUrl },
+			? { type: "input_image" as const, image_url: part.dataUrl }
+			: {
+					type: "input_file" as const,
+					filename: part.name,
+					file_data: part.dataUrl,
+				},
 	);
 
 /**

@@ -373,3 +373,32 @@ describe("the web transport", () => {
 		globalThis.fetch = realFetch;
 	});
 });
+
+describe("the browser transport's cancel", () => {
+	test("aborts the request it started, so a stopped turn stops paying for it", async () => {
+		const realFetch = globalThis.fetch;
+		let seen: AbortSignal | undefined;
+		globalThis.fetch = ((
+			_input: RequestInfo | URL,
+			init?: RequestInit,
+		): Promise<Response> => {
+			seen = init?.signal ?? undefined;
+			return Promise.resolve(
+				new Response("data: [DONE]\n\n", {
+					status: 200,
+					headers: { "content-type": "text/event-stream" },
+				}),
+			);
+		}) as typeof fetch;
+		try {
+			const response = await Effect.runPromise(
+				webTransport("https://openrouter.ai/api/v1/chat/completions", {}, "{}"),
+			);
+			expect(seen?.aborted).toBe(false);
+			await Effect.runPromise(response.cancel);
+			expect(seen?.aborted).toBe(true);
+		} finally {
+			globalThis.fetch = realFetch;
+		}
+	});
+});
