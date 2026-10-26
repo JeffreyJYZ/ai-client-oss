@@ -29,6 +29,13 @@ jobs:
       - name: Lint
         working-directory: web
         run: bunx biome check .
+      # The suite is the only gate on behaviour: the four steps around it check
+      # types, formatting, effects and that the bundle builds. `bun run verify`
+      # has always run it; CI composed its own list and left it out, so a PR
+      # could delete an assertion or regress a parser and still merge green.
+      - name: Test
+        working-directory: web
+        run: bun test
       - name: Effect language service diagnostics
         working-directory: web
         run: bunx effect-language-service diagnostics --project tsconfig.app.json --format text
@@ -55,3 +62,8 @@ jobs:
       - name: Cargo check
         working-directory: web/src-tauri
         run: cargo check --all-targets
+      # `--all-targets` compiles the tests but never runs them; the shell's own
+      # tests are what pin plugin path containment and the companion's guards.
+      - name: Cargo test
+        working-directory: web/src-tauri
+        run: cargo test
