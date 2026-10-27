@@ -158,10 +158,13 @@ jobs:
           releaseBody: |
             Download the installer for your platform from the assets below.
 
-            **New in 0.6.8**
+            **New in 0.6.9**
 
-            - **Settings reads properly.** The section selector is a bordered rail beside the sections instead of an unbordered strip floating over them, and sections finally have space between their rows — a Chromium `::details-content` quirk had collapsed the gaps, so labels sat on the paragraph above them.
-            - **A refused model list says why.** Volcengine ARK answers the CORS preflight on its chat endpoint but not on `/api/v3/models`, so "Fetch models" failed with a bare `TypeError: Load failed`. It now explains the refusal and says what to type instead — the endpoint id (`ep-…`) or the model name from the ARK console.
+            - **The desktop app now shows pairing as it happens.** Pair a browser tab with the local companion and the app's Settings says so within seconds — "Paired — https://aiclient.jyz.land is using this app right now." — instead of only updating on the next reload. The record is display-only; the token still decides every request.
+            - **The settings rail stays visible.** The section list is sticky at every width and scrolls on its own when it outgrows the window, so jumping between sections no longer means scrolling back up to find the rail.
+            - **Profiles bundle a variant.** A profile now carries a provider, model, system prompt **and** a variant, so one pick applies the whole configuration including generation parameters. New profiles start from the variant already in use, and a profile whose variant was deleted clears it rather than leaving a stale one.
+            - **Provider fixes.** A streamed error now fails the turn instead of finishing with an empty reply; OpenRouter/Responses attachments are written in their real fields; a tool call that arrives beside empty content is kept; a stopped turn aborts cleanly.
+            - **Security.** Conversation ids are validated, settings and conversation writes are atomic, and the local companion's surface is bounded by the exact origin list.
 
             **License:** this version is GPL-3.0-only. The 0.1.x releases were MIT and stay MIT for anyone who already has them.
 
