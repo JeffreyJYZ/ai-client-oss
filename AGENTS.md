@@ -34,6 +34,8 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 
 - **Space a `<details>`' children with `space-y-*`, never `gap`** — Chromium wraps the content in `::details-content`, so `flex flex-col gap-3` spaces that wrapper and leaves every child flush against the one above (measured 2026-10-23: labels sat on paragraphs in Settings). `SECTION`/`SUBSECTION` and the plugin rows are margin-based for this reason.
 
+- **A sticky rail must be the sticky element's parent-height ancestor, and that ancestor cannot be `position: sticky`'s own child** — Settings' section nav sat inside a wrapper exactly as tall as itself, so `sticky` had no range and the rail scrolled away. The wrapper (`SettingsShell`) carries `sticky top-0 md:top-6 md:self-start`; the nav only styles itself. `self-start` is `md:`-only, or the mobile grid item shrinks to its content width (measured in the production bundle 2026-10-27).
+
 ## Linting
 
 - **Effect checking = two layers, both wired.** Biome GritQL is syntactic (no types); the Effect language service is type-aware.
@@ -129,7 +131,7 @@ Tauri desktop app (`oss-ai-client`) with a Vite + React 19 (TS) frontend. Bun + 
 - **`POST /v1/chat` forwards only to a host a configured provider's `baseUrl` names**, and page-supplied header names are validated before reqwest sees them — that bound is what keeps the route a forwarder rather than a proxy.
 - **Body caps differ per route: `/v1/settings` 4 MB, router-wide 32 MB.** A chat body is a whole conversation, and an outer `DefaultBodyLimit` shadows a per-route one, so the smaller cap goes on the route.
 - **The page's `ChatTransport` carries status and body only, so upstream headers cannot reach it** — the daemon relays `content-type`, everything else stops at the seam. Do not add a header field without changing the contract.
-- **Pairing is client state, not daemon state**: token in `localStorage["ai-client.companion"]`, read per call so pairing needs no reload; a stored token with the app closed falls back to browser-local settings and says so, never merges.
+- **Pairing is client state, not daemon state**: token in `localStorage["ai-client.companion"]`, read per call so pairing needs no reload; a stored token with the app closed falls back to browser-local settings and says so, never merges. **The desktop's "paired" line is polled from `companion_info`**: the daemon records the last successful `/v1/pair` and the last authenticated request (origin + time, session-local, cleared on rotation) purely to display it, and that log is never an auth input — the token still decides every request. Without it the app cannot know a page paired, because the pairing lives only in that page's storage (2026-10-27).
 - **Temp files come from `tmp_sibling` (pid + counter), never a fixed `.tmp`** — two tabs once raced one name through a rename.
 - **`ring` is a direct dependency for the token's randomness** — it is already in the tree via rustls, whose re-export does not expose `rand`.
 - **Prove the page with `scripts/companion-stub.ts`, not the app** — the daemon needs a GUI to start; the stub implements the same routes and guards. Proof: `docs/proofs/2026-10-22-companion-browser-proof.md`.

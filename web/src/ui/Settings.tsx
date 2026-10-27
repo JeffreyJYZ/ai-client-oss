@@ -68,6 +68,7 @@ import {
 } from "@/ui/kit";
 import { SettingsNav } from "@/ui/SettingsNav";
 import Slot from "@/ui/slots/Slot";
+import { variantLabel } from "@/ui/variants/variantFields";
 
 /** Only tool the UI exposes; the request body sends it verbatim. */
 const WEB_SEARCH = "web_search_preview";
@@ -133,7 +134,10 @@ export function SettingsShell() {
 					Settings
 				</h2>
 				<EditorProvider>
-					<div className="flex min-w-0 flex-col gap-2">
+					{/* The rail scrolls with the page no longer: the wrapper is the
+					    sticky box (a sticky nav inside it could never move — its
+					    containing block is only its own height). */}
+					<div className="sticky top-0 z-10 flex min-w-0 flex-col gap-2 md:top-6 md:self-start">
 						<SettingsNav />
 						<Slot id="settings.nav" />
 					</div>
@@ -574,36 +578,42 @@ export function ProfilesSection() {
 				</p>
 			) : (
 				<ul className="flex flex-col gap-2">
-					{settings.profiles.map((profile) => (
-						<li
-							key={profile.id}
-							className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
-						>
-							<span className="flex min-w-0 flex-1 flex-col items-start text-left">
-								<span className="w-full truncate text-sm text-neutral-100">
-									{profile.name.trim() !== ""
-										? profile.name
-										: "Untitled profile"}
-								</span>
-								<span className="w-full truncate text-xs text-neutral-500">
-									{profile.model.trim() !== "" ? profile.model : "no model"}
-								</span>
-							</span>
-							<button
-								type="button"
-								onClick={() => editor?.setEditingProfileId(profile.id)}
-								className={BUTTON}
+					{settings.profiles.map((profile) => {
+						const variant = settings.variants.find(
+							(candidate) => candidate.id === profile.variantId,
+						);
+						return (
+							<li
+								key={profile.id}
+								className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-3 py-2"
 							>
-								Edit
-							</button>
-							<ConfirmButton
-								label="Remove"
-								confirmLabel="Confirm?"
-								onConfirm={() => removeProfileEntry(profile.id)}
-								className={BUTTON}
-							/>
-						</li>
-					))}
+								<span className="flex min-w-0 flex-1 flex-col items-start text-left">
+									<span className="w-full truncate text-sm text-neutral-100">
+										{profile.name.trim() !== ""
+											? profile.name
+											: "Untitled profile"}
+									</span>
+									<span className="w-full truncate text-xs text-neutral-500">
+										{profile.model.trim() !== "" ? profile.model : "no model"}
+										{variant !== undefined ? ` · ${variantLabel(variant)}` : ""}
+									</span>
+								</span>
+								<button
+									type="button"
+									onClick={() => editor?.setEditingProfileId(profile.id)}
+									className={BUTTON}
+								>
+									Edit
+								</button>
+								<ConfirmButton
+									label="Remove"
+									confirmLabel="Confirm?"
+									onConfirm={() => removeProfileEntry(profile.id)}
+									className={BUTTON}
+								/>
+							</li>
+						);
+					})}
 				</ul>
 			)}
 		</Section>
@@ -680,6 +690,21 @@ export function ProfileEditor() {
 					<option key={id} value={id} />
 				))}
 			</datalist>
+			<label className={LABEL}>
+				Variant
+				<select
+					value={editingProfile.variantId}
+					onChange={(event) => patchProfile({ variantId: event.target.value })}
+					className={INPUT}
+				>
+					<option value="">—</option>
+					{settings.variants.map((variant) => (
+						<option key={variant.id} value={variant.id}>
+							{variantLabel(variant)}
+						</option>
+					))}
+				</select>
+			</label>
 			<label className={LABEL}>
 				System prompt
 				<textarea

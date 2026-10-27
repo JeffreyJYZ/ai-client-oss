@@ -33,6 +33,7 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::body::{Body, Bytes};
 use axum::extract::{DefaultBodyLimit, State};
@@ -95,6 +96,25 @@ const HOP_BY_HOP: &[&str] = &[
     "referer",
 ];
 
+/// One page the companion has heard from. Recorded for the desktop UI only and
+/// never consulted for auth: the bearer token stays the sole authority, so a
+/// stale record cannot admit a request.
+#[derive(Clone)]
+struct SeenOrigin {
+    origin: String,
+    at: u64,
+}
+
+/// What the desktop window shows about pairing. Session-local on purpose — the
+/// pairing itself lives in the page's `localStorage`, so this is an
+/// observation, not a second source of truth.
+#[derive(Default)]
+struct PairingLog {
+    paired: u64,
+    last_pair: Option<SeenOrigin>,
+    last_seen: Option<SeenOrigin>,
+}
+
 /// The state every route needs. `settings` is a path rather than an
 /// `AppHandle` so a test can drive the real router against a temp dir.
 #[derive(Clone)]
@@ -102,6 +122,7 @@ struct CompanionState {
     settings: PathBuf,
     port: u16,
     token: Arc<Mutex<String>>,
+    pairing: Arc<Mutex<PairingLog>>,
 }
 
 /// The process-wide handle the desktop commands read. Set once at startup.
@@ -109,6 +130,7 @@ struct Companion {
     token: Arc<Mutex<String>>,
     port: u16,
     running: Arc<AtomicBool>,
+    pairing: Arc<Mutex<PairingLog>>,
 }
 
 static COMPANION: OnceLock<Companion> = OnceLock::new();
@@ -143,10 +165,12 @@ pub fn start(app: tauri::AppHandle) {
 
     let token = Arc::new(Mutex::new(token));
     let running = Arc::new(AtomicBool::new(false));
+    let pairing = Arc::new(Mutex::new(PairingLog::default()));
     let state = CompanionState {
         settings,
         port,
         token: token.clone(),
+        pairing: pairing.clone(),
     };
     let flag = running.clone();
 
@@ -173,11 +197,13 @@ pub fn start(app: tauri::AppHandle) {
         token,
         port,
         running,
+        pairing,
     });
 }
 
-/// What the desktop UI shows: the port, this machine's token, and whether the
-/// listener is up. The token is the user's own secret, shown only in the app.
+/// What the desktop UI shows: the port, this machine's token, whether the
+/// listener is up, and the last page that paired or talked to it. The token is
+/// the user's own secret, shown only in the app.
 #[tauri::command]
 pub fn companion_info() -> Result<Value, String> {
     let companion = COMPANION
@@ -188,15 +214,27 @@ pub fn companion_info() -> Result<Value, String> {
         .lock()
         .map_err(|_| "companion: state poisoned".to_string())?
         .clone();
+    let pairing = companion
+        .pairing
+        .lock()
+        .map_err(|_| "companion: state poisoned".to_string())?;
     Ok(json!({
         "port": companion.port,
         "token": token,
         "running": companion.running.load(Ordering::SeqCst),
+        "paired": pairing.paired > 0,
+        "pairedCount": pairing.paired,
+        "pairedOrigin": pairing.last_pair.as_ref().map(|seen| seen.origin.clone()),
+        "pairedAt": pairing.last_pair.as_ref().map(|seen| seen.at),
+        "lastSeenOrigin": pairing.last_seen.as_ref().map(|seen| seen.origin.clone()),
+        "lastSeenAt": pairing.last_seen.as_ref().map(|seen| seen.at),
     }))
 }
 
 /// Mint a new token and write it down. A page holding the old one is refused
-/// from the next request on, because every check reads the live value.
+/// from the next request on, because every check reads the live value. The
+/// pairing log is cleared with it: every record it held names a page whose
+/// stored token just stopped working.
 #[tauri::command]
 pub fn companion_rotate(app: tauri::AppHandle) -> Result<Value, String> {
     let companion = COMPANION
@@ -208,7 +246,56 @@ pub fn companion_rotate(app: tauri::AppHandle) -> Result<Value, String> {
         .token
         .lock()
         .map_err(|_| "companion: state poisoned".to_string())? = token.clone();
+    if let Ok(mut pairing) = companion.pairing.lock() {
+        *pairing = PairingLog::default();
+    }
     Ok(json!({ "token": token }))
+}
+
+/// Milliseconds since the epoch, for the pairing log's timestamps only.
+fn now_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// The page's own origin, or a phrase when it sent none. Only an allowlisted
+/// origin reaches a handler (the guard refuses the rest), so this is safe to
+/// show verbatim in the desktop UI.
+fn origin_of(headers: &HeaderMap) -> String {
+    headers
+        .get(header::ORIGIN)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("a page without an origin")
+        .to_string()
+}
+
+/// Note a successful pairing, so the desktop says "paired" the moment a page
+/// pairs. Display-only: the page still holds the token and the daemon still
+/// checks it on every real request.
+fn record_pair(state: &CompanionState, headers: &HeaderMap) {
+    let seen = SeenOrigin {
+        origin: origin_of(headers),
+        at: now_ms(),
+    };
+    if let Ok(mut pairing) = state.pairing.lock() {
+        pairing.paired = pairing.paired.saturating_add(1);
+        pairing.last_pair = Some(seen.clone());
+        pairing.last_seen = Some(seen);
+    }
+}
+
+/// Note an authenticated request, so the desktop can say a paired page is
+/// talking to the app right now (a page keeps its token across restarts and
+/// never calls `/v1/pair` again).
+fn record_seen(state: &CompanionState, headers: &HeaderMap) {
+    if let Ok(mut pairing) = state.pairing.lock() {
+        pairing.last_seen = Some(SeenOrigin {
+            origin: origin_of(headers),
+            at: now_ms(),
+        });
+    }
 }
 
 fn token_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
@@ -450,12 +537,17 @@ struct PairBody {
 
 /// Validate a pasted token before the page stores it. Separate from
 /// `/v1/settings` so a wrong token gets a sentence rather than an empty read.
-async fn pair(State(state): State<CompanionState>, Json(body): Json<PairBody>) -> Response {
+async fn pair(
+    State(state): State<CompanionState>,
+    headers: HeaderMap,
+    Json(body): Json<PairBody>,
+) -> Response {
     let current = match state.token.lock() {
         Ok(current) => current.clone(),
         Err(_) => return error(StatusCode::INTERNAL_SERVER_ERROR, "companion state poisoned"),
     };
     if same_token(&body.token, &current) {
+        record_pair(&state, &headers);
         ok_json(json!({ "ok": true }))
     } else {
         error(StatusCode::UNAUTHORIZED, "bad token")
@@ -466,6 +558,7 @@ async fn get_settings(State(state): State<CompanionState>, headers: HeaderMap) -
     if !authorized(&state, &headers) {
         return unauthorized();
     }
+    record_seen(&state, &headers);
     match fs::read(&state.settings) {
         Ok(bytes) => Response::builder()
             .status(StatusCode::OK)
@@ -490,6 +583,7 @@ async fn put_settings(
     if !authorized(&state, &headers) {
         return unauthorized();
     }
+    record_seen(&state, &headers);
     if body.len() > MAX_BODY_BYTES {
         return error(StatusCode::PAYLOAD_TOO_LARGE, "settings too large");
     }
@@ -548,6 +642,7 @@ async fn chat(
     if !authorized(&state, &headers) {
         return unauthorized();
     }
+    record_seen(&state, &headers);
     let Some(origin) = url_origin(&request.url) else {
         return error(StatusCode::BAD_REQUEST, "only http:// and https:// URLs");
     };
@@ -836,10 +931,12 @@ mod tests {
     #[tokio::test]
     async fn the_router_answers_and_refuses() {
         let dir = temp_dir("router");
+        let pairing = Arc::new(Mutex::new(PairingLog::default()));
         let state = CompanionState {
             settings: dir.join(crate::SETTINGS_FILE),
             port: 0,
             token: Arc::new(Mutex::new("test-token".to_string())),
+            pairing: pairing.clone(),
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
@@ -876,14 +973,36 @@ mod tests {
             StatusCode::UNAUTHORIZED
         );
 
-        // Pairing validates without a read.
+        // Pairing validates without a read. A refused pairing leaves the log
+        // empty; an accepted one records the page for the desktop UI. Neither
+        // path ever reads the log back for auth — it is display-only.
+        let refused_pair = client
+            .post(format!("{base}/v1/pair"))
+            .header("origin", "https://aiclient.jyz.land")
+            .json(&json!({ "token": "wrong" }))
+            .send()
+            .await
+            .expect("refused pair");
+        assert_eq!(refused_pair.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(pairing.lock().expect("pairing").paired, 0);
+
         let paired = client
             .post(format!("{base}/v1/pair"))
+            .header("origin", "https://aiclient.jyz.land")
             .json(&json!({ "token": "test-token" }))
             .send()
             .await
             .expect("pair");
         assert_eq!(paired.status(), StatusCode::OK);
+        {
+            let log = pairing.lock().expect("pairing");
+            assert_eq!(log.paired, 1);
+            assert_eq!(
+                log.last_pair.as_ref().map(|seen| seen.origin.as_str()),
+                Some("https://aiclient.jyz.land")
+            );
+            assert!(log.last_pair.as_ref().is_some_and(|seen| seen.at > 0));
+        }
 
         // Write then read the settings file through the surface.
         let written = client
@@ -897,11 +1016,21 @@ mod tests {
         let read = client
             .get(format!("{base}/v1/settings"))
             .bearer_auth("test-token")
+            .header("origin", "https://aiclient.jyz.land")
             .send()
             .await
             .expect("get");
         assert_eq!(read.status(), StatusCode::OK);
         assert!(read.text().await.expect("body").contains("api.example.com"));
+        assert_eq!(
+            pairing
+                .lock()
+                .expect("pairing")
+                .last_seen
+                .as_ref()
+                .map(|seen| seen.origin.as_str()),
+            Some("https://aiclient.jyz.land")
+        );
 
         // The preflight is answered for an allowed origin, and refused for one
         // that is not.

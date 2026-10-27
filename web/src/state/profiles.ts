@@ -1,6 +1,11 @@
 import type { Profile } from "@lib/db";
 import { setSystemPrompt } from "./chat";
-import { selectProvider, updateProvider } from "./settings";
+import {
+	getSettings,
+	selectProvider,
+	selectVariant,
+	updateProvider,
+} from "./settings";
 
 /**
  * Applying a profile spans two stores, so the orchestration lives here rather
@@ -10,10 +15,17 @@ import { selectProvider, updateProvider } from "./settings";
  * two halves across modules.
  *
  * Effect: point the active provider at `providerId`, write `model` into that
- * provider, and set the active conversation's system prompt.
+ * provider, set the active conversation's system prompt, and make the profile's
+ * variant the active one. A profile whose variant was deleted clears the
+ * pointer rather than keeping whatever variant happened to be active before —
+ * the profile names one bundle, not "leave the other half alone".
  */
 export const applyProfile = (profile: Profile): void => {
 	selectProvider(profile.providerId);
 	updateProvider(profile.providerId, { model: profile.model });
+	const variantExists = getSettings().variants.some(
+		(variant) => variant.id === profile.variantId,
+	);
+	selectVariant(variantExists ? profile.variantId : "");
 	setSystemPrompt(profile.systemPrompt);
 };

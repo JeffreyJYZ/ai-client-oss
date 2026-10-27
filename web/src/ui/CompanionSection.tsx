@@ -1,4 +1,6 @@
 import {
+	COMPANION_ACTIVE_MS,
+	COMPANION_POLL_MS,
 	COMPANION_PORT,
 	companionStatus,
 	pair,
@@ -24,12 +26,26 @@ interface CompanionInfo {
 	readonly port: number;
 	readonly token: string;
 	readonly running: boolean;
+	/** A page has paired with this app since launch (or the last rotation). */
+	readonly paired: boolean;
+	readonly pairedCount: number;
+	readonly pairedOrigin: string | null;
+	readonly pairedAt: number | null;
+	/** The last page the daemon served an authenticated request to. */
+	readonly lastSeenOrigin: string | null;
+	readonly lastSeenAt: number | null;
 }
 
 /**
  * The "Local companion" settings section: status line, the port, a token field
  * with Pair/Unpair. On the desktop build, the app's own token is shown via
  * `companion_info` with a Rotate button.
+ *
+ * **The desktop side polls `companion_info`.** A pairing is the page's own
+ * state in `localStorage`, so the app cannot read it from its settings store —
+ * the daemon records the pairing (and the last authenticated request) and this
+ * section asks for that record, which is why the app says "paired" the moment
+ * the website pairs instead of only on the next reload.
  */
 export function CompanionSection() {
 	const [status, setStatus] = useState<"absent" | "unpaired" | "paired" | null>(
@@ -39,6 +55,7 @@ export function CompanionSection() {
 	const [token, setToken] = useState("");
 	const [message, setMessage] = useState<string | null>(null);
 	const [desktop, setDesktop] = useState<CompanionInfo | null>(null);
+	const [desktopError, setDesktopError] = useState<string | null>(null);
 	const [pending, setPending] = useState(false);
 
 	const refresh = useCallback((): void => {
@@ -54,22 +71,36 @@ export function CompanionSection() {
 		);
 	}, []);
 
-	useEffect(() => {
-		refresh();
-	}, [refresh]);
-
-	useEffect(() => {
-		if (!isDesktop) return;
+	const readDesktop = useCallback((): void => {
 		Effect.runFork(
 			Effect.tryPromise({
 				try: () => invoke<CompanionInfo>("companion_info"),
 				catch: (cause) => String(cause),
 			}).pipe(
-				Effect.tap((info) => Effect.sync(() => setDesktop(info))),
-				Effect.catch((error) => Effect.sync(() => setMessage(error))),
+				Effect.tap((info) =>
+					Effect.sync(() => {
+						setDesktop(info);
+						setDesktopError(null);
+					}),
+				),
+				Effect.catch((error) => Effect.sync(() => setDesktopError(error))),
 			),
 		);
 	}, []);
+
+	useEffect(() => {
+		if (isDesktop) return;
+		refresh();
+	}, [refresh]);
+
+	// The app is the daemon: poll its record so a page pairing in a browser
+	// shows up here without reopening Settings.
+	useEffect(() => {
+		if (!isDesktop) return;
+		readDesktop();
+		const timer = window.setInterval(readDesktop, COMPANION_POLL_MS);
+		return () => window.clearInterval(timer);
+	}, [readDesktop]);
 
 	const doPair = (): void => {
 		setPending(true);
@@ -121,6 +152,7 @@ export function CompanionSection() {
 					Effect.sync(() => {
 						setToken(result.token);
 						setMessage("Token rotated. Pair this page with the new token.");
+						readDesktop();
 					}),
 				),
 				Effect.catch((error) => Effect.sync(() => setMessage(error))),
@@ -130,6 +162,22 @@ export function CompanionSection() {
 	};
 
 	const statusLine = (() => {
+		if (isDesktop) {
+			if (desktop === null) return desktopError ?? "Checking…";
+			if (!desktop.running) {
+				return "Not listening — the website cannot pair until the app is running.";
+			}
+			const seenAt = desktop.lastSeenAt;
+			const seenOrigin = desktop.lastSeenOrigin ?? "a page";
+			if (seenAt !== null && Date.now() - seenAt < COMPANION_ACTIVE_MS) {
+				return `Paired — ${seenOrigin} is using this app right now.`;
+			}
+			if (desktop.paired) {
+				const origin = desktop.pairedOrigin ?? seenOrigin;
+				return `Paired — ${origin} paired; no page is talking right now.`;
+			}
+			return "Listening — no page has paired yet.";
+		}
 		if (status === null) return "Checking…";
 		if (status === "absent") {
 			return hasToken
@@ -181,7 +229,7 @@ export function CompanionSection() {
 					placeholder="paste the companion's token"
 				/>
 			</div>
-			<div className="flex flex-wrap items-center gap-2">
+			<div className="flex flex-wrap items-center gap-2 pt-2">
 				{isDesktop ? (
 					<button
 						type="button"

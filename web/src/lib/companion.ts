@@ -32,6 +32,17 @@ export const COMPANION_STORAGE_KEY = "ai-client.companion";
 export const COMPANION_PING_TIMEOUT_MS = 600;
 
 /**
+ * How often the desktop build re-reads `companion_info`. A pairing is the
+ * page's own `localStorage` state, so the app learns about it from the daemon's
+ * record and must poll: this is what makes the app say "paired" while the
+ * Settings section is open instead of only on the next reload.
+ */
+export const COMPANION_POLL_MS = 2000;
+
+/** A page seen within this window shows as "using this app right now". */
+export const COMPANION_ACTIVE_MS = 60_000;
+
+/**
  * What the page knows about the companion: `absent` (nothing is listening),
  * `unpaired` (it is listening, but this page holds no token) or `paired` (it
  * is listening and this page holds a token).

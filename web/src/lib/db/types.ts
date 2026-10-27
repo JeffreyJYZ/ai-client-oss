@@ -64,9 +64,9 @@ export const emptyProviderConfig = (id: string): ProviderConfig =>
 	providerConfigSchema.parse({ id });
 
 /**
- * A saved bundle of provider + model + system prompt, applied in one pick.
- * `providerId` points at a `ProviderConfig`; a dangling pointer is tolerated
- * (applying then only sets the system prompt).
+ * A saved bundle of provider + model + system prompt + variant, applied in one
+ * pick. `providerId` points at a `ProviderConfig` and `variantId` at a saved
+ * `Variant`; a dangling pointer is tolerated (applying then skips that half).
  */
 export const profileSchema = z.object({
 	id: z.string(),
@@ -74,6 +74,7 @@ export const profileSchema = z.object({
 	providerId: z.string().default(""),
 	model: z.string().default(""),
 	systemPrompt: z.string().default(""),
+	variantId: z.string().default(""),
 });
 
 export type Profile = z.infer<typeof profileSchema>;

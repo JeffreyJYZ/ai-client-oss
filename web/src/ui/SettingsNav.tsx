@@ -36,9 +36,12 @@ export function SettingsNav() {
 	if (entries.length === 0) return null;
 
 	return (
+		// Positioning lives on the wrapper (`SettingsShell`): a sticky element is
+		// bounded by its own containing block, and this nav's parent is exactly
+		// as tall as the nav, so stickiness here would have no range to move in.
 		<nav
 			aria-label="Settings sections"
-			className="sticky top-0 z-10 -mx-4 flex flex-wrap gap-1 border-b border-neutral-800 bg-neutral-950/95 px-4 py-2 backdrop-blur md:static md:mx-0 md:flex-col md:flex-nowrap md:gap-1 md:border-b-0 md:border-r md:border-neutral-800 md:bg-transparent md:px-0 md:py-0 md:pr-3 md:backdrop-blur-none"
+			className="-mx-4 flex flex-wrap gap-1 border-b border-neutral-800 bg-neutral-950/95 px-4 py-2 backdrop-blur md:mx-0 md:max-h-[calc(100vh-3rem)] md:flex-col md:flex-nowrap md:gap-1 md:overflow-y-auto md:border-b-0 md:border-r md:border-neutral-800 md:bg-transparent md:px-0 md:py-0 md:pr-3 md:backdrop-blur-none"
 		>
 			{entries.map((entry) => (
 				<button

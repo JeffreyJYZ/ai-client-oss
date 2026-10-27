@@ -181,7 +181,13 @@ const newProfileId = (): string => `profile-${crypto.randomUUID()}`;
  * active provider so a new profile starts pointing at something real.
  */
 export const addProfile = (providerId = current.activeProviderId): string => {
-	const profile: Profile = { ...emptyProfile(newProfileId()), providerId };
+	const profile: Profile = {
+		...emptyProfile(newProfileId()),
+		providerId,
+		// A new profile starts from the variant already in use, so "add" captures
+		// the live configuration instead of an empty parameter set.
+		variantId: current.activeVariantId,
+	};
 	setSettings({ profiles: [...current.profiles, profile] });
 	return profile.id;
 };

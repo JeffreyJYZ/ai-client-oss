@@ -174,9 +174,9 @@ export const ProvidersSection = () => (
 					trip.
 				</p>
 				<p>
-					A profile bundles a provider, a model and a system prompt, so a
-					configuration can be applied in one pick. Export/Import moves settings
-					and conversations between the desktop and web builds.
+					A profile bundles a provider, a model, a system prompt and a variant,
+					so a configuration can be applied in one pick. Export/Import moves
+					settings and conversations between the desktop and web builds.
 				</p>
 			</Prose>
 		</SubSection>
