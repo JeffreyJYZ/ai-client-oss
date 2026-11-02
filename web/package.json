@@ -14,7 +14,7 @@
 		"fix": "biome check . --write",
 		"preview": "vite preview",
 		"tauri": "tauri",
-		"test": "bun test"
+		"test": "bun test --concurrency 1"
 	},
 	"dependencies": {
 		"@tauri-apps/api": "^2.12.2",
