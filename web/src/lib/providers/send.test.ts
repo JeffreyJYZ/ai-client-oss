@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import { chatHeaders, sendStream } from "@lib/providers/send";
 import { Cause, Effect, Exit, Option, Stream } from "effect";
+import { COMPANION_STORAGE_KEY } from "@lib/companion";
 import { SITE_URL } from "@/constants/links";
 
 /**
@@ -26,6 +27,14 @@ const calls: FetchCall[] = [];
 // in the same process is still in it, and the header assertions read that one.
 beforeEach(() => {
 	calls.length = 0;
+	// A pairing another test file stored would route this file through the
+	// companion (its /v1/chat) instead of the provider. Bun has localStorage on
+	// Linux and not on macOS, so this only bites in CI.
+	try {
+		globalThis.localStorage?.removeItem(COMPANION_STORAGE_KEY);
+	} catch {
+		// no storage on this platform: nothing was ever paired
+	}
 });
 
 /** Replace the global `fetch` for one test, recording how it was called. */
