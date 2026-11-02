@@ -947,6 +947,9 @@ mod tests {
         let handle = tokio::spawn(async move {
             let _ = axum::serve(listener, served).await;
         });
+        // The rustls-no-provider build has no crypto provider until one is installed
+        // (the app does it in `client_builder`); a bare test client must too.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let client = reqwest::Client::new();
         let base = format!("http://127.0.0.1:{port}");
 
@@ -1077,6 +1080,7 @@ mod tests {
         // over-cap body may be refused with a `413` or by dropping the
         // connection mid-upload, and a pooled connection the server already
         // closed would fail for the wrong reason.
+        let _ = rustls::crypto::ring::default_provider().install_default();
         let fresh = reqwest::Client::new();
         let big = "x".repeat(5 * 1024 * 1024);
         let oversized = fresh

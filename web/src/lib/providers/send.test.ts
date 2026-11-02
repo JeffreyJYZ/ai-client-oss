@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import { chatHeaders, sendStream } from "@lib/providers/send";
 import { Cause, Effect, Exit, Option, Stream } from "effect";
@@ -21,6 +21,12 @@ interface FetchCall {
 
 const realFetch = globalThis.fetch;
 const calls: FetchCall[] = [];
+
+// The array is module state: without this, a call another file recorded earlier
+// in the same process is still in it, and the header assertions read that one.
+beforeEach(() => {
+	calls.length = 0;
+});
 
 /** Replace the global `fetch` for one test, recording how it was called. */
 const stubFetch = (respond: () => Response | Promise<Response>): void => {
