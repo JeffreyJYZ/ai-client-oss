@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { COMPANION_STORAGE_KEY } from "@lib/companion";
 import { PREFLIGHT_REFUSAL } from "@lib/providers/presets";
 import { chatHeaders, sendStream } from "@lib/providers/send";
 import { Cause, Effect, Exit, Option, Stream } from "effect";
-import { COMPANION_STORAGE_KEY } from "@lib/companion";
 import { SITE_URL } from "@/constants/links";
 
 /**
