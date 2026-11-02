@@ -38,9 +38,17 @@ export default function Docs() {
 					>
 						← Open Source AI Client
 					</a>
-					<span className="uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]">
-						Docs
-					</span>
+					<div className="flex items-center gap-4">
+						<span className="uppercase tracking-widest text-[11px] text-[color:var(--docs-faint)]">
+							Docs
+						</span>
+						<a
+							href="https://jyz.land"
+							className="text-[11px] uppercase tracking-widest text-[color:var(--docs-muted)] hover:text-[color:var(--docs-fg)]"
+						>
+							jyz.land
+						</a>
+					</div>
 				</div>
 			</header>
 

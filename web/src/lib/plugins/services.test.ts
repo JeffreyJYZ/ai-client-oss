@@ -1,4 +1,5 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { COMPANION_STORAGE_KEY } from "@lib/companion";
 import { db } from "@lib/db";
 import { PluginFault } from "@lib/plugins/errors";
 import {
@@ -21,6 +22,18 @@ import {
 import { executeTool, registerTool, type Tool } from "@lib/plugins/tools";
 import { testModel } from "@lib/providers/models";
 import type { Provider, SendCtx, ToolCallData } from "@lib/providers/types";
+
+// A pairing stored by another test file would route the probe through the
+// companion's envelope instead of the plugin protocol. Bun provides
+// localStorage on Linux and not on macOS, so this only bites in CI.
+beforeEach(() => {
+	try {
+		globalThis.localStorage?.removeItem(COMPANION_STORAGE_KEY);
+	} catch {
+		// no storage on this platform: nothing was ever paired
+	}
+});
+
 import {
 	Cause,
 	Duration,

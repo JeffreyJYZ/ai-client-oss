@@ -35,7 +35,9 @@ jobs:
       # could delete an assertion or regress a parser and still merge green.
       - name: Test
         working-directory: web
-        run: bun test
+        # One file at a time: stubFetch replaces the global fetch, so parallel
+        # files capture each other's requests.
+        run: bun run test
       - name: Effect language service diagnostics
         working-directory: web
         run: bunx effect-language-service diagnostics --project tsconfig.app.json --format text
